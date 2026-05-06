@@ -1,0 +1,42 @@
+{
+  "Function": {
+    "prefix": "func",
+    "body": ["func ${1:name}(${2:args}) ${3:returnType} {", "\t${0}", "}"],
+    "description": "Function declaration"
+  },
+  "Method": {
+    "prefix": "meth",
+    "body": ["func (${1:r} ${2:Receiver}) ${3:name}(${4:args}) ${5:returnType} {", "\t${0}", "}"],
+    "description": "Method on a receiver"
+  },
+  "Main": {
+    "prefix": "main",
+    "body": ["package main", "", "import \"fmt\"", "", "func main() {", "\tfmt.Println(${1:\"Hello, World!\"})$0", "}"],
+    "description": "Hello world main"
+  },
+  "If err != nil": {
+    "prefix": "iferr",
+    "body": ["if err != nil {", "\treturn ${1:err}", "}", "$0"],
+    "description": "Standard if-err-return"
+  },
+  "For loop": {
+    "prefix": "for",
+    "body": ["for ${1:i} := 0; ${1:i} < ${2:n}; ${1:i}++ {", "\t${0}", "}"],
+    "description": "C-style for loop"
+  },
+  "For range": {
+    "prefix": "forr",
+    "body": ["for ${1:i}, ${2:v} := range ${3:xs} {", "\t${0}", "}"],
+    "description": "for range loop"
+  },
+  "Struct": {
+    "prefix": "struct",
+    "body": ["type ${1:Name} struct {", "\t${0}", "}"],
+    "description": "Struct definition"
+  },
+  "Interface": {
+    "prefix": "iface",
+    "body": ["type ${1:Name} interface {", "\t${0}", "}"],
+    "description": "Interface definition"
+  }
+}

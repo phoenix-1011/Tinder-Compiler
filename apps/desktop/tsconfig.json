@@ -1,0 +1,21 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "types": ["node", "vite/client"],
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "resolveJsonModule": true,
+    "paths": {
+      "@tinder/ai": ["../../packages/ai/src/index.ts"],
+      "@tinder/compiler-bridge": ["../../packages/compiler-bridge/src/index.ts"],
+      "@tinder/editor": ["../../packages/editor/src/index.ts"],
+      "@tinder/project": ["../../packages/project/src/index.ts"]
+    }
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "electron.vite.config.ts"
+  ]
+}
+

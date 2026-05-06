@@ -1,0 +1,34 @@
+{
+  "name": "tinder-compiler",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Standalone Windows desktop editor for project-specific code, config, build, run, and AI workflows.",
+  "license": "UNLICENSED",
+  "packageManager": "pnpm@10.10.0",
+  "engines": {
+    "node": ">=20.11.0",
+    "pnpm": ">=9.0.0"
+  },
+  "scripts": {
+    "start": "scripts\\dev.cmd",
+    "dev": "scripts\\dev.cmd",
+    "desktop:dev": "pnpm --filter @tinder/desktop dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint",
+    "format": "pnpm -r format",
+    "normalize-jsonc": "node scripts/normalize-jsonc.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "typescript": "^5.8.3"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@vscode/ripgrep",
+      "electron",
+      "esbuild",
+      "node-pty"
+    ]
+  }
+}

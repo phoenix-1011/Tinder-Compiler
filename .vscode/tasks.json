@@ -1,0 +1,28 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Run Tinder Compiler",
+      "type": "shell",
+      "command": "scripts\\dev.cmd",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "isBackground": true,
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": false
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Typecheck",
+      "type": "shell",
+      "command": "cmd /c pnpm.cmd typecheck",
+      "group": "test",
+      "problemMatcher": "$tsc"
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+out/
+build/
+release/
+coverage/
+
+# Electron/Vite
+.vite/
+*.tsbuildinfo
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# IDE/editor
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+.idea/
+
+# OS
+Thumbs.db
+Desktop.ini
+
+# Local project data
+.tinder/
+workspace-storage/
+
+# Agent tool state
+.claude/
+.codex/
+

@@ -1,0 +1,7 @@
+{
+  "typescript.tsdk": "node_modules/typescript/lib",
+  "files.eol": "\r\n",
+  "editor.tabSize": 2,
+  "editor.insertSpaces": true,
+  "editor.formatOnSave": false
+}

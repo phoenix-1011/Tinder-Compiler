@@ -1,0 +1,52 @@
+{
+  "Function": {
+    "prefix": "fn",
+    "body": ["fn ${1:name}(${2:args})${3: -> ${4:ReturnType}} {", "\t${0}", "}"],
+    "description": "Function definition"
+  },
+  "Main": {
+    "prefix": "main",
+    "body": ["fn main() {", "\t${0:println!(\"Hello, World!\");}", "}"],
+    "description": "Main entry point"
+  },
+  "Impl": {
+    "prefix": "impl",
+    "body": ["impl ${1:Name} {", "\t${0}", "}"],
+    "description": "impl block"
+  },
+  "Impl trait": {
+    "prefix": "implt",
+    "body": ["impl ${1:Trait} for ${2:Name} {", "\t${0}", "}"],
+    "description": "impl Trait for Name"
+  },
+  "Struct": {
+    "prefix": "struct",
+    "body": ["struct ${1:Name} {", "\t${0}", "}"],
+    "description": "Struct definition"
+  },
+  "Tuple struct": {
+    "prefix": "tuplestruct",
+    "body": ["struct ${1:Name}(${0});"],
+    "description": "Tuple struct"
+  },
+  "Enum": {
+    "prefix": "enum",
+    "body": ["enum ${1:Name} {", "\t${0}", "}"],
+    "description": "Enum definition"
+  },
+  "Match": {
+    "prefix": "match",
+    "body": ["match ${1:value} {", "\t${2:pattern} => ${3:result},", "\t_ => ${0:unimplemented!()},", "}"],
+    "description": "Match expression"
+  },
+  "If let Some": {
+    "prefix": "iflet",
+    "body": ["if let Some(${1:value}) = ${2:option} {", "\t${0}", "}"],
+    "description": "if let Some pattern"
+  },
+  "Test": {
+    "prefix": "test",
+    "body": ["#[test]", "fn ${1:test_name}() {", "\t${0}", "}"],
+    "description": "Unit test function"
+  }
+}

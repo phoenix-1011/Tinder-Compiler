@@ -1,0 +1,42 @@
+{
+  "Function definition": {
+    "prefix": "def",
+    "body": ["def ${1:name}(${2:args}):", "\t${0:pass}"],
+    "description": "Function definition"
+  },
+  "Class definition": {
+    "prefix": "class",
+    "body": ["class ${1:Name}:", "\tdef __init__(self${2:, args}):", "\t\t${0:pass}"],
+    "description": "Class definition"
+  },
+  "Main guard": {
+    "prefix": "ifmain",
+    "body": ["if __name__ == \"__main__\":", "\t${0:main()}"],
+    "description": "if __name__ == '__main__' guard"
+  },
+  "For loop": {
+    "prefix": "for",
+    "body": ["for ${1:item} in ${2:iterable}:", "\t${0:pass}"],
+    "description": "For loop"
+  },
+  "Range loop": {
+    "prefix": "forr",
+    "body": ["for ${1:i} in range(${2:n}):", "\t${0:pass}"],
+    "description": "For range loop"
+  },
+  "While loop": {
+    "prefix": "while",
+    "body": ["while ${1:condition}:", "\t${0:pass}"],
+    "description": "While loop"
+  },
+  "Try / Except": {
+    "prefix": "try",
+    "body": ["try:", "\t${1:pass}", "except ${2:Exception} as ${3:e}:", "\t${0:pass}"],
+    "description": "Try / except block"
+  },
+  "Print f-string": {
+    "prefix": "pf",
+    "body": ["print(f\"${1:msg}\")$0"],
+    "description": "print f-string"
+  }
+}
