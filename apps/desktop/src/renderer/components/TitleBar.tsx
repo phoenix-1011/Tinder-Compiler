@@ -52,7 +52,9 @@ export function TitleBar() {
   // Eagerly load recents so the menu is responsive when opened.
   useEffect(() => {
     let cancelled = false;
-    void window.tinder.recent.list().then((list) => {
+    const recent = window.tinder?.recent;
+    if (!recent) return;
+    void recent.list().then((list) => {
       if (!cancelled) setRecents(list);
     });
     return () => {

@@ -8,7 +8,9 @@ export function WelcomeView() {
 
   useEffect(() => {
     let cancelled = false;
-    window.tinder.recent.list().then((list) => {
+    const recent = window.tinder?.recent;
+    if (!recent) return;
+    void recent.list().then((list) => {
       if (!cancelled) setRecents(list);
     });
     return () => {
@@ -17,7 +19,9 @@ export function WelcomeView() {
   }, []);
 
   const onRemove = async (path: string) => {
-    const list = await window.tinder.recent.remove(path);
+    const recent = window.tinder?.recent;
+    if (!recent) return;
+    const list = await recent.remove(path);
     setRecents(list);
   };
 
