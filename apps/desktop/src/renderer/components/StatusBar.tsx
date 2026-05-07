@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useWorkspace } from "../state/WorkspaceContext";
 import { useUI } from "../state/UIContext";
 import { LanguagePicker } from "./LanguagePicker";
+import { ChainAssemblyPathStatus } from "./ChainAssemblyChrome";
 
 function formatStatus(
   status: ReturnType<typeof useWorkspace>["saveStatus"][string] | undefined,
@@ -52,6 +53,7 @@ export function StatusBar() {
             <span className="codicon codicon-source-control" aria-hidden="true" />
             main
           </span>
+          <ChainAssemblyPathStatus />
         </div>
         <div className="statusbar-right">
           {active && (

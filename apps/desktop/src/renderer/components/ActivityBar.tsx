@@ -5,6 +5,7 @@ const TOP_ITEMS: Array<{ id: ActivityView; label: string; icon: string }> = [
   { id: "explorer", label: "资源管理器  Ctrl+Shift+E", icon: "files" },
   { id: "search", label: "搜索  Ctrl+Shift+F", icon: "search" },
   { id: "run", label: "运行与构建  Ctrl+Shift+D", icon: "play" },
+  { id: "chain-assembly", label: "计算链路组装", icon: "type-hierarchy" },
   { id: "ai", label: "AI 助手", icon: "sparkle" }
 ];
 

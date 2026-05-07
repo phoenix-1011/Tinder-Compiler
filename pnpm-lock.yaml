@@ -26,6 +26,9 @@ importers:
       '@tinder/editor':
         specifier: workspace:*
         version: link:../../packages/editor
+      '@tinder/nextstep':
+        specifier: workspace:*
+        version: link:../../packages/nextstep
       '@tinder/project':
         specifier: workspace:*
         version: link:../../packages/project
@@ -102,6 +105,8 @@ importers:
   packages/compiler-bridge: {}
 
   packages/editor: {}
+
+  packages/nextstep: {}
 
   packages/project: {}
 

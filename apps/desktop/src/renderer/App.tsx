@@ -23,6 +23,7 @@ import { UIProvider, useUI } from "./state/UIContext";
 import { KeyboardShortcuts } from "./state/KeyboardShortcuts";
 import { BuiltInCommands } from "./state/BuiltInCommands";
 import { LspBootstrap } from "./state/LspBootstrap";
+import { ChainAssemblyProvider } from "./state/ChainAssemblyContext";
 
 function Workbench() {
   const {
@@ -92,12 +93,14 @@ export function App() {
               <RunProvider>
                 <UIProvider>
                   <CommandRegistryProvider>
-                    <BuiltInCommands />
-                    <KeyboardShortcuts />
-                    <LspBootstrap />
-                    <AutoSave />
-                    <UserKeybindingsLoader />
-                    <Workbench />
+                    <ChainAssemblyProvider>
+                      <BuiltInCommands />
+                      <KeyboardShortcuts />
+                      <LspBootstrap />
+                      <AutoSave />
+                      <UserKeybindingsLoader />
+                      <Workbench />
+                    </ChainAssemblyProvider>
                   </CommandRegistryProvider>
                 </UIProvider>
               </RunProvider>

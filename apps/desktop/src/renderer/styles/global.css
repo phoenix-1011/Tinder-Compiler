@@ -344,12 +344,42 @@ button:focus-visible {
 }
 
 .sidebar-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   text-transform: uppercase;
   font-size: 11px;
   letter-spacing: 0.05em;
   color: var(--tc-fg-muted);
   padding: 8px 16px;
   border-bottom: 1px solid var(--tc-border-soft);
+}
+
+.sidebar-header.has-actions {
+  padding: 4px 4px 4px 16px;
+  min-height: 28px;
+}
+
+.sidebar-header-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ca-header-actions {
+  display: flex;
+  gap: 0;
+}
+
+.ca-header-actions .ca-action-btn {
+  width: 22px;
+  height: 22px;
+}
+
+.ca-header-actions .ca-action-btn[disabled] {
+  opacity: 0.4;
+  cursor: default;
 }
 
 .sidebar-body {
@@ -430,6 +460,226 @@ button:focus-visible {
 .explorer-name {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.explorer-row.is-muted {
+  color: var(--tc-fg-muted);
+  font-style: italic;
+}
+
+/* Chain Assembly -------------------------------------------- */
+.chain-assembly {
+  display: flex;
+  flex-direction: column;
+}
+
+.ca-empty {
+  padding: 24px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: stretch;
+  color: var(--tc-fg-muted);
+}
+
+.ca-status-path {
+  max-width: 360px;
+}
+.ca-status-path-text {
+  display: inline-block;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl; /* keep the tail (most-specific dir) visible when truncated */
+  text-align: left;
+  vertical-align: bottom;
+}
+
+.ca-error {
+  background: rgba(244, 135, 113, 0.1);
+  border-bottom: 1px solid rgba(244, 135, 113, 0.4);
+  color: var(--tc-fg-error);
+  padding: 6px 12px;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.ca-section {
+  display: flex;
+  flex-direction: column;
+}
+
+.ca-section-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 8px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--tc-fg-strong);
+  cursor: pointer;
+  user-select: none;
+  background: var(--tc-bg-titlebar);
+  border-top: 1px solid var(--tc-border);
+  border-bottom: 1px solid var(--tc-border);
+}
+
+.ca-section:first-child .ca-section-header {
+  border-top: none;
+}
+
+.ca-section-header:hover {
+  background: #4a4a4a;
+}
+
+.ca-section-chevron {
+  width: 14px;
+  font-size: 14px !important;
+  color: var(--tc-fg-default);
+}
+
+.ca-section-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ca-section-actions,
+.ca-row-actions {
+  display: flex;
+  gap: 0;
+  margin-left: auto;
+  opacity: 0;
+  transition: opacity 80ms ease;
+}
+
+.ca-section-header:hover .ca-section-actions,
+.explorer-row:hover .ca-row-actions {
+  opacity: 1;
+}
+
+.ca-action-btn {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--tc-fg-default);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  border-radius: 2px;
+}
+
+.ca-action-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.ca-action-btn .codicon {
+  font-size: 14px !important;
+}
+
+.ca-section-body {
+  padding: 2px 0;
+}
+
+/* Tree indent guides — vertical line at the immediate parent's chevron column. */
+.chain-assembly .explorer-row {
+  position: relative;
+}
+
+.chain-assembly .explorer-row[data-depth]:not([data-depth="0"])::before {
+  content: "";
+  position: absolute;
+  left: var(--ca-guide-x);
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.18);
+  pointer-events: none;
+}
+
+/* Drop-target highlight — wraps the "资源" row + (when open) its children. */
+.ca-drop-zone {
+  position: relative;
+}
+.ca-drop-zone.is-drop-over {
+  background: rgba(0, 122, 204, 0.12);
+  outline: 1px dashed var(--tc-accent);
+  outline-offset: -1px;
+}
+.ca-drop-zone.is-drop-over * {
+  pointer-events: none;
+}
+
+/* In-app dialog (replaces window.prompt / confirm — Electron blocks those). */
+.ca-dialog-card {
+  width: 360px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px 22px;
+}
+.ca-dialog-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--tc-fg-strong);
+}
+.ca-dialog-message {
+  font-size: 13px;
+  color: var(--tc-fg-default);
+  line-height: 1.5;
+}
+.ca-dialog-input {
+  background: var(--tc-bg-input);
+  border: 1px solid var(--tc-border-popup);
+  border-radius: 2px;
+  color: var(--tc-fg-default);
+  padding: 6px 10px;
+  font-size: 13px;
+  outline: none;
+  font-family: var(--tc-font-ui);
+}
+.ca-dialog-input:focus {
+  border-color: var(--tc-accent);
+}
+.ca-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+.ca-dialog-btn {
+  padding: 5px 14px;
+  border-radius: 2px;
+  font-size: 13px;
+  border: 1px solid var(--tc-border-popup);
+  background: transparent;
+  color: var(--tc-fg-default);
+  cursor: pointer;
+}
+.ca-dialog-btn:hover {
+  background: var(--tc-bg-hover);
+}
+.ca-dialog-btn.is-primary {
+  background: var(--tc-accent);
+  border-color: var(--tc-accent);
+  color: var(--tc-fg-strong);
+}
+.ca-dialog-btn.is-primary:hover {
+  background: var(--tc-accent-hover);
+}
+.ca-dialog-btn.is-destructive {
+  background: #c4413a;
+  border-color: #c4413a;
+  color: var(--tc-fg-strong);
+}
+.ca-dialog-btn.is-destructive:hover {
+  background: #d94a42;
 }
 
 /* Editor Area ----------------------------------------------- */
