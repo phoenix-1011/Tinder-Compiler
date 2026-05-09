@@ -102,9 +102,9 @@ function NodeDetail({
         )}
       </header>
 
-      {!hasStructured && node.markdown && (
+      {!hasStructured && (
         <p className="chain-help-hint">
-          本节点未提取出结构化字段，原始 Markdown 见下。
+          本节点未在链路文档中提取出结构化字段，请查看上方"返回链路文档"。
         </p>
       )}
 
@@ -185,12 +185,6 @@ function NodeDetail({
         </Field>
       )}
 
-      {node.markdown && (
-        <details className="chain-help-raw">
-          <summary>原始 Markdown</summary>
-          <Markdown source={node.markdown} />
-        </details>
-      )}
     </article>
   );
 }
