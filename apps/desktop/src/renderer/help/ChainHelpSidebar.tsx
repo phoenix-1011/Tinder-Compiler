@@ -162,9 +162,9 @@ interface RowProps {
 }
 
 function rowPadding(depth: number): number {
-  if (depth <= 0) return 22;
-  if (depth === 1) return 32;
-  return 40 + (depth - 2) * 8;
+  if (depth <= 0) return 12;
+  if (depth === 1) return 20;
+  return 28 + (depth - 2) * 8;
 }
 
 function Row({ depth, label, active, expandable, expanded, hint, badge, onClick }: RowProps) {
