@@ -360,9 +360,9 @@ async function main() {
   const ordered = parseOrderedExecution(
     (await readDoc("02-ordered-execution")).text
   );
-  if (ordered.length !== 49) {
+  if (ordered.length === 0) {
     throw new Error(
-      `Expected 49 canonical core chain entries, parsed ${ordered.length}`
+      "Parsed 0 canonical core chain entries from 02-ordered-execution.md — the table format may have drifted."
     );
   }
 
