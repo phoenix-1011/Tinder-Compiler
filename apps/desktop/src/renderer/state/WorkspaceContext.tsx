@@ -23,7 +23,13 @@ export interface OpenDocument {
   eol: EolKind;
 }
 
-export type ActivityView = "explorer" | "search" | "run" | "chain-assembly" | "ai";
+export type ActivityView =
+  | "explorer"
+  | "search"
+  | "run"
+  | "chain-assembly"
+  | "help"
+  | "ai";
 
 export type MainView = "editor" | "settings";
 

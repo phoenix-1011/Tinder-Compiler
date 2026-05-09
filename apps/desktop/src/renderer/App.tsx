@@ -16,7 +16,7 @@ import { SettingsProvider } from "./state/SettingsContext";
 import { ProjectProvider } from "./state/ProjectContext";
 import { AutoSave } from "./state/AutoSave";
 import { UserKeybindingsLoader } from "./state/UserKeybindings";
-import { WorkspaceProvider } from "./state/WorkspaceContext";
+import { WorkspaceProvider, useWorkspace } from "./state/WorkspaceContext";
 import { RunProvider } from "./state/RunContext";
 import { CommandRegistryProvider } from "./state/CommandRegistry";
 import { UIProvider, useUI } from "./state/UIContext";
@@ -24,6 +24,8 @@ import { KeyboardShortcuts } from "./state/KeyboardShortcuts";
 import { BuiltInCommands } from "./state/BuiltInCommands";
 import { LspBootstrap } from "./state/LspBootstrap";
 import { ChainAssemblyProvider } from "./state/ChainAssemblyContext";
+import { ChainHelpProvider } from "./help/ChainHelpContext";
+import { ChainHelpView } from "./help/ChainHelpView";
 
 function Workbench() {
   const {
@@ -39,6 +41,7 @@ function Workbench() {
     closeThemePicker,
     isSettingsOpen
   } = useUI();
+  const { activeView } = useWorkspace();
 
   const bodyTemplate = sidebarVisible
     ? `var(--tc-activitybar-w) ${sidebarWidth}px 4px 1fr`
@@ -62,7 +65,13 @@ function Workbench() {
           />
         )}
         <div className="workbench-main" style={{ gridTemplateRows: mainTemplate }}>
-          {isSettingsOpen ? <SettingsView /> : <EditorArea />}
+          {isSettingsOpen ? (
+            <SettingsView />
+          ) : activeView === "help" ? (
+            <ChainHelpView />
+          ) : (
+            <EditorArea />
+          )}
           {panelVisible && (
             <Splitter
               orientation="horizontal"
@@ -94,12 +103,14 @@ export function App() {
                 <UIProvider>
                   <CommandRegistryProvider>
                     <ChainAssemblyProvider>
-                      <BuiltInCommands />
-                      <KeyboardShortcuts />
-                      <LspBootstrap />
-                      <AutoSave />
-                      <UserKeybindingsLoader />
-                      <Workbench />
+                      <ChainHelpProvider>
+                        <BuiltInCommands />
+                        <KeyboardShortcuts />
+                        <LspBootstrap />
+                        <AutoSave />
+                        <UserKeybindingsLoader />
+                        <Workbench />
+                      </ChainHelpProvider>
                     </ChainAssemblyProvider>
                   </CommandRegistryProvider>
                 </UIProvider>

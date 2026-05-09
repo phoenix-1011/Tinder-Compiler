@@ -5,8 +5,11 @@
   "type": "module",
   "main": "dist/main/index.js",
   "scripts": {
+    "predev": "node ../../scripts/build-chain-catalog.mjs",
     "dev": "electron-vite dev",
+    "prebuild": "node ../../scripts/build-chain-catalog.mjs",
     "build": "electron-vite build",
+    "pretypecheck": "node ../../scripts/build-chain-catalog.mjs",
     "typecheck": "tsc --project tsconfig.json --noEmit",
     "rebuild": "electron-rebuild -f -w node-pty",
     "lint": "echo \"lint not configured yet\"",

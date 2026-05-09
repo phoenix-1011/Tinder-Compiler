@@ -4,6 +4,7 @@ import { SearchView } from "./SearchView";
 import { RunView } from "./RunView";
 import { ChainAssemblyView } from "./ChainAssemblyView";
 import { ChainAssemblyHeaderActions } from "./ChainAssemblyChrome";
+import { ChainHelpSidebar } from "../help/ChainHelpSidebar";
 
 export function SideBar() {
   const { activeView, folder, openFolder } = useWorkspace();
@@ -26,6 +27,8 @@ export function SideBar() {
     body = <RunView />;
   } else if (activeView === "chain-assembly") {
     body = <ChainAssemblyView />;
+  } else if (activeView === "help") {
+    body = <ChainHelpSidebar />;
   } else {
     body = (
       <div className="sidebar-empty">
@@ -40,6 +43,7 @@ export function SideBar() {
       search: "搜索",
       run: "运行与构建",
       "chain-assembly": "计算链路组装",
+      help: "链路文档",
       ai: "AI 助手"
     } as const
   )[activeView];
