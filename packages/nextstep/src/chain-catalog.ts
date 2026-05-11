@@ -10,19 +10,30 @@
  * fills what it can and the viewer falls back to raw markdown when a field is missing.
  */
 
-/** A single row of an "输入" or "输出" table inside a node section. */
+/**
+ * A single row of an "输入" or "输出" table inside a node section.
+ *
+ * The third column's semantics depend on the table the row was parsed from:
+ * - Input tables: "是否必需" — values like "是" / "否".
+ * - Output tables: "生命周期" — e.g. "按 contract 类型".
+ *
+ * Stored generically here because the parser doesn't track which table it
+ * came from once the row is extracted; consumers that need to render a
+ * header should pick a label based on whether the row lives in `inputs` or
+ * `outputs` on the owning `ChainNodeEntry`.
+ */
 export interface ChainContractRow {
   /** First column — typically a `shared.*` / `runtime.*` / `transient.*` contract name or an open description. */
   contract: string;
   /** Second column — source / target / consumer, depending on the table. */
   endpoint: string;
-  /** Whether the contract is required ("是" / "否"); empty for output tables. */
-  required?: string;
+  /** Third column — required flag for inputs, lifecycle for outputs. */
+  qualifier?: string;
   /** Free-form note. */
   note?: string;
 }
 
-/** Single row of the canonical 49-node ordered execution table. */
+/** Single row of the canonical ordered execution table. */
 export interface ChainOrderedEntry {
   order: number;
   /** Canonical node id, e.g. `platform.entity.update`. */
@@ -41,7 +52,7 @@ export interface ChainOrderedEntry {
 export interface ChainNodeEntry {
   nodeId: string;
   displayName: string;
-  /** 1..49 if part of the canonical core chain, otherwise undefined. */
+  /** 1-based position in the canonical ordered execution table; undefined for nodes outside it. */
   order?: number;
   /** docSlug owning this node. */
   docSlug: string;
@@ -69,8 +80,6 @@ export interface ChainDoc {
   fileName: string;
   /** H1 of the document. */
   title: string;
-  /** First paragraph after `## 结论`, when present. */
-  summary?: string;
   /** Full markdown source. Used as fallback render when a node section can't be sliced. */
   markdown: string;
   /** Canonical node ids that this doc describes (in canonical order). */
@@ -100,6 +109,6 @@ export interface ChainCatalog {
   groups: ChainGroup[];
   /** Per-node entries keyed by canonical node id. */
   nodes: Record<string, ChainNodeEntry>;
-  /** Canonical 1..49 ordered list. */
+  /** Canonical ordered execution list, in order. */
   orderedNodes: ChainOrderedEntry[];
 }

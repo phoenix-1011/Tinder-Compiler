@@ -2,10 +2,10 @@
 // Generate apps/desktop/src/renderer/help/chain-catalog.generated.ts
 // from docs/flowchat/chain-contract/*.md.
 //
-// The Markdown files are the SSOT. This script extracts the canonical 49-node
-// ordered list, the per-doc grouping, and best-effort per-node sections so the
-// in-app help viewer can render structured navigation while still falling back
-// to raw markdown for fields the parser can't reliably extract yet.
+// The Markdown files are the SSOT. This script extracts the canonical ordered
+// execution table, the per-doc grouping, and best-effort per-node sections so
+// the in-app help viewer can render structured navigation while still falling
+// back to raw markdown for fields the parser can't reliably extract yet.
 
 import { promises as fs } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -257,21 +257,24 @@ function parseDisplayNames(text) {
 }
 
 /**
- * Parse a chain doc and return:
- *   { title, summary, sections: { [nodeId|sectionKey]: parsedNode | rawSection }, ownedNodeIds }.
+ * Parse a chain doc into per-node sections plus two ownership signals.
  *
- * Per-node sections are H2 headings whose label is a backtick-wrapped node id.
+ * - `title`: H1 of the doc, used as the chain group's display title.
+ * - `nodes`: structured fields for each H2 heading whose label is a
+ *   backtick-wrapped node id.
+ * - `explicitNodeIds`: which ids had per-node `## ` sections.
+ * - `summaryNodeIds`: ids advertised in any table whose header includes a
+ *   Node / Canonical node id column.
+ *
+ * Ownership resolution in `main()` combines these with 01-overview.md's
+ * grouping table.
  */
-function parseChainDoc(slug, text) {
+function parseChainDoc(text) {
   const titleMatch = /^#\s+(.+?)\s*$/m.exec(text);
-  const title = titleMatch ? titleMatch[1].trim() : slug;
+  const title = titleMatch ? titleMatch[1].trim() : null;
 
   const sections = splitH2Sections(text);
-  let summary;
-  if (sections["结论"]) summary = firstParagraph(sections["结论"]);
-
   const nodes = {};
-  // Explicit per-node ownership — `## \`node.id\`` headings.
   const explicitNodeIds = new Set();
   for (const [heading, body] of Object.entries(sections)) {
     if (heading === "__preamble__") continue;
@@ -280,14 +283,8 @@ function parseChainDoc(slug, text) {
     nodes[nodeId] = parseNodeSection(nodeId, body);
     explicitNodeIds.add(nodeId);
   }
-
-  // Soft ownership — node ids advertised in the doc's "summary" tables (those
-  // whose header has a Node / Canonical node id column). Several chain docs
-  // (45/60/65/75 and the still-not-restructured 30) list their owned nodes
-  // this way without giving each one a `## ` section.
   const summaryNodeIds = new Set(nodeIdsFromSummaryTables(text));
-
-  return { title, summary, nodes, explicitNodeIds, summaryNodeIds };
+  return { title, nodes, explicitNodeIds, summaryNodeIds };
 }
 
 /**
@@ -325,7 +322,10 @@ function nodeIdsFromSummaryTables(text) {
       }
       j++;
     }
-    i = j;
+    // Step back one — the for loop's i++ will skip the current line, but we
+    // want to advance past the table's last line, not past the line *after*
+    // it (which could itself be a table header).
+    i = j - 1;
   }
   return out;
 }
@@ -385,8 +385,10 @@ function parseNodeSection(nodeId, bodyLines) {
 }
 
 /**
- * Parse a "输入" or "输出" table. Header columns vary slightly across docs;
- * we keep the first 4 columns as { contract, endpoint, required, note }.
+ * Parse a "输入" or "输出" table. Header columns differ between input and
+ * output tables in the third column (input: "是否必需"; output: "生命周期"),
+ * so we surface that value as a neutral `qualifier` and let the renderer
+ * pick a label based on which list the row landed in.
  */
 function parseContractTable(bodyLines) {
   const rows = findTable(bodyLines, (cells) => cells.length >= 2);
@@ -397,7 +399,7 @@ function parseContractTable(bodyLines) {
   return dataRows.map((r) => ({
     contract: (r[0] ?? "").trim(),
     endpoint: (r[1] ?? "").trim(),
-    required: (r[2] ?? "").trim() || undefined,
+    qualifier: (r[2] ?? "").trim() || undefined,
     note: (r[3] ?? "").trim() || undefined
   }));
 }
@@ -413,10 +415,6 @@ async function readDoc(slug) {
   // and it makes the H1 regex (^# ...) miss line 1.
   if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
   return { slug, fileName, text };
-}
-
-function escapeBacktickString(s) {
-  return s.replace(/\\/g, "\\\\").replace(/`/g, "\\`").replace(/\$\{/g, "\\${");
 }
 
 async function main() {
@@ -450,7 +448,7 @@ async function main() {
   // strategy: explicit `## ` sections > 01-overview.md > summary tables.
   const chainParsed = {};
   for (const slug of CHAIN_DOC_SLUGS) {
-    chainParsed[slug] = parseChainDoc(slug, all[slug].text);
+    chainParsed[slug] = parseChainDoc(all[slug].text);
   }
   const ownerByNodeId = new Map();
 
@@ -539,7 +537,7 @@ async function main() {
       .map((e) => e.nodeId);
     groups.push({
       id: slug.replace(/^\d+-/, ""),
-      title: chainParsed[slug].title,
+      title: chainParsed[slug].title ?? slug,
       docSlug: slug,
       nodeIds: owned
     });
@@ -552,9 +550,8 @@ async function main() {
       slug: UNASSIGNED_SLUG,
       fileName: "",
       title: "未归类节点",
-      summary:
+      markdown:
         "以下节点已在 02-ordered-execution.md / 04-display-names.md 中列出，但当前没有任何链路文档为其提供 ## 章节，01-overview.md 也未归入任一文档。请在对应链路文档中补充节点章节。",
-      markdown: "",
       nodeIds: orderedEntries
         .filter((e) => e.docSlug === UNASSIGNED_SLUG)
         .sort((a, b) => a.order - b.order)
@@ -565,9 +562,6 @@ async function main() {
     const { fileName, text } = all[slug];
     const titleMatch = /^#\s+(.+?)\s*$/m.exec(text);
     const title = titleMatch ? titleMatch[1].trim() : slug;
-    let summary;
-    const sections = splitH2Sections(text);
-    if (sections["结论"]) summary = firstParagraph(sections["结论"]);
     const nodeIds =
       slug in chainParsed
         ? orderedEntries
@@ -579,7 +573,6 @@ async function main() {
       slug,
       fileName,
       title,
-      summary,
       markdown: text,
       nodeIds
     };
@@ -596,17 +589,12 @@ async function main() {
     orderedNodes: orderedEntries
   };
 
-  // Emit a TS module that exports the catalog as a const.
-  // Markdown bodies live in template literals — we escape backticks/${}.
-  const replacer = (_key, value) => value;
-  const json = JSON.stringify(catalog, replacer, 2);
-
-  // For very large markdown blobs the JSON string is fine; the TS module just
-  // re-exports it. Keep it simple and embed as JSON — the renderer imports it
-  // as a value, not as code.
+  // Emit the catalog as JSON inside a TS module. The renderer imports it as
+  // a value — the only TS in the file is the type annotation.
+  const json = JSON.stringify(catalog, null, 2);
   const banner =
     "// AUTO-GENERATED by scripts/build-chain-catalog.mjs — do not edit.\n" +
-    "// Regenerate with: pnpm chain-catalog\n" +
+    "// Regenerate with: node scripts/build-chain-catalog.mjs\n" +
     "import type { ChainCatalog } from \"@tinder/nextstep\";\n\n";
   const body = `export const CHAIN_CATALOG: ChainCatalog = ${json} as const;\n`;
 
@@ -617,7 +605,6 @@ async function main() {
   console.log(
     `chain-catalog: wrote ${OUT_FILE} (${ordered.length} nodes, ${groups.length} groups)`
   );
-  void escapeBacktickString;
 }
 
 main().catch((err) => {

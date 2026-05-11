@@ -1,4 +1,4 @@
-import { type ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 
 /**
  * Minimal markdown renderer focused on what the chain-contract docs use:
@@ -11,6 +11,15 @@ import { type ReactNode } from "react";
 export function Markdown({ source }: { source: string }) {
   const blocks = parseBlocks(source);
   return <div className="md-body">{blocks.map((b, i) => renderBlock(b, i))}</div>;
+}
+
+/**
+ * Inline-only counterpart for places where a block wrapper would be wrong —
+ * table cells, list items, label/value rows. Renders inline code, bold,
+ * italic, and autolinks; nothing else. No `<div>`, no `<p>`.
+ */
+export function MarkdownInline({ source }: { source: string }) {
+  return <Fragment>{renderInline(source)}</Fragment>;
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -330,10 +339,14 @@ function renderInline(text: string): ReactNode[] {
 }
 
 function renderText(text: string, baseKey: number): ReactNode[] {
-  // Bold (**), then italic (*), then autolinks. Apply in that order to keep
-  // overlapping markers (***bold-italic***) handled left-to-right.
+  // Bold (**…**), italic (*…*), and autolinks. The italic alt uses lookbehind
+  // and lookahead so a stray `*` in prose (e.g. a glob like `shared.*`
+  // appearing outside backticks) doesn't accidentally swallow the rest of the
+  // text. We don't try to implement the full GFM flanking rules — just enough
+  // that a single `*` doesn't pair with the next one across unrelated tokens.
   const out: ReactNode[] = [];
-  const re = /\*\*([^*\n]+?)\*\*|\*([^*\n]+?)\*|\bhttps?:\/\/[^\s)]+/g;
+  const re =
+    /\*\*([^*\n]+?)\*\*|(?<![\w*])\*([^\s*][^*\n]*?[^\s*]|[^\s*])\*(?![\w*])|\bhttps?:\/\/[^\s)]+/g;
   let lastIdx = 0;
   let m: RegExpExecArray | null;
   let key = baseKey;

@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import type { ChainContractRow, ChainNodeEntry } from "@tinder/nextstep";
 import { CHAIN_CATALOG } from "./chain-catalog.generated";
 import { useChainHelp } from "./ChainHelpContext";
-import { Markdown } from "./Markdown";
+import { Markdown, MarkdownInline } from "./Markdown";
 
 export function ChainHelpView() {
   const { selection, selectNode, selectDoc } = useChainHelp();
@@ -127,7 +127,7 @@ function NodeDetail({
           <ul className="chain-help-bullets">
             {node.runtimeContract.map((line, i) => (
               <li key={i}>
-                <Markdown source={line} />
+                <MarkdownInline source={line} />
               </li>
             ))}
           </ul>
@@ -151,7 +151,7 @@ function NodeDetail({
                 <tr key={i}>
                   <td>{row.layer}</td>
                   <td>
-                    <Markdown source={row.target} />
+                    <MarkdownInline source={row.target} />
                   </td>
                 </tr>
               ))}
@@ -173,10 +173,10 @@ function NodeDetail({
               {node.validation.map((row, i) => (
                 <tr key={i}>
                   <td>
-                    <Markdown source={row.check} />
+                    <MarkdownInline source={row.check} />
                   </td>
                   <td>
-                    <Markdown source={row.expected} />
+                    <MarkdownInline source={row.expected} />
                   </td>
                 </tr>
               ))}
@@ -184,7 +184,6 @@ function NodeDetail({
           </table>
         </Field>
       )}
-
     </article>
   );
 }
@@ -207,14 +206,14 @@ function ContractTable({
   rows: ChainContractRow[];
   kind: "input" | "output";
 }) {
-  const required = kind === "input";
+  const isInput = kind === "input";
   return (
     <table className="md-table">
       <thead>
         <tr>
           <th style={{ width: "20%" }}>Contract</th>
-          <th style={{ width: "30%" }}>{required ? "来源" : "目标"}</th>
-          <th style={{ width: "15%" }}>{required ? "是否必需" : "生命周期"}</th>
+          <th style={{ width: "30%" }}>{isInput ? "来源" : "目标"}</th>
+          <th style={{ width: "15%" }}>{isInput ? "是否必需" : "生命周期"}</th>
           <th>说明</th>
         </tr>
       </thead>
@@ -222,14 +221,14 @@ function ContractTable({
         {rows.map((row, i) => (
           <tr key={i}>
             <td>
-              <Markdown source={row.contract} />
+              <MarkdownInline source={row.contract} />
             </td>
             <td>
-              <Markdown source={row.endpoint} />
+              <MarkdownInline source={row.endpoint} />
             </td>
-            <td>{row.required ?? ""}</td>
+            <td>{row.qualifier ?? ""}</td>
             <td>
-              <Markdown source={row.note ?? ""} />
+              <MarkdownInline source={row.note ?? ""} />
             </td>
           </tr>
         ))}
