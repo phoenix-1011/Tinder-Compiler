@@ -262,7 +262,7 @@ function parseDisplayNames(text) {
  *
  * Per-node sections are H2 headings whose label is a backtick-wrapped node id.
  */
-function parseChainDoc(slug, text, allOrderedNodeIds) {
+function parseChainDoc(slug, text) {
   const titleMatch = /^#\s+(.+?)\s*$/m.exec(text);
   const title = titleMatch ? titleMatch[1].trim() : slug;
 
@@ -271,30 +271,63 @@ function parseChainDoc(slug, text, allOrderedNodeIds) {
   if (sections["结论"]) summary = firstParagraph(sections["结论"]);
 
   const nodes = {};
-  const ownedNodeIds = new Set();
-
-  // 1. Per-node H2 sections
+  // Explicit per-node ownership — `## \`node.id\`` headings.
+  const explicitNodeIds = new Set();
   for (const [heading, body] of Object.entries(sections)) {
     if (heading === "__preamble__") continue;
     const nodeId = nodeIdFromHeading(heading);
     if (!nodeId) continue;
     nodes[nodeId] = parseNodeSection(nodeId, body);
-    ownedNodeIds.add(nodeId);
+    explicitNodeIds.add(nodeId);
   }
 
-  // 2. Fallback: nodes mentioned in the doc but without a per-node section
-  // (e.g. 45-control-chain lists 3 node ids only in tables).
-  // We claim ownership when the node id appears in the file body and isn't
-  // already owned by another doc.
-  for (const candidate of allOrderedNodeIds) {
-    if (ownedNodeIds.has(candidate)) continue;
-    if (text.includes(`\`${candidate}\``)) {
-      ownedNodeIds.add(candidate);
-      // No per-node markdown — viewer falls back to whole-doc render.
+  // Soft ownership — node ids advertised in the doc's "summary" tables (those
+  // whose header has a Node / Canonical node id column). Several chain docs
+  // (45/60/65/75 and the still-not-restructured 30) list their owned nodes
+  // this way without giving each one a `## ` section.
+  const summaryNodeIds = new Set(nodeIdsFromSummaryTables(text));
+
+  return { title, summary, nodes, explicitNodeIds, summaryNodeIds };
+}
+
+/**
+ * Walk every markdown table in the doc whose header advertises a Node /
+ * Canonical node id column, and yield the backtick-wrapped ids found in that
+ * column's rows. Each chain doc has at most a handful of such tables at the
+ * top — they declare which nodes the doc owns.
+ */
+function nodeIdsFromSummaryTables(text) {
+  const lines = text.split(/\r?\n/);
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line.trim().startsWith("|")) continue;
+    const headerCells = splitRow(line);
+    const nodeColIdx = headerCells.findIndex((cell) =>
+      /^\s*(canonical\s+node\s+id|node)\s*$/i.test(cell)
+    );
+    if (nodeColIdx < 0) continue;
+    const sepIdx = nextNonBlank(lines, i + 1);
+    if (!/^\s*\|[\s\-:|]+\|\s*$/.test(lines[sepIdx] ?? "")) continue;
+    let j = nextNonBlank(lines, sepIdx + 1);
+    while (j < lines.length) {
+      const row = lines[j];
+      if (row.trim() === "") {
+        j++;
+        continue;
+      }
+      if (!row.trim().startsWith("|")) break;
+      const cells = splitRow(row);
+      const cell = cells[nodeColIdx];
+      if (cell) {
+        const m = /`([^`]+)`/.exec(cell);
+        if (m) out.push(m[1]);
+      }
+      j++;
     }
+    i = j;
   }
-
-  return { title, summary, nodes, ownedNodeIds };
+  return out;
 }
 
 /** Extract structured fields from a single node's H2 section body. */
@@ -375,7 +408,10 @@ function parseContractTable(bodyLines) {
 
 async function readDoc(slug) {
   const fileName = `${slug}.md`;
-  const text = await fs.readFile(join(DOCS_DIR, fileName), "utf8");
+  let text = await fs.readFile(join(DOCS_DIR, fileName), "utf8");
+  // Strip the UTF-8 BOM if present — several chain docs were saved with one,
+  // and it makes the H1 regex (^# ...) miss line 1.
+  if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
   return { slug, fileName, text };
 }
 
@@ -404,53 +440,45 @@ async function main() {
     (await readDoc("01-overview")).text
   );
 
-  const allOrderedNodeIds = new Set(ordered.map((e) => e.nodeId));
-
   // Read all docs upfront.
   const all = {};
   for (const slug of [...FOUNDATION_SLUGS, ...CHAIN_DOC_SLUGS, ...EXTENSION_SLUGS]) {
     all[slug] = await readDoc(slug);
   }
 
-  // Parse chain docs and resolve doc → node ownership.
+  // Parse every chain doc once; defer ownership resolution to a 3-pass
+  // strategy: explicit `## ` sections > 01-overview.md > summary tables.
   const chainParsed = {};
-  const ownerByNodeId = new Map();
   for (const slug of CHAIN_DOC_SLUGS) {
-    const { text } = all[slug];
-    const parsed = parseChainDoc(slug, text, allOrderedNodeIds);
-    chainParsed[slug] = parsed;
-    for (const nodeId of parsed.ownedNodeIds) {
-      if (ownerByNodeId.has(nodeId)) {
-        // First doc with an explicit per-node section wins; an implicit
-        // mention can't override an explicit owner.
-        const existing = ownerByNodeId.get(nodeId);
-        const existingHasExplicit = !!chainParsed[existing].nodes[nodeId];
-        const candidateHasExplicit = !!parsed.nodes[nodeId];
-        if (existingHasExplicit) continue;
-        if (candidateHasExplicit) {
-          ownerByNodeId.set(nodeId, slug);
-          continue;
-        }
-        // Both implicit — keep the first to preserve doc reading order.
-        continue;
-      }
-      ownerByNodeId.set(nodeId, slug);
+    chainParsed[slug] = parseChainDoc(slug, all[slug].text);
+  }
+  const ownerByNodeId = new Map();
+
+  // Pass 1: explicit per-node `## \`node.id\`` headings — strongest signal.
+  for (const slug of CHAIN_DOC_SLUGS) {
+    for (const nodeId of chainParsed[slug].explicitNodeIds) {
+      if (!ownerByNodeId.has(nodeId)) ownerByNodeId.set(nodeId, slug);
     }
   }
 
-  // Fall back to 01-overview.md's doc-level grouping when neither per-node
-  // sections nor chain-doc body mentions claim ownership. The display name in
-  // 01-overview's "范围" column is what we look up.
+  // Pass 2: 01-overview.md's grouping table. Display name in the overview's
+  // "范围" column → owner doc. This trumps summary-table claims because the
+  // overview is the SSOT for doc-level scope (a node id may appear in
+  // multiple docs' summary tables, e.g. `device.control.strike.resolve`
+  // shows up in both 45-control and 65-strike — overview decides).
   for (const entry of ordered) {
     if (ownerByNodeId.has(entry.nodeId)) continue;
     const displayName = displayNames.get(entry.nodeId) ?? entry.displayName;
     const fromOverview = overviewOwnerByDisplayName.get(displayName);
     if (fromOverview && CHAIN_DOC_SLUGS.includes(fromOverview)) {
       ownerByNodeId.set(entry.nodeId, fromOverview);
-      // eslint-disable-next-line no-console
-      console.warn(
-        `chain-catalog: ${entry.nodeId} (${displayName}) inferred owner ${fromOverview} from 01-overview.md (chain doc lacks per-node section)`
-      );
+    }
+  }
+
+  // Pass 3: summary tables, in CHAIN_DOC_SLUGS reading order.
+  for (const slug of CHAIN_DOC_SLUGS) {
+    for (const nodeId of chainParsed[slug].summaryNodeIds) {
+      if (!ownerByNodeId.has(nodeId)) ownerByNodeId.set(nodeId, slug);
     }
   }
 
@@ -479,7 +507,7 @@ async function main() {
   const nodes = {};
   for (const entry of orderedEntries) {
     const owner = chainParsed[entry.docSlug];
-    const explicit = owner.nodes[entry.nodeId];
+    const explicit = owner?.nodes[entry.nodeId];
     nodes[entry.nodeId] = {
       nodeId: entry.nodeId,
       displayName: entry.displayName,
