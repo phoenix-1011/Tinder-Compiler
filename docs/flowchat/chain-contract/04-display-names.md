@@ -1,63 +1,89 @@
-# 节点中文展示名索引
-
-
+﻿# 展示名清单
 
 ## 结论
 
+展示名只用于 UI、汇报和人工阅读；配置、代码、测试必须使用 canonical node id。
 
-
-本文件是 canonical node id 到中文展示名的快速索引。展示名只用于展示和理解，不替代配置、代码和测试中的 canonical node id。
-
-
-
-| # | 展示名 | Canonical node id |
+| # | 展示名 | Node |
 |---:|---|---|
-| 1 | 实体维护 | `platform.entity.update` |
-| 2 | 外观维护 | `platform.outlook.update` |
-| 3 | 环境维护 | `platform.environment.update` |
-| 4 | 控制传入 | `device.control.intake` |
-| 5 | 控制维护 | `device.control.maintain` |
-| 6 | 控制解析 | `device.control.resolve` |
-| 7 | 指令维护 | `platform.navigation.command.maintain` |
-| 8 | 指令解析 | `platform.navigation.command.resolve` |
-| 9 | 机动执行 | `device.mobile_navigation.execute` |
-| 10 | 导航修正 | `navigation.perception_correction.update` |
-| 11 | 坐标提交 | `platform.coordinate.commit` |
-| 12 | 协同同步 | `platform.cooperation.message_sync` |
-| 13 | 长机更新 | `platform.cooperation.leader_update` |
-| 14 | 成员更新 | `platform.cooperation.member_update` |
-| 15 | 协同通信 | `platform.cooperation.communication_record` |
-| 16 | 诱饵库存 | `platform.decoy_inventory.update` |
-| 17 | 炮弹库存 | `platform.bullet_inventory.update` |
-| 18 | 导弹库存 | `platform.missile_inventory.update` |
-| 19 | 弹药库存 | `platform.ammunitor_inventory.update` |
-| 20 | 搭载库存 | `platform.carriee_inventory.update` |
-| 21 | 搭载监督 | `platform.supervise_carriee.update` |
-| 22 | 导弹监督 | `platform.supervise_missile.update` |
-| 23 | 炮弹监督 | `platform.supervise_canonball.update` |
-| 24 | 跟踪请求 | `platform.tracking_request.maintain` |
-| 25 | 目标键维护 | `platform.tracking_target_key.maintain` |
-| 26 | 跟踪设备 | `platform.tracking_device.resolve` |
-| 27 | 跟踪事实 | `platform.tracking_fact.resolve` |
-| 28 | 跟踪监督 | `platform.supervise_tracking.update` |
-| 29 | 归港维护 | `platform.homeport.update` |
-| 30 | 通道监督 | `platform.supervise_tunnel.update` |
-| 31 | 状态汇总 | `platform.status.update` |
-| 32 | 设备状态 | `device.status.update` |
-| 33 | 设备空间 | `device.spatial_state.update` |
-| 34 | 设备性能 | `device.performance.update` |
-| 35 | 静态信号 | `signal.static_generation.update` |
-| 36 | 信号生命周期 | `environment.signal.lifecycle.manage` |
-| 37 | 环境生成 | `environment.signal.generate` |
-| 38 | 回波生成 | `environment.signal.echo_generate` |
-| 39 | 传播转换 | `environment.signal.transform` |
-| 40 | 信号传入 | `sense.signal.intake` |
-| 41 | 信号预处理 | `sense.signal.preprocess` |
-| 42 | 信号成检 | `sense.detection.from_signal` |
-| 43 | 假警维护 | `sense.detection.artifact.update` |
-| 44 | 探测更新 | `sense.detection.update` |
-| 45 | 探测成观 | `sense.observation.from_detection` |
-| 46 | 观测更新 | `sense.observation.update` |
-| 47 | 航迹更新 | `sense.track.update` |
-| 48 | 态势融合 | `sense.awareness.update` |
-| 49 | 态势维护 | `sense.awareness.maintain` |
+| 1 | 裁决影响 | `platform.judge.effect.resolve` |
+| 2 | 设备裁决 | `device.judge.effect.process` |
+| 3 | 实体维护 | `platform.entity.update` |
+| 4 | 外观维护 | `platform.outlook.update` |
+| 5 | 环境维护 | `platform.environment.update` |
+| 6 | 组网维护 | `communication.network.update` |
+| 7 | 接收传入 | `communication.receive.intake` |
+| 8 | 接收解析 | `communication.receive.resolve` |
+| 9 | 控制传入 | `device.control.intake` |
+| 10 | 控制维护 | `device.control.maintain` |
+| 11 | 控制解析 | `device.control.resolve` |
+| 12 | 开关解析 | `device.control.switch.resolve` |
+| 13 | 伸缩解析 | `device.control.extend.resolve` |
+| 14 | 发波解析 | `device.control.emit_beam.resolve` |
+| 15 | 派出解析 | `device.control.dispatch.resolve` |
+| 16 | 放出解析 | `device.control.discharge.resolve` |
+| 17 | 通知解析 | `device.control.inform.resolve` |
+| 18 | 打击解析 | `device.control.strike.resolve` |
+| 19 | 打击路由 | `strike.route.resolve` |
+| 20 | 通道准备 | `strike.channel.prepare` |
+| 21 | 发射执行 | `strike.launch.execute` |
+| 22 | 自主生成 | `strike.autonomous.spawn` |
+| 23 | 弹道生成 | `strike.ballistic.spawn` |
+| 24 | 弹幕生成 | `strike.barrage.emit` |
+| 25 | 打击监督 | `strike.supervise.update` |
+| 26 | 裁决提交 | `strike.judge.submit` |
+| 27 | 指令维护 | `platform.navigation.command.maintain` |
+| 28 | 指令解析 | `platform.navigation.command.resolve` |
+| 29 | 机动执行 | `device.mobile_navigation.execute` |
+| 30 | 导航修正 | `navigation.perception_correction.update` |
+| 31 | 坐标提交 | `platform.coordinate.commit` |
+| 32 | 协同同步 | `platform.cooperation.message_sync` |
+| 33 | 长机更新 | `platform.cooperation.leader_update` |
+| 34 | 成员更新 | `platform.cooperation.member_update` |
+| 35 | 协同通信 | `platform.cooperation.communication_record` |
+| 36 | 诱饵库存 | `platform.decoy_inventory.update` |
+| 37 | 炮弹库存 | `platform.bullet_inventory.update` |
+| 38 | 导弹库存 | `platform.missile_inventory.update` |
+| 39 | 弹药库存 | `platform.ammunitor_inventory.update` |
+| 40 | 搭载库存 | `platform.carriee_inventory.update` |
+| 41 | 搭载监督 | `platform.supervise_carriee.update` |
+| 42 | 导弹监督 | `platform.supervise_missile.update` |
+| 43 | 炮弹监督 | `platform.supervise_canonball.update` |
+| 44 | 跟踪请求 | `platform.tracking_request.maintain` |
+| 45 | 目标键维护 | `platform.tracking_target_key.maintain` |
+| 46 | 跟踪设备 | `platform.tracking_device.resolve` |
+| 47 | 跟踪事实 | `platform.tracking_fact.resolve` |
+| 48 | 跟踪监督 | `platform.supervise_tracking.update` |
+| 49 | 归港维护 | `platform.homeport.update` |
+| 50 | 通道监督 | `platform.supervise_tunnel.update` |
+| 51 | 状态汇总 | `platform.status.update` |
+| 52 | 设备状态 | `device.status.update` |
+| 53 | 设备空间 | `device.spatial_state.update` |
+| 54 | 设备性能 | `device.performance.update` |
+| 55 | 静态信号 | `signal.static_generation.update` |
+| 56 | 软杀发射 | `device.softkill.emission.generate` |
+| 57 | 信号生命周期 | `environment.signal.lifecycle.manage` |
+| 58 | 环境生成 | `environment.signal.generate` |
+| 59 | 回波生成 | `environment.signal.echo_generate` |
+| 60 | 传播转换 | `environment.signal.transform` |
+| 61 | 软杀传播 | `softkill.propagation.resolve` |
+| 62 | 平台软杀 | `platform.softkill.effect.resolve` |
+| 63 | 设备软杀 | `device.softkill.effect.process` |
+| 64 | 特征生成 | `environment.signature.generate` |
+| 65 | 特征维护 | `environment.signature.lifecycle.manage` |
+| 66 | 特征传播 | `environment.signature.propagation.resolve` |
+| 67 | 特征接收 | `device.signature.receive.process` |
+| 68 | 信号传入 | `sense.signal.intake` |
+| 69 | 信号预处理 | `sense.signal.preprocess` |
+| 70 | 信号成检 | `sense.detection.from_signal` |
+| 71 | 特征成检 | `sense.detection.from_signature` |
+| 72 | 假警维护 | `sense.detection.artifact.update` |
+| 73 | 探测更新 | `sense.detection.update` |
+| 74 | 探测成观 | `sense.observation.from_detection` |
+| 75 | 观测更新 | `sense.observation.update` |
+| 76 | 航迹更新 | `sense.track.update` |
+| 77 | 态势融合 | `sense.awareness.update` |
+| 78 | 态势维护 | `sense.awareness.maintain` |
+| 79 | 请求汇集 | `communication.request.collect` |
+| 80 | 发送解析 | `communication.send.resolve` |
+| 81 | 通信发送 | `communication.dispatch.update` |

@@ -1,4 +1,4 @@
-# 导航链路
+﻿# 导航链路
 
 
 
@@ -14,15 +14,15 @@
 
 |---:|---|---|---|
 
-| 7 | 指令维护 | `platform.navigation.command.maintain` | `shared.platform.navigation_command`、内存 `NavigationCommand p05_command_request` |
+| 25 | 指令维护 | `platform.navigation.command.maintain` | `shared.platform.navigation_command`、内存 `NavigationCommand p05_command_request` |
 
-| 8 | 指令解析 | `platform.navigation.command.resolve` | 内存 `NavigationCommand p05_executable_command` |
+| 26 | 指令解析 | `platform.navigation.command.resolve` | 内存 `NavigationCommand p05_executable_command` |
 
-| 9 | 机动执行 | `device.mobile_navigation.execute` | 内存 `CoordinateDelta p05_actual_delta` |
+| 27 | 机动执行 | `device.mobile_navigation.execute` | 内存 `CoordinateDelta p05_actual_delta` |
 
-| 10 | 导航修正 | `navigation.perception_correction.update` | `shared.navigation.error`、内存 `NavigationCorrectionResultState` |
+| 28 | 导航修正 | `navigation.perception_correction.update` | `shared.navigation.error`、内存 `NavigationCorrectionResultState` |
 
-| 11 | 坐标提交 | `platform.coordinate.commit` | `shared.platform.coordinate` |
+| 29 | 坐标提交 | `platform.coordinate.commit` | `shared.platform.coordinate` |
 
 
 
@@ -44,11 +44,11 @@
 
 | 展示名 | 指令维护 |
 
-| 执行序号 | 7 |
+| 执行序号 | 25 |
 
 | 阶段 | Post-commit core chain |
 
-| 上游 | `platform.environment.update` |
+| 上游 | `strike.judge.submit` |
 
 | 下游 | `platform.navigation.command.resolve` |
 
@@ -118,7 +118,7 @@ fixed implementation fallback：统一入口按内置命令保留和过期规则
 
 |---|---|
 
-| 执行序号 | `02-ordered-execution.md` 中第 7 项为 `platform.navigation.command.maintain` |
+| 执行序号 | `02-ordered-execution.md` 中第 25 项为 `platform.navigation.command.maintain` |
 
 | Build | `xmake build test-l3-unified-entry` 通过 |
 
@@ -142,7 +142,7 @@ fixed implementation fallback：统一入口按内置命令保留和过期规则
 
 | 展示名 | 指令解析 |
 
-| 执行序号 | 8 |
+| 执行序号 | 26 |
 
 | 阶段 | Post-commit core chain |
 
@@ -216,7 +216,7 @@ fixed implementation fallback：无外部计算资源时使用内置命令解析
 
 |---|---|
 
-| 执行序号 | `02-ordered-execution.md` 中第 8 项为 `platform.navigation.command.resolve` |
+| 执行序号 | `02-ordered-execution.md` 中第 26 项为 `platform.navigation.command.resolve` |
 
 | Build | `xmake build test-l3-unified-entry` 通过 |
 
@@ -240,7 +240,7 @@ fixed implementation fallback：无外部计算资源时使用内置命令解析
 
 | 展示名 | 机动执行 |
 
-| 执行序号 | 9 |
+| 执行序号 | 27 |
 
 | 阶段 | Post-commit core chain |
 
@@ -314,7 +314,7 @@ no fallback：失败或无资源时不更新空间增量。
 
 |---|---|
 
-| 执行序号 | `02-ordered-execution.md` 中第 9 项为 `device.mobile_navigation.execute` |
+| 执行序号 | `02-ordered-execution.md` 中第 27 项为 `device.mobile_navigation.execute` |
 
 | Build | `xmake build test-l3-unified-entry` 通过 |
 
@@ -338,7 +338,7 @@ no fallback：失败或无资源时不更新空间增量。
 
 | 展示名 | 导航修正 |
 
-| 执行序号 | 10 |
+| 执行序号 | 28 |
 
 | 阶段 | Post-commit core chain |
 
@@ -412,7 +412,7 @@ skip/no-op：无实际运动增量时不更新导航误差。
 
 |---|---|
 
-| 执行序号 | `02-ordered-execution.md` 中第 10 项为 `navigation.perception_correction.update` |
+| 执行序号 | `02-ordered-execution.md` 中第 28 项为 `navigation.perception_correction.update` |
 
 | Build | `xmake build test-l3-unified-entry` 通过 |
 
@@ -436,7 +436,7 @@ skip/no-op：无实际运动增量时不更新导航误差。
 
 | 展示名 | 坐标提交 |
 
-| 执行序号 | 11 |
+| 执行序号 | 29 |
 
 | 阶段 | Post-commit core chain |
 
@@ -510,6 +510,7 @@ fixed implementation fallback：统一入口合成真值与 `platform.coordinate
 
 |---|---|
 
-| 执行序号 | `02-ordered-execution.md` 中第 11 项为 `platform.coordinate.commit` |
+| 执行序号 | `02-ordered-execution.md` 中第 29 项为 `platform.coordinate.commit` |
 
 | Build | `xmake build test-l3-unified-entry` 通过 |
+

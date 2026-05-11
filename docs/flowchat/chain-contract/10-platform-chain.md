@@ -1,4 +1,4 @@
-# 平台基础链路
+﻿# 平台基础链路
 
 
 
@@ -20,7 +20,7 @@
 
 | 3 | 环境维护 | `platform.environment.update` | `shared.platform.environment` |
 
-| 31 | 状态汇总 | `platform.status.update` | `shared.platform.status` |
+| 49 | 状态汇总 | `platform.status.update` | `shared.platform.status` |
 
 
 
@@ -46,7 +46,7 @@
 
 | 阶段 | Post-commit core chain |
 
-| 上游 | core chain 边界 |
+| 上游 | `core chain 边界` |
 
 | 下游 | `platform.outlook.update` |
 
@@ -244,7 +244,7 @@ fixed implementation fallback。
 
 | 上游 | `platform.outlook.update` |
 
-| 下游 | `platform.navigation.command.maintain` |
+| 下游 | `communication.network.update` |
 
 
 
@@ -336,7 +336,7 @@ fixed implementation fallback。
 
 | 展示名 | 状态汇总 |
 
-| 执行序号 | 31 |
+| 执行序号 | 49 |
 
 | 阶段 | Post-commit core chain |
 
@@ -410,6 +410,7 @@ fixed implementation fallback。
 
 |---|---|
 
-| 执行序号 | `02-ordered-execution.md` 中第 31 项为 `platform.status.update` |
+| 执行序号 | `02-ordered-execution.md` 中第 49 项为 `platform.status.update` |
 
 | Build | `xmake build test-l3-unified-entry` 通过 |
+

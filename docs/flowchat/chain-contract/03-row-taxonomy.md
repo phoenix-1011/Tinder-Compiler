@@ -1,4 +1,4 @@
-# Row Taxonomy
+﻿# Row Taxonomy
 
 
 
@@ -46,13 +46,28 @@
 
 | `shared.platform.navigation_command` | `platform.navigation.command.maintain` | 导航链路 命令生命周期 |
 
-| `shared.navigation.error` | `navigation.perception_correction.update` | 导航误差或修正状态 |
+| `shared.navigation.error` | 
+avigation.perception_correction.update` | 导航误差或修正状态 |
 
 | `shared.platform.coordinate` | `platform.coordinate.commit` | 平台真值和可见坐标 |
 
 | `shared.platform.cooperation` | `platform.cooperation.member_update` | 协同成员状态 |
 
 | `shared.communication.outbox.p06` | `platform.cooperation.communication_record` | 协同通信待发送消息 |
+
+| `shared.communication.network_state` | `communication.network.update` | 统一入口维护的组网状态，目标 contract |
+
+| `shared.communication.request_set` | `communication.request.collect` | 统一通信请求集合，目标 contract |
+
+| `shared.communication.send_resolution` | `communication.send.resolve` | 通信设备和链路发送解析结果，目标 contract |
+
+| `shared.communication.dispatch.*` | `communication.dispatch.update` | 统一通信发送结果，目标 contract |
+
+| `shared.strike.channel_state` | `strike.supervise.update` | 打击通道生命周期权威状态 |
+
+| `shared.strike.supervision` | `strike.supervise.update` | 打击请求、发射产物和生命周期监督权威状态 |
+
+| `shared.strike.judge_submission` | `strike.judge.submit` | 打击裁决提交记录 |
 
 | `shared.platform.decoy` | `platform.decoy_inventory.update` | 诱饵库存 |
 
@@ -85,6 +100,7 @@
 | `shared.device.performance` | `device.performance.update` | 设备性能权威状态 |
 
 | `shared.signal.records` | `signal.static_generation.update` | 静态信号权威池 |
+| `shared.environment.signature.records` | `environment.signature.lifecycle.manage` | 环境特征权威池，覆盖尾流、磁异常、热迹、化学痕迹和自定义特征 |
 
 | `shared.sense.signal` | `sense.signal.preprocess` | 接收侧信号结果 |
 
@@ -109,12 +125,16 @@
 |---|---|---|---|
 
 | `runtime.environment.signal.propagated_local_candidates` | `environment.signal.transform` | `sense.signal.intake`、post-commit custom nodes | 当前 tick |
+| `runtime.environment.signature.propagated_candidates` | `environment.signature.propagation.resolve` | `device.signature.receive.process`、post-commit custom nodes | 当前 tick |
 
 | `device_received_signal_bucket` | `sense.signal.intake` | `sense.signal.preprocess` | 当前函数链 |
+| `device_signature_receive_bucket` | 统一入口内部 receive/classify | `device.signature.receive.process` | 当前函数链 |
+| `device_signature_result_set` | `device.signature.receive.process` | `sense.detection.from_signature` | 当前函数链 |
 
 | `preprocessed_signal_observation_set` | `sense.signal.preprocess` | `sense.detection.from_signal` | 当前函数链 |
 
 | `signal_detection_set` | `sense.detection.from_signal` | `sense.detection.artifact.update`、`sense.detection.update` | 当前函数链 |
+| `signature_detection_set` | `sense.detection.from_signature` | `sense.detection.artifact.update`、`sense.detection.update` | 当前函数链 |
 
 | `artifact_detection_set` | `sense.detection.artifact.update` | `sense.detection.update` | 当前函数链 |
 
@@ -124,6 +144,16 @@
 
 | `awareness_working_set` | `sense.awareness.update` | `sense.awareness.maintain` | 当前函数链 |
 
+| `communication_request_set` | `communication.request.collect` | `communication.send.resolve` | 当前函数链 |
+
+| `communication_receive_bucket` | `communication.receive.intake` | `communication.receive.resolve` | 当前函数链 |
+
+| `communication_send_set` | `communication.send.resolve` | `communication.dispatch.update` | 当前函数链 |
+
+| `strike_channel_candidate_set` | `strike.channel.prepare` | `strike.launch.execute` | 当前函数链 |
+
+| `strike_launch_result_set` | `strike.launch.execute` | `strike.autonomous.spawn`、`strike.ballistic.spawn`、`strike.barrage.emit`、`strike.supervise.update` | 当前函数链 |
+
 ## 控制指令 transient contract
 
 | Contract | Producer | Consumer | Lifetime |
@@ -131,6 +161,24 @@
 | `transient.device.control.intake.*` | `DeviceControl` 统一入口 | `device.control.intake` | 当前 tick |
 | `transient.device.control.maintain.*` | `DeviceControl` 统一入口 | `device.control.maintain` | 当前 tick |
 | `transient.device.control.resolved.*` | `DeviceControl` 统一入口 | `device.control.resolve` 与下游业务节点 | 当前 tick |
-| 业务投影 transient rows | `device.control.resolve` 兼容投影 | 导航、设备、信号、库存、监督、通信链路 | 当前 tick |
+| `transient.device.status.device.*.extension_change` | `device.control.extend.resolve` fixed fallback | `device.spatial_state.update` | 当前 tick |
+| `transient.sgen.device.*` | `device.control.emit_beam.resolve` fixed fallback | `signal.static_generation.update` | 当前 tick |
+| `transient.p11.*` | `device.control.dispatch.resolve` fixed fallback | `platform.carriee_inventory.update` | 当前 tick |
+| `transient.p07.*` / `transient.p10.*` / `transient.p12.*` | `device.control.discharge.resolve` fixed fallback | 库存节点、`platform.supervise_tunnel.update` | 当前 tick |
+| `transient.communication.request.*` | `ControlInform`、协同链路、awareness、业务节点 | `communication.request.collect` | 当前 tick |
+| `transient.communication.receive.raw.*` | `ReceiveMessage` / engine receive callback | `communication.receive.intake`、`communication.receive.resolve` | 当前 tick |
+| `transient.communication.received.*` | `communication.receive.resolve` | awareness、cooperation、homeport、tracking 等业务节点 | 当前 tick |
+| `transient.strike.request.*` | `device.control.strike.resolve` | `strike.route.resolve` | 当前 tick |
+| `transient.strike.route.*` | `strike.route.resolve` | `strike.channel.prepare` | 当前 tick |
+| `transient.strike.channel_candidate.*` | `strike.channel.prepare` | `strike.launch.execute` | 当前 tick |
+| `transient.strike.launch_result.*` | `strike.launch.execute` | `strike.autonomous.spawn`、`strike.ballistic.spawn`、`strike.barrage.emit`、`strike.supervise.update` | 当前 tick |
+| `transient.strike.spawn.autonomous.*` | `strike.autonomous.spawn` | `strike.supervise.update`、`strike.judge.submit` | 当前 tick |
+| `transient.strike.spawn.ballistic.*` | `strike.ballistic.spawn` | `strike.supervise.update`、`strike.judge.submit` | 当前 tick |
+| `transient.strike.barrage.*` | `strike.barrage.emit` | `strike.supervise.update`、`strike.judge.submit` | 当前 tick |
+| `shared.device.performance.*.extension_rate` / `removable` | `device.performance.update` | `device.control.extend.resolve` fixed fallback | 跨 tick |
+| 业务投影 transient rows | `device.control.resolve` 业务投影 | 导航、设备、信号、库存、监督、通信、打击链路 | 当前 tick |
 
 控制指令统一链路的 transient rows MUST 记录 `family`、`action`、`target_chain` 和投影状态。当前代码保留业务投影 rows 作为下游消费入口，避免一次性迁移导致行为漂移。
+
+
+

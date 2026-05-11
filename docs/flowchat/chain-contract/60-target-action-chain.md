@@ -14,33 +14,33 @@
 
 |---:|---|---|---|
 
-| 12 | 协同同步 | `platform.cooperation.message_sync` | 内存 `p06_message_sync_state`、内存同步消息 |
+| 30 | 协同同步 | `platform.cooperation.message_sync` | 内存 `p06_message_sync_state`、内存同步消息 |
 
-| 13 | 长机更新 | `platform.cooperation.leader_update` | 内存 `p06_leader_state` |
+| 31 | 长机更新 | `platform.cooperation.leader_update` | 内存 `p06_leader_state` |
 
-| 14 | 成员更新 | `platform.cooperation.member_update` | `shared.platform.cooperation`、内存 `p06_member_state` |
+| 32 | 成员更新 | `platform.cooperation.member_update` | `shared.platform.cooperation`、内存 `p06_member_state` |
 
-| 15 | 协同通信 | `platform.cooperation.communication_record` | `shared.communication.outbox.p06` |
+| 33 | 协同通信 | `platform.cooperation.communication_record` | `shared.communication.outbox.p06` |
 
-| 16 | 诱饵库存 | `platform.decoy_inventory.update` | `shared.platform.decoy` |
+| 34 | 诱饵库存 | `platform.decoy_inventory.update` | `shared.platform.decoy` |
 
-| 17 | 炮弹库存 | `platform.bullet_inventory.update` | `shared.platform.bullet` |
+| 35 | 炮弹库存 | `platform.bullet_inventory.update` | `shared.platform.bullet` |
 
-| 18 | 导弹库存 | `platform.missile_inventory.update` | `shared.platform.missile` |
+| 36 | 导弹库存 | `platform.missile_inventory.update` | `shared.platform.missile` |
 
-| 19 | 弹药库存 | `platform.ammunitor_inventory.update` | `shared.platform.ammunitor` |
+| 37 | 弹药库存 | `platform.ammunitor_inventory.update` | `shared.platform.ammunitor` |
 
-| 20 | 搭载库存 | `platform.carriee_inventory.update` | `shared.platform.carriee` |
+| 38 | 搭载库存 | `platform.carriee_inventory.update` | `shared.platform.carriee` |
 
-| 21 | 搭载监督 | `platform.supervise_carriee.update` | `shared.platform.superviseCarriee` |
+| 39 | 搭载监督 | `platform.supervise_carriee.update` | `shared.platform.superviseCarriee` |
 
-| 22 | 导弹监督 | `platform.supervise_missile.update` | `shared.platform.superviseMissile`、通道监督 launch handoff |
+| 40 | 导弹监督 | `platform.supervise_missile.update` | `shared.platform.superviseMissile`、通道监督 launch handoff |
 
-| 23 | 炮弹监督 | `platform.supervise_canonball.update` | `shared.platform.superviseCanonball`、通道监督 launch handoff |
+| 41 | 炮弹监督 | `platform.supervise_canonball.update` | `shared.platform.superviseCanonball`、通道监督 launch handoff |
 
-| 29 | 归港维护 | `platform.homeport.update` | `shared.platform.homeport` |
+| 47 | 归港维护 | `platform.homeport.update` | `shared.platform.homeport` |
 
-| 30 | 通道监督 | `platform.supervise_tunnel.update` | `shared.platform.superviseTunnel` |
+| 48 | 通道监督 | `platform.supervise_tunnel.update` | `shared.platform.superviseTunnel` |
 
 
 
@@ -62,7 +62,7 @@
 
 | 展示名 | 协同同步 |
 
-| 执行序号 | 12 |
+| 执行序号 | 30 |
 
 | 阶段 | Post-commit core chain |
 
@@ -136,7 +136,7 @@ no fallback：失败或无输入时不产生新的同步消息。
 
 |---|---|
 
-| 执行序号 | `02-ordered-execution.md` 中第 12 项为 `platform.cooperation.message_sync` |
+| 执行序号 | `02-ordered-execution.md` 中第 30 项为 `platform.cooperation.message_sync` |
 
 | Build | `xmake build test-l3-unified-entry` 通过 |
 
@@ -160,7 +160,7 @@ no fallback：失败或无输入时不产生新的同步消息。
 
 | 展示名 | 长机更新 |
 
-| 执行序号 | 13 |
+| 执行序号 | 31 |
 
 | 阶段 | Post-commit core chain |
 
@@ -234,7 +234,7 @@ hard failure：缺少 message_sync 时失败。
 
 |---|---|
 
-| 执行序号 | `02-ordered-execution.md` 中第 13 项为 `platform.cooperation.leader_update` |
+| 执行序号 | `02-ordered-execution.md` 中第 31 项为 `platform.cooperation.leader_update` |
 
 | Build | `xmake build test-l3-unified-entry` 通过 |
 
@@ -258,7 +258,7 @@ hard failure：缺少 message_sync 时失败。
 
 | 展示名 | 成员更新 |
 
-| 执行序号 | 14 |
+| 执行序号 | 32 |
 
 | 阶段 | Post-commit core chain |
 
@@ -332,7 +332,7 @@ hard failure：缺少 leader_update 时失败。
 
 |---|---|
 
-| 执行序号 | `02-ordered-execution.md` 中第 14 项为 `platform.cooperation.member_update` |
+| 执行序号 | `02-ordered-execution.md` 中第 32 项为 `platform.cooperation.member_update` |
 
 | Build | `xmake build test-l3-unified-entry` 通过 |
 
@@ -344,7 +344,7 @@ hard failure：缺少 leader_update 时失败。
 
 ### 目的
 
-将需要跨平台同步的协同消息转为通信 outbox。
+将需要跨平台同步的协同消息转为统一通信请求。当前实现产出 `shared.communication.outbox.p06`，并由 `communication.request.collect` 在发送后段统一收口；后续可进一步收敛为直接产出 `transient.communication.request.cooperation.*`。
 
 
 
@@ -356,7 +356,7 @@ hard failure：缺少 leader_update 时失败。
 
 | 展示名 | 协同通信 |
 
-| 执行序号 | 15 |
+| 执行序号 | 33 |
 
 | 阶段 | Post-commit core chain |
 
@@ -382,7 +382,7 @@ hard failure：缺少 leader_update 时失败。
 
 |---|---|---|---|
 
-| 输出集合 | `shared.communication.outbox.p06` | 按 contract 类型 | 输出必须只由本节点或显式 joint commit owner 写入。 |
+| 输出集合 | `transient.communication.request.cooperation.*`；当前投影同时产出 `shared.communication.outbox.p06` 供 `communication.request.collect` 汇集 | 按 contract 类型 | 目标 contract 中输出必须进入统一通信请求集合，不直接绕过通信设备链路。 |
 
 
 
@@ -400,13 +400,13 @@ hard failure：缺少 leader_update 时失败。
 
 ### 回退策略
 
-skip/no-op：无同步消息时不写 outbox。
+skip/no-op：无同步消息时不写通信请求。
 
 
 
 ### 状态与保留
 
-不维护长期状态；outbox 由通信 dispatch 消费。
+不维护长期状态；通信请求由 `communication.request.collect` 消费。
 
 
 
@@ -430,7 +430,7 @@ skip/no-op：无同步消息时不写 outbox。
 
 |---|---|
 
-| 执行序号 | `02-ordered-execution.md` 中第 15 项为 `platform.cooperation.communication_record` |
+| 执行序号 | `02-ordered-execution.md` 中第 33 项为 `platform.cooperation.communication_record` |
 
 | Build | `xmake build test-l3-unified-entry` 通过 |
 
@@ -454,7 +454,7 @@ skip/no-op：无同步消息时不写 outbox。
 
 | 展示名 | 诱饵库存 |
 
-| 执行序号 | 16 |
+| 执行序号 | 34 |
 
 | 阶段 | Post-commit core chain |
 
@@ -528,7 +528,7 @@ no fallback：无有效输入时保持当前库存状态。
 
 |---|---|
 
-| 执行序号 | `02-ordered-execution.md` 中第 16 项为 `platform.decoy_inventory.update` |
+| 执行序号 | `02-ordered-execution.md` 中第 34 项为 `platform.decoy_inventory.update` |
 
 | Build | `xmake build test-l3-unified-entry` 通过 |
 
@@ -552,7 +552,7 @@ no fallback：无有效输入时保持当前库存状态。
 
 | 展示名 | 炮弹库存 |
 
-| 执行序号 | 17 |
+| 执行序号 | 35 |
 
 | 阶段 | Post-commit core chain |
 
@@ -626,7 +626,7 @@ no fallback：无有效输入时保持当前库存状态。
 
 |---|---|
 
-| 执行序号 | `02-ordered-execution.md` 中第 17 项为 `platform.bullet_inventory.update` |
+| 执行序号 | `02-ordered-execution.md` 中第 35 项为 `platform.bullet_inventory.update` |
 
 | Build | `xmake build test-l3-unified-entry` 通过 |
 
@@ -650,7 +650,7 @@ no fallback：无有效输入时保持当前库存状态。
 
 | 展示名 | 导弹库存 |
 
-| 执行序号 | 18 |
+| 执行序号 | 36 |
 
 | 阶段 | Post-commit core chain |
 
@@ -724,7 +724,7 @@ no fallback：无有效输入时保持当前库存状态。
 
 |---|---|
 
-| 执行序号 | `02-ordered-execution.md` 中第 18 项为 `platform.missile_inventory.update` |
+| 执行序号 | `02-ordered-execution.md` 中第 36 项为 `platform.missile_inventory.update` |
 
 | Build | `xmake build test-l3-unified-entry` 通过 |
 
@@ -748,7 +748,7 @@ no fallback：无有效输入时保持当前库存状态。
 
 | 展示名 | 弹药库存 |
 
-| 执行序号 | 19 |
+| 执行序号 | 37 |
 
 | 阶段 | Post-commit core chain |
 
@@ -822,7 +822,7 @@ no fallback：无有效输入时保持当前库存状态。
 
 |---|---|
 
-| 执行序号 | `02-ordered-execution.md` 中第 19 项为 `platform.ammunitor_inventory.update` |
+| 执行序号 | `02-ordered-execution.md` 中第 37 项为 `platform.ammunitor_inventory.update` |
 
 | Build | `xmake build test-l3-unified-entry` 通过 |
 
@@ -846,7 +846,7 @@ no fallback：无有效输入时保持当前库存状态。
 
 | 展示名 | 搭载库存 |
 
-| 执行序号 | 20 |
+| 执行序号 | 38 |
 
 | 阶段 | Post-commit core chain |
 
@@ -920,7 +920,7 @@ fixed implementation fallback：可向后续搭载监督提供 deploy handoff。
 
 |---|---|
 
-| 执行序号 | `02-ordered-execution.md` 中第 20 项为 `platform.carriee_inventory.update` |
+| 执行序号 | `02-ordered-execution.md` 中第 38 项为 `platform.carriee_inventory.update` |
 
 | Build | `xmake build test-l3-unified-entry` 通过 |
 
@@ -944,7 +944,7 @@ fixed implementation fallback：可向后续搭载监督提供 deploy handoff。
 
 | 展示名 | 搭载监督 |
 
-| 执行序号 | 21 |
+| 执行序号 | 39 |
 
 | 阶段 | Post-commit core chain |
 
@@ -1018,7 +1018,7 @@ fixed implementation fallback：无显式输入时可消费 搭载库存 handoff
 
 |---|---|
 
-| 执行序号 | `02-ordered-execution.md` 中第 21 项为 `platform.supervise_carriee.update` |
+| 执行序号 | `02-ordered-execution.md` 中第 39 项为 `platform.supervise_carriee.update` |
 
 | Build | `xmake build test-l3-unified-entry` 通过 |
 
@@ -1042,7 +1042,7 @@ fixed implementation fallback：无显式输入时可消费 搭载库存 handoff
 
 | 展示名 | 导弹监督 |
 
-| 执行序号 | 22 |
+| 执行序号 | 40 |
 
 | 阶段 | Post-commit core chain |
 
@@ -1116,7 +1116,7 @@ fixed implementation fallback：统一入口产生最小监督结构。
 
 |---|---|
 
-| 执行序号 | `02-ordered-execution.md` 中第 22 项为 `platform.supervise_missile.update` |
+| 执行序号 | `02-ordered-execution.md` 中第 40 项为 `platform.supervise_missile.update` |
 
 | Build | `xmake build test-l3-unified-entry` 通过 |
 
@@ -1140,7 +1140,7 @@ fixed implementation fallback：统一入口产生最小监督结构。
 
 | 展示名 | 炮弹监督 |
 
-| 执行序号 | 23 |
+| 执行序号 | 41 |
 
 | 阶段 | Post-commit core chain |
 
@@ -1214,7 +1214,7 @@ fixed implementation fallback：统一入口产生最小监督结构。
 
 |---|---|
 
-| 执行序号 | `02-ordered-execution.md` 中第 23 项为 `platform.supervise_canonball.update` |
+| 执行序号 | `02-ordered-execution.md` 中第 41 项为 `platform.supervise_canonball.update` |
 
 | Build | `xmake build test-l3-unified-entry` 通过 |
 
@@ -1238,7 +1238,7 @@ fixed implementation fallback：统一入口产生最小监督结构。
 
 | 展示名 | 归港维护 |
 
-| 执行序号 | 29 |
+| 执行序号 | 47 |
 
 | 阶段 | Post-commit core chain |
 
@@ -1312,7 +1312,7 @@ fixed implementation fallback。
 
 |---|---|
 
-| 执行序号 | `02-ordered-execution.md` 中第 29 项为 `platform.homeport.update` |
+| 执行序号 | `02-ordered-execution.md` 中第 47 项为 `platform.homeport.update` |
 
 | Build | `xmake build test-l3-unified-entry` 通过 |
 
@@ -1336,7 +1336,7 @@ fixed implementation fallback。
 
 | 展示名 | 通道监督 |
 
-| 执行序号 | 30 |
+| 执行序号 | 48 |
 
 | 阶段 | Post-commit core chain |
 
@@ -1380,7 +1380,7 @@ fixed implementation fallback。
 
 ### 回退策略
 
-fixed implementation fallback：无显式 通道监督 输入时可消费 launch supervision handoff。
+fixed implementation fallback：无显式 通道监督 输入时可消费 launch supervision handoff；如果没有显式输入、没有 handoff、也没有上一 tick 权威状态，则本节点不写 `shared.platform.superviseTunnel`。
 
 
 
@@ -1410,6 +1410,9 @@ fixed implementation fallback：无显式 通道监督 输入时可消费 launch
 
 |---|---|
 
-| 执行序号 | `02-ordered-execution.md` 中第 30 项为 `platform.supervise_tunnel.update` |
+| 执行序号 | `02-ordered-execution.md` 中第 48 项为 `platform.supervise_tunnel.update` |
 
 | Build | `xmake build test-l3-unified-entry` 通过 |
+
+
+

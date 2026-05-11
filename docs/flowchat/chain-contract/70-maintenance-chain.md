@@ -1,4 +1,4 @@
-# 维护与跟踪链路
+﻿# 维护与跟踪链路
 
 
 
@@ -14,15 +14,15 @@
 
 |---:|---|---|---|
 
-| 24 | 跟踪请求 | `platform.tracking_request.maintain` | `shared.platform.tracking_request_scope`、内存请求上下文 |
+| 42 | 跟踪请求 | `platform.tracking_request.maintain` | `shared.platform.tracking_request_scope`、内存请求上下文 |
 
-| 25 | 目标键维护 | `platform.tracking_target_key.maintain` | `shared.platform.tracking_target_key_set`、内存 key set |
+| 43 | 目标键维护 | `platform.tracking_target_key.maintain` | `shared.platform.tracking_target_key_set`、内存 key set |
 
-| 26 | 跟踪设备 | `platform.tracking_device.resolve` | 内存 `TrackingDeviceWorkingSnapshotState` |
+| 44 | 跟踪设备 | `platform.tracking_device.resolve` | 内存 `TrackingDeviceWorkingSnapshotState` |
 
-| 27 | 跟踪事实 | `platform.tracking_fact.resolve` | 内存 `TrackingFactInputState` |
+| 45 | 跟踪事实 | `platform.tracking_fact.resolve` | 内存 `TrackingFactInputState` |
 
-| 28 | 跟踪监督 | `platform.supervise_tracking.update` | `shared.platform.superviseTracking` |
+| 46 | 跟踪监督 | `platform.supervise_tracking.update` | `shared.platform.superviseTracking` |
 
 
 
@@ -44,7 +44,7 @@
 
 | 展示名 | 跟踪请求 |
 
-| 执行序号 | 24 |
+| 执行序号 | 42 |
 
 | 阶段 | Post-commit core chain |
 
@@ -118,7 +118,7 @@ fixed implementation fallback。
 
 |---|---|
 
-| 执行序号 | `02-ordered-execution.md` 中第 24 项为 `platform.tracking_request.maintain` |
+| 执行序号 | `02-ordered-execution.md` 中第 42 项为 `platform.tracking_request.maintain` |
 
 | Build | `xmake build test-l3-unified-entry` 通过 |
 
@@ -142,7 +142,7 @@ fixed implementation fallback。
 
 | 展示名 | 目标键维护 |
 
-| 执行序号 | 25 |
+| 执行序号 | 43 |
 
 | 阶段 | Post-commit core chain |
 
@@ -216,7 +216,7 @@ hard failure：缺少 request 节点时失败。
 
 |---|---|
 
-| 执行序号 | `02-ordered-execution.md` 中第 25 项为 `platform.tracking_target_key.maintain` |
+| 执行序号 | `02-ordered-execution.md` 中第 43 项为 `platform.tracking_target_key.maintain` |
 
 | Build | `xmake build test-l3-unified-entry` 通过 |
 
@@ -240,7 +240,7 @@ hard failure：缺少 request 节点时失败。
 
 | 展示名 | 跟踪设备 |
 
-| 执行序号 | 26 |
+| 执行序号 | 44 |
 
 | 阶段 | Post-commit core chain |
 
@@ -314,7 +314,7 @@ hard failure：缺少 target key 节点时失败。
 
 |---|---|
 
-| 执行序号 | `02-ordered-execution.md` 中第 26 项为 `platform.tracking_device.resolve` |
+| 执行序号 | `02-ordered-execution.md` 中第 44 项为 `platform.tracking_device.resolve` |
 
 | Build | `xmake build test-l3-unified-entry` 通过 |
 
@@ -338,7 +338,7 @@ hard failure：缺少 target key 节点时失败。
 
 | 展示名 | 跟踪事实 |
 
-| 执行序号 | 27 |
+| 执行序号 | 45 |
 
 | 阶段 | Post-commit core chain |
 
@@ -412,7 +412,7 @@ hard failure：缺少 device resolve 节点时失败。
 
 |---|---|
 
-| 执行序号 | `02-ordered-execution.md` 中第 27 项为 `platform.tracking_fact.resolve` |
+| 执行序号 | `02-ordered-execution.md` 中第 45 项为 `platform.tracking_fact.resolve` |
 
 | Build | `xmake build test-l3-unified-entry` 通过 |
 
@@ -436,7 +436,7 @@ hard failure：缺少 device resolve 节点时失败。
 
 | 展示名 | 跟踪监督 |
 
-| 执行序号 | 28 |
+| 执行序号 | 46 |
 
 | 阶段 | Post-commit core chain |
 
@@ -510,6 +510,7 @@ fixed implementation fallback。
 
 |---|---|
 
-| 执行序号 | `02-ordered-execution.md` 中第 28 项为 `platform.supervise_tracking.update` |
+| 执行序号 | `02-ordered-execution.md` 中第 46 项为 `platform.supervise_tracking.update` |
 
 | Build | `xmake build test-l3-unified-entry` 通过 |
+

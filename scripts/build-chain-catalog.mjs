@@ -44,7 +44,9 @@ const CHAIN_DOC_SLUGS = [
   "45-control-chain",
   "50-navigation-chain",
   "60-target-action-chain",
-  "70-maintenance-chain"
+  "65-strike-chain",
+  "70-maintenance-chain",
+  "75-communication-chain"
 ];
 
 /** Slugs of the extension/runtime docs. */
@@ -209,6 +211,31 @@ function parseOrderedExecution(text) {
     }));
 }
 
+/**
+ * Parse 01-overview.md → Map<displayName, docSlug>. The overview keeps the
+ * canonical doc-level grouping table, so when a chain doc lags behind and
+ * doesn't yet have a per-node section for a newly added canonical node, we
+ * can still recover the intended owner doc by looking up the display name.
+ */
+function parseOverviewGrouping(text) {
+  const lines = text.split(/\r?\n/);
+  const rows = findTable(lines, (cells) => {
+    if (cells.length < 4) return false;
+    return /分组/.test(cells[0]) && /文档/.test(cells[1]) && /范围/.test(cells[3]);
+  });
+  const out = new Map();
+  if (!rows) return out;
+  for (const r of rows) {
+    if (r.length < 4) continue;
+    if (/分组/.test(r[0]) || /^[-:\s|]+$/.test(r[0])) continue;
+    const docFile = unwrapCell(r[1]);
+    const docSlug = docFile.replace(/\.md$/, "");
+    const names = r[3].split(/[、,，]/).map((s) => s.trim()).filter(Boolean);
+    for (const name of names) out.set(name, docSlug);
+  }
+  return out;
+}
+
 /** Parse 04-display-names.md → Map<nodeId, displayName>. */
 function parseDisplayNames(text) {
   const lines = text.split(/\r?\n/);
@@ -370,6 +397,13 @@ async function main() {
     (await readDoc("04-display-names")).text
   );
 
+  // Doc-level grouping fallback: useful when a node id has been added to the
+  // canonical 02-ordered-execution list but the owning chain doc hasn't grown
+  // a per-node `## ` section for it yet.
+  const overviewOwnerByDisplayName = parseOverviewGrouping(
+    (await readDoc("01-overview")).text
+  );
+
   const allOrderedNodeIds = new Set(ordered.map((e) => e.nodeId));
 
   // Read all docs upfront.
@@ -404,23 +438,43 @@ async function main() {
     }
   }
 
-  // Verify every canonical node has a doc owner.
+  // Fall back to 01-overview.md's doc-level grouping when neither per-node
+  // sections nor chain-doc body mentions claim ownership. The display name in
+  // 01-overview's "范围" column is what we look up.
+  for (const entry of ordered) {
+    if (ownerByNodeId.has(entry.nodeId)) continue;
+    const displayName = displayNames.get(entry.nodeId) ?? entry.displayName;
+    const fromOverview = overviewOwnerByDisplayName.get(displayName);
+    if (fromOverview && CHAIN_DOC_SLUGS.includes(fromOverview)) {
+      ownerByNodeId.set(entry.nodeId, fromOverview);
+      // eslint-disable-next-line no-console
+      console.warn(
+        `chain-catalog: ${entry.nodeId} (${displayName}) inferred owner ${fromOverview} from 01-overview.md (chain doc lacks per-node section)`
+      );
+    }
+  }
+
+  // Anything still orphaned is a real docs gap — warn but keep building so the
+  // viewer can flag the node for the reader.
   const orphans = ordered.filter((e) => !ownerByNodeId.has(e.nodeId));
   if (orphans.length > 0) {
-    throw new Error(
-      `No chain doc owns these canonical nodes: ${orphans
+    // eslint-disable-next-line no-console
+    console.warn(
+      `chain-catalog: no chain doc owns these canonical nodes (will appear under "未归类"): ${orphans
         .map((e) => e.nodeId)
         .join(", ")}`
     );
   }
 
   // Build catalog structures.
+  const UNASSIGNED_SLUG = "_unassigned";
   const orderedEntries = ordered.map((e) => ({
     ...e,
-    docSlug: ownerByNodeId.get(e.nodeId),
+    docSlug: ownerByNodeId.get(e.nodeId) ?? UNASSIGNED_SLUG,
     // Prefer the cross-validated display name from 04-display-names.md.
     displayName: displayNames.get(e.nodeId) ?? e.displayName
   }));
+  const hasUnassigned = orderedEntries.some((e) => e.docSlug === UNASSIGNED_SLUG);
 
   const nodes = {};
   for (const entry of orderedEntries) {
@@ -435,22 +489,50 @@ async function main() {
     };
   }
 
-  // Build groups (one per chain doc, in canonical doc order).
-  const groups = CHAIN_DOC_SLUGS.map((slug) => {
+  // Build groups (one per chain doc, in canonical doc order). Synthesize an
+  // "未归类" group on top when there are orphans, so the reader can spot them
+  // without digging through the ordered execution list.
+  const groups = [];
+  if (hasUnassigned) {
+    groups.push({
+      id: UNASSIGNED_SLUG,
+      title: "未归类",
+      docSlug: UNASSIGNED_SLUG,
+      nodeIds: orderedEntries
+        .filter((e) => e.docSlug === UNASSIGNED_SLUG)
+        .sort((a, b) => a.order - b.order)
+        .map((e) => e.nodeId)
+    });
+  }
+  for (const slug of CHAIN_DOC_SLUGS) {
     const owned = orderedEntries
       .filter((e) => e.docSlug === slug)
       .sort((a, b) => a.order - b.order)
       .map((e) => e.nodeId);
-    return {
+    groups.push({
       id: slug.replace(/^\d+-/, ""),
       title: chainParsed[slug].title,
       docSlug: slug,
       nodeIds: owned
-    };
-  });
+    });
+  }
 
   // Build doc dictionary.
   const docs = {};
+  if (hasUnassigned) {
+    docs[UNASSIGNED_SLUG] = {
+      slug: UNASSIGNED_SLUG,
+      fileName: "",
+      title: "未归类节点",
+      summary:
+        "以下节点已在 02-ordered-execution.md / 04-display-names.md 中列出，但当前没有任何链路文档为其提供 ## 章节，01-overview.md 也未归入任一文档。请在对应链路文档中补充节点章节。",
+      markdown: "",
+      nodeIds: orderedEntries
+        .filter((e) => e.docSlug === UNASSIGNED_SLUG)
+        .sort((a, b) => a.order - b.order)
+        .map((e) => e.nodeId)
+    };
+  }
   for (const slug of [...FOUNDATION_SLUGS, ...CHAIN_DOC_SLUGS, ...EXTENSION_SLUGS]) {
     const { fileName, text } = all[slug];
     const titleMatch = /^#\s+(.+?)\s*$/m.exec(text);
