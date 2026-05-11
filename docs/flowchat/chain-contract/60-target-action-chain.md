@@ -1,14 +1,8 @@
 # 目标动作与协同链路
 
-
-
 ## 结论
 
-
-
 目标动作与协同链路覆盖协同消息、库存、发射/投放监督、通道监督和归港状态。
-
-
 
 | # | 展示名 | Node | Owner output |
 
@@ -42,17 +36,11 @@
 
 | 48 | 通道监督 | `platform.supervise_tunnel.update` | `shared.platform.superviseTunnel` |
 
-
-
 ## `platform.cooperation.message_sync`
-
-
 
 ### 目的
 
 归并当前步协同消息输入，形成本步同步消息上下文。
-
-
 
 ### 位置
 
@@ -70,8 +58,6 @@
 
 | 下游 | `platform.cooperation.leader_update` |
 
-
-
 ### 输入
 
 | Contract | 来源 | 是否必需 | 说明 |
@@ -80,8 +66,6 @@
 
 | 输入集合 | `current_rows` | 是 | 由统一入口按 ordered execution 准备。 |
 
-
-
 ### 输出
 
 | Contract | 目标 | 生命周期 | 说明 |
@@ -89,8 +73,6 @@
 |---|---|---|---|
 
 | 输出集合 | 内存 `p06_message_sync_state`、内存同步消息 | 按 contract 类型 | 输出必须只由本节点或显式 joint commit owner 写入。 |
-
-
 
 ### 运行时契约
 
@@ -102,19 +84,13 @@
 
 - @failure: 必要输入缺失、输出指针为空或 executor 失败时，按回退策略处理并更新 `last_lifecycle_error_`。
 
-
-
 ### 回退策略
 
 no fallback：失败或无输入时不产生新的同步消息。
 
-
-
 ### 状态与保留
 
 只维护当前步内存上下文。
-
-
 
 ### 实现映射
 
@@ -128,8 +104,6 @@ no fallback：失败或无输入时不产生新的同步消息。
 
 | Header contract | `D:\Tinder\Model\Model-P-v2\include\model_p_v2\l3\unified\unified_model_entry.h` |
 
-
-
 ### 验证
 
 | 检查项 | 期望结果 |
@@ -140,17 +114,11 @@ no fallback：失败或无输入时不产生新的同步消息。
 
 | Build | `xmake build test-l3-unified-entry` 通过 |
 
-
-
 ## `platform.cooperation.leader_update`
-
-
 
 ### 目的
 
 基于协同消息更新队形或编队 leader 信息。
-
-
 
 ### 位置
 
@@ -168,8 +136,6 @@ no fallback：失败或无输入时不产生新的同步消息。
 
 | 下游 | `platform.cooperation.member_update` |
 
-
-
 ### 输入
 
 | Contract | 来源 | 是否必需 | 说明 |
@@ -178,8 +144,6 @@ no fallback：失败或无输入时不产生新的同步消息。
 
 | 输入集合 | 内存 `p06_message_sync_state`、`current_rows` | 是 | 由统一入口按 ordered execution 准备。 |
 
-
-
 ### 输出
 
 | Contract | 目标 | 生命周期 | 说明 |
@@ -187,8 +151,6 @@ no fallback：失败或无输入时不产生新的同步消息。
 |---|---|---|---|
 
 | 输出集合 | 内存 `p06_leader_state` | 按 contract 类型 | 输出必须只由本节点或显式 joint commit owner 写入。 |
-
-
 
 ### 运行时契约
 
@@ -200,19 +162,13 @@ no fallback：失败或无输入时不产生新的同步消息。
 
 - @failure: 必要输入缺失、输出指针为空或 executor 失败时，按回退策略处理并更新 `last_lifecycle_error_`。
 
-
-
 ### 回退策略
 
 hard failure：缺少 message_sync 时失败。
 
-
-
 ### 状态与保留
 
 只维护当前步 leader 中间态。
-
-
 
 ### 实现映射
 
@@ -226,8 +182,6 @@ hard failure：缺少 message_sync 时失败。
 
 | Header contract | `D:\Tinder\Model\Model-P-v2\include\model_p_v2\l3\unified\unified_model_entry.h` |
 
-
-
 ### 验证
 
 | 检查项 | 期望结果 |
@@ -238,17 +192,11 @@ hard failure：缺少 message_sync 时失败。
 
 | Build | `xmake build test-l3-unified-entry` 通过 |
 
-
-
 ## `platform.cooperation.member_update`
-
-
 
 ### 目的
 
 基于 leader 状态更新成员关系并提交协同权威行。
-
-
 
 ### 位置
 
@@ -266,8 +214,6 @@ hard failure：缺少 message_sync 时失败。
 
 | 下游 | `platform.cooperation.communication_record` |
 
-
-
 ### 输入
 
 | Contract | 来源 | 是否必需 | 说明 |
@@ -276,8 +222,6 @@ hard failure：缺少 message_sync 时失败。
 
 | 输入集合 | 内存 `p06_leader_state`、`current_rows` | 是 | 由统一入口按 ordered execution 准备。 |
 
-
-
 ### 输出
 
 | Contract | 目标 | 生命周期 | 说明 |
@@ -285,8 +229,6 @@ hard failure：缺少 message_sync 时失败。
 |---|---|---|---|
 
 | 输出集合 | `shared.platform.cooperation`、内存 `p06_member_state` | 按 contract 类型 | 输出必须只由本节点或显式 joint commit owner 写入。 |
-
-
 
 ### 运行时契约
 
@@ -298,19 +240,13 @@ hard failure：缺少 message_sync 时失败。
 
 - @failure: 必要输入缺失、输出指针为空或 executor 失败时，按回退策略处理并更新 `last_lifecycle_error_`。
 
-
-
 ### 回退策略
 
 hard failure：缺少 leader_update 时失败。
 
-
-
 ### 状态与保留
 
 维护 `cooperation_state_`。
-
-
 
 ### 实现映射
 
@@ -324,8 +260,6 @@ hard failure：缺少 leader_update 时失败。
 
 | Header contract | `D:\Tinder\Model\Model-P-v2\include\model_p_v2\l3\unified\unified_model_entry.h` |
 
-
-
 ### 验证
 
 | 检查项 | 期望结果 |
@@ -336,17 +270,11 @@ hard failure：缺少 leader_update 时失败。
 
 | Build | `xmake build test-l3-unified-entry` 通过 |
 
-
-
 ## `platform.cooperation.communication_record`
-
-
 
 ### 目的
 
 将需要跨平台同步的协同消息转为统一通信请求。当前实现产出 `shared.communication.outbox.p06`，并由 `communication.request.collect` 在发送后段统一收口；后续可进一步收敛为直接产出 `transient.communication.request.cooperation.*`。
-
-
 
 ### 位置
 
@@ -364,8 +292,6 @@ hard failure：缺少 leader_update 时失败。
 
 | 下游 | `platform.decoy_inventory.update` |
 
-
-
 ### 输入
 
 | Contract | 来源 | 是否必需 | 说明 |
@@ -374,8 +300,6 @@ hard failure：缺少 leader_update 时失败。
 
 | 输入集合 | 内存 `p06_member_state`、同步消息 | 是 | 由统一入口按 ordered execution 准备。 |
 
-
-
 ### 输出
 
 | Contract | 目标 | 生命周期 | 说明 |
@@ -383,8 +307,6 @@ hard failure：缺少 leader_update 时失败。
 |---|---|---|---|
 
 | 输出集合 | `transient.communication.request.cooperation.*`；当前投影同时产出 `shared.communication.outbox.p06` 供 `communication.request.collect` 汇集 | 按 contract 类型 | 目标 contract 中输出必须进入统一通信请求集合，不直接绕过通信设备链路。 |
-
-
 
 ### 运行时契约
 
@@ -396,19 +318,13 @@ hard failure：缺少 leader_update 时失败。
 
 - @failure: 必要输入缺失、输出指针为空或 executor 失败时，按回退策略处理并更新 `last_lifecycle_error_`。
 
-
-
 ### 回退策略
 
 skip/no-op：无同步消息时不写通信请求。
 
-
-
 ### 状态与保留
 
 不维护长期状态；通信请求由 `communication.request.collect` 消费。
-
-
 
 ### 实现映射
 
@@ -422,8 +338,6 @@ skip/no-op：无同步消息时不写通信请求。
 
 | Header contract | `D:\Tinder\Model\Model-P-v2\include\model_p_v2\l3\unified\unified_model_entry.h` |
 
-
-
 ### 验证
 
 | 检查项 | 期望结果 |
@@ -434,17 +348,11 @@ skip/no-op：无同步消息时不写通信请求。
 
 | Build | `xmake build test-l3-unified-entry` 通过 |
 
-
-
 ## `platform.decoy_inventory.update`
-
-
 
 ### 目的
 
 维护诱饵库存数量和定义引用。
-
-
 
 ### 位置
 
@@ -462,8 +370,6 @@ skip/no-op：无同步消息时不写通信请求。
 
 | 下游 | `platform.bullet_inventory.update` |
 
-
-
 ### 输入
 
 | Contract | 来源 | 是否必需 | 说明 |
@@ -472,8 +378,6 @@ skip/no-op：无同步消息时不写通信请求。
 
 | 输入集合 | `current_rows`、`previous_shared_rows` | 是 | 由统一入口按 ordered execution 准备。 |
 
-
-
 ### 输出
 
 | Contract | 目标 | 生命周期 | 说明 |
@@ -481,8 +385,6 @@ skip/no-op：无同步消息时不写通信请求。
 |---|---|---|---|
 
 | 输出集合 | `shared.platform.decoy` | 按 contract 类型 | 输出必须只由本节点或显式 joint commit owner 写入。 |
-
-
 
 ### 运行时契约
 
@@ -494,19 +396,13 @@ skip/no-op：无同步消息时不写通信请求。
 
 - @failure: 必要输入缺失、输出指针为空或 executor 失败时，按回退策略处理并更新 `last_lifecycle_error_`。
 
-
-
 ### 回退策略
 
 no fallback：无有效输入时保持当前库存状态。
 
-
-
 ### 状态与保留
 
 维护 `decoy_state_`。
-
-
 
 ### 实现映射
 
@@ -520,8 +416,6 @@ no fallback：无有效输入时保持当前库存状态。
 
 | Header contract | `D:\Tinder\Model\Model-P-v2\include\model_p_v2\l3\unified\unified_model_entry.h` |
 
-
-
 ### 验证
 
 | 检查项 | 期望结果 |
@@ -532,17 +426,11 @@ no fallback：无有效输入时保持当前库存状态。
 
 | Build | `xmake build test-l3-unified-entry` 通过 |
 
-
-
 ## `platform.bullet_inventory.update`
-
-
 
 ### 目的
 
 维护炮弹库存数量和定义引用。
-
-
 
 ### 位置
 
@@ -560,8 +448,6 @@ no fallback：无有效输入时保持当前库存状态。
 
 | 下游 | `platform.missile_inventory.update` |
 
-
-
 ### 输入
 
 | Contract | 来源 | 是否必需 | 说明 |
@@ -570,8 +456,6 @@ no fallback：无有效输入时保持当前库存状态。
 
 | 输入集合 | `current_rows`、`previous_shared_rows` | 是 | 由统一入口按 ordered execution 准备。 |
 
-
-
 ### 输出
 
 | Contract | 目标 | 生命周期 | 说明 |
@@ -579,8 +463,6 @@ no fallback：无有效输入时保持当前库存状态。
 |---|---|---|---|
 
 | 输出集合 | `shared.platform.bullet` | 按 contract 类型 | 输出必须只由本节点或显式 joint commit owner 写入。 |
-
-
 
 ### 运行时契约
 
@@ -592,19 +474,13 @@ no fallback：无有效输入时保持当前库存状态。
 
 - @failure: 必要输入缺失、输出指针为空或 executor 失败时，按回退策略处理并更新 `last_lifecycle_error_`。
 
-
-
 ### 回退策略
 
 no fallback：无有效输入时保持当前库存状态。
 
-
-
 ### 状态与保留
 
 维护 `bullet_state_`。
-
-
 
 ### 实现映射
 
@@ -618,8 +494,6 @@ no fallback：无有效输入时保持当前库存状态。
 
 | Header contract | `D:\Tinder\Model\Model-P-v2\include\model_p_v2\l3\unified\unified_model_entry.h` |
 
-
-
 ### 验证
 
 | 检查项 | 期望结果 |
@@ -630,17 +504,11 @@ no fallback：无有效输入时保持当前库存状态。
 
 | Build | `xmake build test-l3-unified-entry` 通过 |
 
-
-
 ## `platform.missile_inventory.update`
-
-
 
 ### 目的
 
 维护导弹库存数量和定义引用。
-
-
 
 ### 位置
 
@@ -658,8 +526,6 @@ no fallback：无有效输入时保持当前库存状态。
 
 | 下游 | `platform.ammunitor_inventory.update` |
 
-
-
 ### 输入
 
 | Contract | 来源 | 是否必需 | 说明 |
@@ -668,8 +534,6 @@ no fallback：无有效输入时保持当前库存状态。
 
 | 输入集合 | `current_rows`、`previous_shared_rows` | 是 | 由统一入口按 ordered execution 准备。 |
 
-
-
 ### 输出
 
 | Contract | 目标 | 生命周期 | 说明 |
@@ -677,8 +541,6 @@ no fallback：无有效输入时保持当前库存状态。
 |---|---|---|---|
 
 | 输出集合 | `shared.platform.missile` | 按 contract 类型 | 输出必须只由本节点或显式 joint commit owner 写入。 |
-
-
 
 ### 运行时契约
 
@@ -690,19 +552,13 @@ no fallback：无有效输入时保持当前库存状态。
 
 - @failure: 必要输入缺失、输出指针为空或 executor 失败时，按回退策略处理并更新 `last_lifecycle_error_`。
 
-
-
 ### 回退策略
 
 no fallback：无有效输入时保持当前库存状态。
 
-
-
 ### 状态与保留
 
 维护 `missile_state_`。
-
-
 
 ### 实现映射
 
@@ -716,8 +572,6 @@ no fallback：无有效输入时保持当前库存状态。
 
 | Header contract | `D:\Tinder\Model\Model-P-v2\include\model_p_v2\l3\unified\unified_model_entry.h` |
 
-
-
 ### 验证
 
 | 检查项 | 期望结果 |
@@ -728,17 +582,11 @@ no fallback：无有效输入时保持当前库存状态。
 
 | Build | `xmake build test-l3-unified-entry` 通过 |
 
-
-
 ## `platform.ammunitor_inventory.update`
-
-
 
 ### 目的
 
 维护弹药补给或装填相关库存。
-
-
 
 ### 位置
 
@@ -756,8 +604,6 @@ no fallback：无有效输入时保持当前库存状态。
 
 | 下游 | `platform.carriee_inventory.update` |
 
-
-
 ### 输入
 
 | Contract | 来源 | 是否必需 | 说明 |
@@ -766,8 +612,6 @@ no fallback：无有效输入时保持当前库存状态。
 
 | 输入集合 | `current_rows`、`previous_shared_rows` | 是 | 由统一入口按 ordered execution 准备。 |
 
-
-
 ### 输出
 
 | Contract | 目标 | 生命周期 | 说明 |
@@ -775,8 +619,6 @@ no fallback：无有效输入时保持当前库存状态。
 |---|---|---|---|
 
 | 输出集合 | `shared.platform.ammunitor` | 按 contract 类型 | 输出必须只由本节点或显式 joint commit owner 写入。 |
-
-
 
 ### 运行时契约
 
@@ -788,19 +630,13 @@ no fallback：无有效输入时保持当前库存状态。
 
 - @failure: 必要输入缺失、输出指针为空或 executor 失败时，按回退策略处理并更新 `last_lifecycle_error_`。
 
-
-
 ### 回退策略
 
 no fallback：无有效输入时保持当前库存状态。
 
-
-
 ### 状态与保留
 
 维护 `ammunitor_state_`。
-
-
 
 ### 实现映射
 
@@ -814,8 +650,6 @@ no fallback：无有效输入时保持当前库存状态。
 
 | Header contract | `D:\Tinder\Model\Model-P-v2\include\model_p_v2\l3\unified\unified_model_entry.h` |
 
-
-
 ### 验证
 
 | 检查项 | 期望结果 |
@@ -826,17 +660,11 @@ no fallback：无有效输入时保持当前库存状态。
 
 | Build | `xmake build test-l3-unified-entry` 通过 |
 
-
-
 ## `platform.carriee_inventory.update`
-
-
 
 ### 目的
 
 维护搭载或投放对象库存，并记录引擎创建结果。
-
-
 
 ### 位置
 
@@ -854,8 +682,6 @@ no fallback：无有效输入时保持当前库存状态。
 
 | 下游 | `platform.supervise_carriee.update` |
 
-
-
 ### 输入
 
 | Contract | 来源 | 是否必需 | 说明 |
@@ -864,8 +690,6 @@ no fallback：无有效输入时保持当前库存状态。
 
 | 输入集合 | `current_rows`、`previous_shared_rows` | 是 | 由统一入口按 ordered execution 准备。 |
 
-
-
 ### 输出
 
 | Contract | 目标 | 生命周期 | 说明 |
@@ -873,8 +697,6 @@ no fallback：无有效输入时保持当前库存状态。
 |---|---|---|---|
 
 | 输出集合 | `shared.platform.carriee` | 按 contract 类型 | 输出必须只由本节点或显式 joint commit owner 写入。 |
-
-
 
 ### 运行时契约
 
@@ -886,19 +708,13 @@ no fallback：无有效输入时保持当前库存状态。
 
 - @failure: 必要输入缺失、输出指针为空或 executor 失败时，按回退策略处理并更新 `last_lifecycle_error_`。
 
-
-
 ### 回退策略
 
 fixed implementation fallback：可向后续搭载监督提供 deploy handoff。
 
-
-
 ### 状态与保留
 
 维护 `carriee_state_` 与本步 handoff。
-
-
 
 ### 实现映射
 
@@ -912,8 +728,6 @@ fixed implementation fallback：可向后续搭载监督提供 deploy handoff。
 
 | Header contract | `D:\Tinder\Model\Model-P-v2\include\model_p_v2\l3\unified\unified_model_entry.h` |
 
-
-
 ### 验证
 
 | 检查项 | 期望结果 |
@@ -924,17 +738,11 @@ fixed implementation fallback：可向后续搭载监督提供 deploy handoff。
 
 | Build | `xmake build test-l3-unified-entry` 通过 |
 
-
-
 ## `platform.supervise_carriee.update`
-
-
 
 ### 目的
 
 维护搭载对象投放、回收和监督状态。
-
-
 
 ### 位置
 
@@ -952,8 +760,6 @@ fixed implementation fallback：可向后续搭载监督提供 deploy handoff。
 
 | 下游 | `platform.supervise_missile.update` |
 
-
-
 ### 输入
 
 | Contract | 来源 | 是否必需 | 说明 |
@@ -962,8 +768,6 @@ fixed implementation fallback：可向后续搭载监督提供 deploy handoff。
 
 | 输入集合 | `current_rows`、`previous_shared_rows`、搭载库存 handoff | 是 | 由统一入口按 ordered execution 准备。 |
 
-
-
 ### 输出
 
 | Contract | 目标 | 生命周期 | 说明 |
@@ -971,8 +775,6 @@ fixed implementation fallback：可向后续搭载监督提供 deploy handoff。
 |---|---|---|---|
 
 | 输出集合 | `shared.platform.superviseCarriee` | 按 contract 类型 | 输出必须只由本节点或显式 joint commit owner 写入。 |
-
-
 
 ### 运行时契约
 
@@ -984,19 +786,13 @@ fixed implementation fallback：可向后续搭载监督提供 deploy handoff。
 
 - @failure: 必要输入缺失、输出指针为空或 executor 失败时，按回退策略处理并更新 `last_lifecycle_error_`。
 
-
-
 ### 回退策略
 
 fixed implementation fallback：无显式输入时可消费 搭载库存 handoff。
 
-
-
 ### 状态与保留
 
 维护 `carriee_supervision_state_`。
-
-
 
 ### 实现映射
 
@@ -1010,8 +806,6 @@ fixed implementation fallback：无显式输入时可消费 搭载库存 handoff
 
 | Header contract | `D:\Tinder\Model\Model-P-v2\include\model_p_v2\l3\unified\unified_model_entry.h` |
 
-
-
 ### 验证
 
 | 检查项 | 期望结果 |
@@ -1022,17 +816,11 @@ fixed implementation fallback：无显式输入时可消费 搭载库存 handoff
 
 | Build | `xmake build test-l3-unified-entry` 通过 |
 
-
-
 ## `platform.supervise_missile.update`
-
-
 
 ### 目的
 
 维护导弹发射监督状态，并将发射伴随事实交给 通道监督。
-
-
 
 ### 位置
 
@@ -1050,8 +838,6 @@ fixed implementation fallback：无显式输入时可消费 搭载库存 handoff
 
 | 下游 | `platform.supervise_canonball.update` |
 
-
-
 ### 输入
 
 | Contract | 来源 | 是否必需 | 说明 |
@@ -1060,8 +846,6 @@ fixed implementation fallback：无显式输入时可消费 搭载库存 handoff
 
 | 输入集合 | `current_rows`、`previous_shared_rows` | 是 | 由统一入口按 ordered execution 准备。 |
 
-
-
 ### 输出
 
 | Contract | 目标 | 生命周期 | 说明 |
@@ -1069,8 +853,6 @@ fixed implementation fallback：无显式输入时可消费 搭载库存 handoff
 |---|---|---|---|
 
 | 输出集合 | `shared.platform.superviseMissile`、通道监督 launch handoff | 按 contract 类型 | 输出必须只由本节点或显式 joint commit owner 写入。 |
-
-
 
 ### 运行时契约
 
@@ -1082,19 +864,13 @@ fixed implementation fallback：无显式输入时可消费 搭载库存 handoff
 
 - @failure: 必要输入缺失、输出指针为空或 executor 失败时，按回退策略处理并更新 `last_lifecycle_error_`。
 
-
-
 ### 回退策略
 
 fixed implementation fallback：统一入口产生最小监督结构。
 
-
-
 ### 状态与保留
 
 维护 `missile_supervision_state_`。
-
-
 
 ### 实现映射
 
@@ -1108,8 +884,6 @@ fixed implementation fallback：统一入口产生最小监督结构。
 
 | Header contract | `D:\Tinder\Model\Model-P-v2\include\model_p_v2\l3\unified\unified_model_entry.h` |
 
-
-
 ### 验证
 
 | 检查项 | 期望结果 |
@@ -1120,17 +894,11 @@ fixed implementation fallback：统一入口产生最小监督结构。
 
 | Build | `xmake build test-l3-unified-entry` 通过 |
 
-
-
 ## `platform.supervise_canonball.update`
-
-
 
 ### 目的
 
 维护炮弹发射监督状态，并将发射伴随事实交给 通道监督。
-
-
 
 ### 位置
 
@@ -1148,8 +916,6 @@ fixed implementation fallback：统一入口产生最小监督结构。
 
 | 下游 | `platform.tracking_request.maintain` |
 
-
-
 ### 输入
 
 | Contract | 来源 | 是否必需 | 说明 |
@@ -1158,8 +924,6 @@ fixed implementation fallback：统一入口产生最小监督结构。
 
 | 输入集合 | `current_rows`、`previous_shared_rows` | 是 | 由统一入口按 ordered execution 准备。 |
 
-
-
 ### 输出
 
 | Contract | 目标 | 生命周期 | 说明 |
@@ -1167,8 +931,6 @@ fixed implementation fallback：统一入口产生最小监督结构。
 |---|---|---|---|
 
 | 输出集合 | `shared.platform.superviseCanonball`、通道监督 launch handoff | 按 contract 类型 | 输出必须只由本节点或显式 joint commit owner 写入。 |
-
-
 
 ### 运行时契约
 
@@ -1180,19 +942,13 @@ fixed implementation fallback：统一入口产生最小监督结构。
 
 - @failure: 必要输入缺失、输出指针为空或 executor 失败时，按回退策略处理并更新 `last_lifecycle_error_`。
 
-
-
 ### 回退策略
 
 fixed implementation fallback：统一入口产生最小监督结构。
 
-
-
 ### 状态与保留
 
 维护 `canonball_supervision_state_`。
-
-
 
 ### 实现映射
 
@@ -1206,8 +962,6 @@ fixed implementation fallback：统一入口产生最小监督结构。
 
 | Header contract | `D:\Tinder\Model\Model-P-v2\include\model_p_v2\l3\unified\unified_model_entry.h` |
 
-
-
 ### 验证
 
 | 检查项 | 期望结果 |
@@ -1218,17 +972,11 @@ fixed implementation fallback：统一入口产生最小监督结构。
 
 | Build | `xmake build test-l3-unified-entry` 通过 |
 
-
-
 ## `platform.homeport.update`
-
-
 
 ### 目的
 
 维护归港和母港相关平台状态。
-
-
 
 ### 位置
 
@@ -1246,8 +994,6 @@ fixed implementation fallback：统一入口产生最小监督结构。
 
 | 下游 | `platform.supervise_tunnel.update` |
 
-
-
 ### 输入
 
 | Contract | 来源 | 是否必需 | 说明 |
@@ -1256,8 +1002,6 @@ fixed implementation fallback：统一入口产生最小监督结构。
 
 | 输入集合 | `current_rows`、`previous_shared_rows` | 是 | 由统一入口按 ordered execution 准备。 |
 
-
-
 ### 输出
 
 | Contract | 目标 | 生命周期 | 说明 |
@@ -1265,8 +1009,6 @@ fixed implementation fallback：统一入口产生最小监督结构。
 |---|---|---|---|
 
 | 输出集合 | `shared.platform.homeport` | 按 contract 类型 | 输出必须只由本节点或显式 joint commit owner 写入。 |
-
-
 
 ### 运行时契约
 
@@ -1278,19 +1020,13 @@ fixed implementation fallback：统一入口产生最小监督结构。
 
 - @failure: 必要输入缺失、输出指针为空或 executor 失败时，按回退策略处理并更新 `last_lifecycle_error_`。
 
-
-
 ### 回退策略
 
 fixed implementation fallback。
 
-
-
 ### 状态与保留
 
 维护 `homeport_state_`。
-
-
 
 ### 实现映射
 
@@ -1304,8 +1040,6 @@ fixed implementation fallback。
 
 | Header contract | `D:\Tinder\Model\Model-P-v2\include\model_p_v2\l3\unified\unified_model_entry.h` |
 
-
-
 ### 验证
 
 | 检查项 | 期望结果 |
@@ -1316,17 +1050,11 @@ fixed implementation fallback。
 
 | Build | `xmake build test-l3-unified-entry` 通过 |
 
-
-
 ## `platform.supervise_tunnel.update`
-
-
 
 ### 目的
 
 维护通道或管道类执行监督状态，是 channel state 的唯一权威写入节点。
-
-
 
 ### 位置
 
@@ -1344,8 +1072,6 @@ fixed implementation fallback。
 
 | 下游 | `platform.status.update` |
 
-
-
 ### 输入
 
 | Contract | 来源 | 是否必需 | 说明 |
@@ -1354,8 +1080,6 @@ fixed implementation fallback。
 
 | 输入集合 | `current_rows`、`previous_shared_rows`、导弹监督/炮弹监督 launch handoff | 是 | 由统一入口按 ordered execution 准备。 |
 
-
-
 ### 输出
 
 | Contract | 目标 | 生命周期 | 说明 |
@@ -1363,8 +1087,6 @@ fixed implementation fallback。
 |---|---|---|---|
 
 | 输出集合 | `shared.platform.superviseTunnel` | 按 contract 类型 | 输出必须只由本节点或显式 joint commit owner 写入。 |
-
-
 
 ### 运行时契约
 
@@ -1376,19 +1098,13 @@ fixed implementation fallback。
 
 - @failure: 必要输入缺失、输出指针为空或 executor 失败时，按回退策略处理并更新 `last_lifecycle_error_`。
 
-
-
 ### 回退策略
 
 fixed implementation fallback：无显式 通道监督 输入时可消费 launch supervision handoff；如果没有显式输入、没有 handoff、也没有上一 tick 权威状态，则本节点不写 `shared.platform.superviseTunnel`。
 
-
-
 ### 状态与保留
 
 维护 `tunnel_state_`；每步清理 handoff 标记。
-
-
 
 ### 实现映射
 
@@ -1402,8 +1118,6 @@ fixed implementation fallback：无显式 通道监督 输入时可消费 launch
 
 | Header contract | `D:\Tinder\Model\Model-P-v2\include\model_p_v2\l3\unified\unified_model_entry.h` |
 
-
-
 ### 验证
 
 | 检查项 | 期望结果 |
@@ -1413,6 +1127,3 @@ fixed implementation fallback：无显式 通道监督 输入时可消费 launch
 | 执行序号 | `02-ordered-execution.md` 中第 48 项为 `platform.supervise_tunnel.update` |
 
 | Build | `xmake build test-l3-unified-entry` 通过 |
-
-
-

@@ -1,14 +1,8 @@
-﻿# 维护与跟踪链路
-
-
+# 维护与跟踪链路
 
 ## 结论
 
-
-
 维护与跟踪链路当前聚焦 跟踪链路：跟踪请求、目标 key、设备快照、事实解析和最终监督更新。
-
-
 
 | # | 展示名 | Node | Owner output |
 
@@ -24,17 +18,11 @@
 
 | 46 | 跟踪监督 | `platform.supervise_tracking.update` | `shared.platform.superviseTracking` |
 
-
-
 ## `platform.tracking_request.maintain`
-
-
 
 ### 目的
 
 维护跟踪请求范围、目标类型和锁定增量。
-
-
 
 ### 位置
 
@@ -52,8 +40,6 @@
 
 | 下游 | `platform.tracking_target_key.maintain` |
 
-
-
 ### 输入
 
 | Contract | 来源 | 是否必需 | 说明 |
@@ -62,8 +48,6 @@
 
 | 输入集合 | `current_rows` | 是 | 由统一入口按 ordered execution 准备。 |
 
-
-
 ### 输出
 
 | Contract | 目标 | 生命周期 | 说明 |
@@ -71,8 +55,6 @@
 |---|---|---|---|
 
 | 输出集合 | `shared.platform.tracking_request_scope`、内存请求上下文 | 按 contract 类型 | 输出必须只由本节点或显式 joint commit owner 写入。 |
-
-
 
 ### 运行时契约
 
@@ -84,19 +66,13 @@
 
 - @failure: 必要输入缺失、输出指针为空或 executor 失败时，按回退策略处理并更新 `last_lifecycle_error_`。
 
-
-
 ### 回退策略
 
 fixed implementation fallback。
 
-
-
 ### 状态与保留
 
 维护 `tracking_request_scope_state_`。
-
-
 
 ### 实现映射
 
@@ -110,8 +86,6 @@ fixed implementation fallback。
 
 | Header contract | `D:\Tinder\Model\Model-P-v2\include\model_p_v2\l3\unified\unified_model_entry.h` |
 
-
-
 ### 验证
 
 | 检查项 | 期望结果 |
@@ -122,17 +96,11 @@ fixed implementation fallback。
 
 | Build | `xmake build test-l3-unified-entry` 通过 |
 
-
-
 ## `platform.tracking_target_key.maintain`
-
-
 
 ### 目的
 
 维护需要跟踪的目标 key 集合。
-
-
 
 ### 位置
 
@@ -150,8 +118,6 @@ fixed implementation fallback。
 
 | 下游 | `platform.tracking_device.resolve` |
 
-
-
 ### 输入
 
 | Contract | 来源 | 是否必需 | 说明 |
@@ -160,8 +126,6 @@ fixed implementation fallback。
 
 | 输入集合 | 内存 tracking request、目标类型、事实引用来源 | 是 | 由统一入口按 ordered execution 准备。 |
 
-
-
 ### 输出
 
 | Contract | 目标 | 生命周期 | 说明 |
@@ -169,8 +133,6 @@ fixed implementation fallback。
 |---|---|---|---|
 
 | 输出集合 | `shared.platform.tracking_target_key_set`、内存 key set | 按 contract 类型 | 输出必须只由本节点或显式 joint commit owner 写入。 |
-
-
 
 ### 运行时契约
 
@@ -182,19 +144,13 @@ fixed implementation fallback。
 
 - @failure: 必要输入缺失、输出指针为空或 executor 失败时，按回退策略处理并更新 `last_lifecycle_error_`。
 
-
-
 ### 回退策略
 
 hard failure：缺少 request 节点时失败。
 
-
-
 ### 状态与保留
 
 维护 `tracking_target_key_set_state_`。
-
-
 
 ### 实现映射
 
@@ -208,8 +164,6 @@ hard failure：缺少 request 节点时失败。
 
 | Header contract | `D:\Tinder\Model\Model-P-v2\include\model_p_v2\l3\unified\unified_model_entry.h` |
 
-
-
 ### 验证
 
 | 检查项 | 期望结果 |
@@ -220,17 +174,11 @@ hard failure：缺少 request 节点时失败。
 
 | Build | `xmake build test-l3-unified-entry` 通过 |
 
-
-
 ## `platform.tracking_device.resolve`
-
-
 
 ### 目的
 
 解析参与跟踪的设备快照。
-
-
 
 ### 位置
 
@@ -248,8 +196,6 @@ hard failure：缺少 request 节点时失败。
 
 | 下游 | `platform.tracking_fact.resolve` |
 
-
-
 ### 输入
 
 | Contract | 来源 | 是否必需 | 说明 |
@@ -258,8 +204,6 @@ hard failure：缺少 request 节点时失败。
 
 | 输入集合 | 内存 tracking request、当前设备状态 | 是 | 由统一入口按 ordered execution 准备。 |
 
-
-
 ### 输出
 
 | Contract | 目标 | 生命周期 | 说明 |
@@ -267,8 +211,6 @@ hard failure：缺少 request 节点时失败。
 |---|---|---|---|
 
 | 输出集合 | 内存 `TrackingDeviceWorkingSnapshotState` | 按 contract 类型 | 输出必须只由本节点或显式 joint commit owner 写入。 |
-
-
 
 ### 运行时契约
 
@@ -280,19 +222,13 @@ hard failure：缺少 request 节点时失败。
 
 - @failure: 必要输入缺失、输出指针为空或 executor 失败时，按回退策略处理并更新 `last_lifecycle_error_`。
 
-
-
 ### 回退策略
 
 hard failure：缺少 target key 节点时失败。
 
-
-
 ### 状态与保留
 
 不直接写 `shared.*`。
-
-
 
 ### 实现映射
 
@@ -306,8 +242,6 @@ hard failure：缺少 target key 节点时失败。
 
 | Header contract | `D:\Tinder\Model\Model-P-v2\include\model_p_v2\l3\unified\unified_model_entry.h` |
 
-
-
 ### 验证
 
 | 检查项 | 期望结果 |
@@ -318,17 +252,11 @@ hard failure：缺少 target key 节点时失败。
 
 | Build | `xmake build test-l3-unified-entry` 通过 |
 
-
-
 ## `platform.tracking_fact.resolve`
-
-
 
 ### 目的
 
 把感知事实和跟踪请求对齐为监督输入。
-
-
 
 ### 位置
 
@@ -346,8 +274,6 @@ hard failure：缺少 target key 节点时失败。
 
 | 下游 | `platform.supervise_tracking.update` |
 
-
-
 ### 输入
 
 | Contract | 来源 | 是否必需 | 说明 |
@@ -356,8 +282,6 @@ hard failure：缺少 target key 节点时失败。
 
 | 输入集合 | `current_rows`、`previous_shared_rows`、内存 request | 是 | 由统一入口按 ordered execution 准备。 |
 
-
-
 ### 输出
 
 | Contract | 目标 | 生命周期 | 说明 |
@@ -365,8 +289,6 @@ hard failure：缺少 target key 节点时失败。
 |---|---|---|---|
 
 | 输出集合 | 内存 `TrackingFactInputState` | 按 contract 类型 | 输出必须只由本节点或显式 joint commit owner 写入。 |
-
-
 
 ### 运行时契约
 
@@ -378,19 +300,13 @@ hard failure：缺少 target key 节点时失败。
 
 - @failure: 必要输入缺失、输出指针为空或 executor 失败时，按回退策略处理并更新 `last_lifecycle_error_`。
 
-
-
 ### 回退策略
 
 hard failure：缺少 device resolve 节点时失败。
 
-
-
 ### 状态与保留
 
 不直接写 `shared.*`。
-
-
 
 ### 实现映射
 
@@ -404,8 +320,6 @@ hard failure：缺少 device resolve 节点时失败。
 
 | Header contract | `D:\Tinder\Model\Model-P-v2\include\model_p_v2\l3\unified\unified_model_entry.h` |
 
-
-
 ### 验证
 
 | 检查项 | 期望结果 |
@@ -416,17 +330,11 @@ hard failure：缺少 device resolve 节点时失败。
 
 | Build | `xmake build test-l3-unified-entry` 通过 |
 
-
-
 ## `platform.supervise_tracking.update`
-
-
 
 ### 目的
 
 更新平台级跟踪监督状态。
-
-
 
 ### 位置
 
@@ -444,8 +352,6 @@ hard failure：缺少 device resolve 节点时失败。
 
 | 下游 | `platform.homeport.update` |
 
-
-
 ### 输入
 
 | Contract | 来源 | 是否必需 | 说明 |
@@ -454,8 +360,6 @@ hard failure：缺少 device resolve 节点时失败。
 
 | 输入集合 | `previous_shared_rows`、request、device snapshot、fact input、锁定增量 | 是 | 由统一入口按 ordered execution 准备。 |
 
-
-
 ### 输出
 
 | Contract | 目标 | 生命周期 | 说明 |
@@ -463,8 +367,6 @@ hard failure：缺少 device resolve 节点时失败。
 |---|---|---|---|
 
 | 输出集合 | `shared.platform.superviseTracking` | 按 contract 类型 | 输出必须只由本节点或显式 joint commit owner 写入。 |
-
-
 
 ### 运行时契约
 
@@ -476,19 +378,13 @@ hard failure：缺少 device resolve 节点时失败。
 
 - @failure: 必要输入缺失、输出指针为空或 executor 失败时，按回退策略处理并更新 `last_lifecycle_error_`。
 
-
-
 ### 回退策略
 
 fixed implementation fallback。
 
-
-
 ### 状态与保留
 
 维护 `tracking_supervision_state_`。
-
-
 
 ### 实现映射
 
@@ -502,8 +398,6 @@ fixed implementation fallback。
 
 | Header contract | `D:\Tinder\Model\Model-P-v2\include\model_p_v2\l3\unified\unified_model_entry.h` |
 
-
-
 ### 验证
 
 | 检查项 | 期望结果 |
@@ -513,4 +407,3 @@ fixed implementation fallback。
 | 执行序号 | `02-ordered-execution.md` 中第 46 项为 `platform.supervise_tracking.update` |
 
 | Build | `xmake build test-l3-unified-entry` 通过 |
-

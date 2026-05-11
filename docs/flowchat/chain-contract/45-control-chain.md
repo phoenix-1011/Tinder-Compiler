@@ -54,7 +54,6 @@
 - fixed fallback 投影到 `transient.sgen.device.*.signal_payload` 和 `.source_id`，由 `signal.static_generation.update` 生成 `shared.signal.records`。
 - 如果同 tick 同设备多条发波指令进入当前业务投影，后续 `signal.static_generation.update` 按当前 rows 生成信号记录；不在控制解析节点内合并或去重。
 
-
 ## ControlDispatch Fallback
 
 - 派出指令保持 current-step 生命周期，不跨 tick 保留。
@@ -105,7 +104,3 @@
 | `kCoreChainOrder` | 包含 10 个控制指令节点，且位于导航链路之前 |
 | `xmake build test-l3-unified-entry` | 构建通过 |
 | UTF-8 解码 | 文档无问号占位符和替换字符 |
-
-
-
-

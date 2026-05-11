@@ -1,4 +1,4 @@
-﻿# 感知链路
+# 感知链路
 
 ## 结论
 
@@ -192,7 +192,6 @@ hard failure：缺少 executor 或 output 时失败。
 |---|---|
 | 执行序号 | `02-ordered-execution.md` 中第 70 项为 `sense.detection.from_signal` |
 | Build | `xmake build test-l3-unified-entry` 通过 |
-
 
 ## `sense.detection.from_signature`
 
@@ -563,10 +562,3 @@ fixed implementation fallback：无计算节点时采用最近 5 次、2 秒 sli
 |---|---|
 | 执行序号 | `02-ordered-execution.md` 中第 78 项为 `sense.awareness.maintain` |
 | Build | `xmake build test-l3-unified-entry` 通过 |
-
-
-
-
-
-
-

@@ -1,4 +1,4 @@
-﻿# 统一通信链路
+# 统一通信链路
 
 ## 结论
 
@@ -126,5 +126,3 @@
 | `ControlInform` 文档路由 | 作为发送请求进入后段通信链路 |
 | 无通信设备 / 计算资源 | 接收和发送均 no-op |
 | 组网 owner | `communication.network.update` |
-
-

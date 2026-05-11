@@ -1,18 +1,10 @@
-﻿# Row Taxonomy
-
-
+# Row Taxonomy
 
 ## 结论
 
-
-
 流程链路使用四类 contract：`shared.*` 权威行、`runtime.*` 当前步运行时行、`transient.*` 当前步输入行、以及 in-memory contract。文档和代码必须显式区分四类 contract 的可见性和生命周期。
 
-
-
 ## Contract 类型
-
-
 
 | 类型 | 生命周期 | 可见性 | 用途 |
 
@@ -26,11 +18,7 @@
 
 | in-memory contract | 当前函数链 | 只在 producer 到 immediate consumer 之间传递 | 中间集合、工作集、候选集、修正结果 |
 
-
-
 ## 主要 `shared.*` owner
-
-
 
 | Row | Owner node | Notes |
 
@@ -114,11 +102,7 @@ avigation.perception_correction.update` | 导航误差或修正状态 |
 
 | `shared.sense.awareness` | `sense.awareness.maintain` | 最终态势 |
 
-
-
 ## Runtime 和 in-memory contract
-
-
 
 | Contract | Producer | Consumer | Lifetime |
 
@@ -179,6 +163,3 @@ avigation.perception_correction.update` | 导航误差或修正状态 |
 | 业务投影 transient rows | `device.control.resolve` 业务投影 | 导航、设备、信号、库存、监督、通信、打击链路 | 当前 tick |
 
 控制指令统一链路的 transient rows MUST 记录 `family`、`action`、`target_chain` 和投影状态。当前代码保留业务投影 rows 作为下游消费入口，避免一次性迁移导致行为漂移。
-
-
-

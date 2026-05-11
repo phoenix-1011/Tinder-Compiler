@@ -1,4 +1,4 @@
-﻿# 信号与环境传播链路
+# 信号与环境传播链路
 
 ## 结论
 
@@ -264,7 +264,6 @@ runtime row 仅当前步有效；候选数量受默认 quota 约束。
 | 执行序号 | `02-ordered-execution.md` 中第 60 项为 `environment.signal.transform` |
 | Build | `xmake build test-l3-unified-entry` 通过 |
 
-
 ## 环境特征链路
 
 环境特征链路覆盖尾流、磁异常、热迹、化学痕迹和自定义特征。它不写 `shared.signal.records`，而是使用独立的 `shared.environment.signature.records` 和 `runtime.environment.signature.propagated_candidates`。
@@ -291,9 +290,3 @@ runtime row 仅当前步有效；候选数量受默认 quota 约束。
 | `shared.environment.signature.records` | `environment.signature.lifecycle.manage` | `environment.signature.propagation.resolve` | authoritative |
 | `runtime.environment.signature.propagated_candidates` | `environment.signature.propagation.resolve` | 统一入口内部 receive/classify、post-commit custom nodes | 当前 tick |
 | `device_signature_receive_bucket` | 统一入口内部 receive/classify | `device.signature.receive.process` | 当前函数链 |
-
-
-
-
-
-

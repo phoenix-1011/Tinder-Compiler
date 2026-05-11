@@ -1,18 +1,10 @@
-﻿# 流程链路契约总览
-
-
+# 流程链路契约总览
 
 ## 结论
 
-
-
 当前 Model-P 统一入口的核心流程链路由 81 个 canonical core chain 节点组成。运行时 ordered execution 先执行域节点和可选 custom invocation 节点，再进入 core chain 边界；core chain 边界之后只能执行 core chain 节点或 post-commit custom invocation 节点。
 
-
-
 ## SSOT
-
-
 
 - 文档 SSOT：`D:\Tinder\Tinder-Compiler\docs\flowchat\chain-contract`。
 
@@ -20,11 +12,7 @@
 
 - C++ contract 入口：`D:\Tinder\Model\Model-P-v2\include\model_p_v2\l3\unified\unified_model_entry.h`。
 
-
-
 ## 节点分组
-
-
 
 | 分组 | 文档 | 节点数 | 范围 |
 
@@ -52,11 +40,7 @@
 
 | 运行时扩展节点 | `80-runtime-extension-nodes.md` | - | 域节点、custom invocation、通信发送 |
 
-
-
 ## 展示名规则
-
-
 
 - 展示名用于 UI、汇报和人工阅读。
 
@@ -66,11 +50,7 @@
 
 - 同一文档集中展示名必须唯一。
 
-
-
 ## 全局执行约束
-
-
 
 - Ordered execution 配置必须与 `kCoreChainOrder` 完全一致。
 
@@ -80,11 +60,7 @@
 
 - Core chain 节点不得使用旧入口函数或双轨兼容入口。
 
-
-
 ## 验证
-
-
 
 | 检查项 | 期望结果 |
 
@@ -97,6 +73,3 @@
 | 统一通信链路 contract | `75-communication-chain.md` 已进入 `kCoreChainOrder`，接收前段和发送后段均为 core chain |
 
 | `xmake build test-l3-unified-entry` | 构建通过 |
-
-
-
