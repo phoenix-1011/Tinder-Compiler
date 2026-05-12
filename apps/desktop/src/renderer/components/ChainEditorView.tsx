@@ -30,6 +30,12 @@ export function ChainEditorView() {
     exportPath: string;
   } | null>(null);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
+  /**
+   * `all` shows every canonical chain node + custom usage. `effective`
+   * keeps custom rows but hides standard rows with no active coverage,
+   * so the user can audit only what will actually run.
+   */
+  const [chainFilter, setChainFilter] = useState<"all" | "effective">("all");
 
   const profileId =
     ca.mainPaneTarget?.kind === "chain-editor"
@@ -54,6 +60,13 @@ export function ChainEditorView() {
       profile ? buildChainProjection(profile.project, flatStandard, flatCustom) : [],
     [profile, flatStandard, flatCustom]
   );
+
+  const visibleProjection = useMemo(() => {
+    if (chainFilter === "all") return projection;
+    return projection.filter((row) =>
+      row.kind === "chain-node" ? row.coverage.status !== "missing" : true
+    );
+  }, [projection, chainFilter]);
 
   if (!profile) {
     return (
@@ -227,11 +240,39 @@ export function ChainEditorView() {
           自定义 {counts.customActive}
           {counts.customDisabled > 0 ? ` · 停用 ${counts.customDisabled}` : ""}
         </span>
+        <div className="chain-editor-filter" role="tablist" aria-label="链路过滤">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={chainFilter === "all"}
+            className={`chain-editor-filter-btn${chainFilter === "all" ? " is-active" : ""}`}
+            onClick={() => setChainFilter("all")}
+            title="显示所有 81 个 canonical 节点"
+          >
+            所有链路
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={chainFilter === "effective"}
+            className={`chain-editor-filter-btn${chainFilter === "effective" ? " is-active" : ""}`}
+            onClick={() => setChainFilter("effective")}
+            title="只显示有覆盖的标准节点 + 全部自定义节点"
+          >
+            有效链路
+          </button>
+        </div>
       </div>
 
       <div className="chain-editor-list">
-        {projection.map((row, idx) =>
-          renderRow(row, idx, openHelpDoc, customMenu)
+        {visibleProjection.length === 0 ? (
+          <div className="chain-editor-empty-list">
+            当前档案没有有效链路。先把标准资源加入档案，或切换回「所有链路」。
+          </div>
+        ) : (
+          visibleProjection.map((row, idx) =>
+            renderRow(row, idx, openHelpDoc, customMenu)
+          )
         )}
       </div>
 
@@ -264,7 +305,6 @@ function renderRow(
         className={`chain-editor-row is-custom${row.usage.enabled ? "" : " is-disabled"}`}
         onContextMenu={(e) => customMenu(e, row)}
       >
-        <span className="chain-editor-row-actions" aria-hidden="true" />
         <span className="chain-editor-row-marker">⌬</span>
         <span className="chain-editor-row-label">{row.displayName}</span>
         <span className="chain-editor-row-id">
@@ -288,18 +328,20 @@ function renderRow(
       className={`chain-editor-row is-chain is-${row.coverage.status}`}
       title={row.nodeId}
     >
-      <button
-        type="button"
-        className="chain-editor-row-doc"
-        title="在新建标签页中查看链路文档"
-        onClick={(e) => {
-          e.stopPropagation();
-          openHelpDoc(row.nodeId);
-        }}
-      >
-        查看文档
-      </button>
-      <span className="chain-editor-row-order">{row.order}</span>
+      <div className="chain-editor-row-order-cell">
+        <span className="chain-editor-row-order">{row.order}</span>
+        <button
+          type="button"
+          className="chain-editor-row-doc"
+          title="在新建标签页中查看链路文档"
+          onClick={(e) => {
+            e.stopPropagation();
+            openHelpDoc(row.nodeId);
+          }}
+        >
+          查看文档
+        </button>
+      </div>
       <span className="chain-editor-row-label">{row.displayName}</span>
       <span className="chain-editor-row-id">{row.nodeId}</span>
       <span className="chain-editor-row-status">{statusText}</span>
