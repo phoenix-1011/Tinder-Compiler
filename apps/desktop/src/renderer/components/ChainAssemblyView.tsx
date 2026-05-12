@@ -125,11 +125,33 @@ export function ChainAssemblyView() {
       { id: "delete", label: "删除", run: () => ca.deleteFolder(folder) }
     ]);
   };
+  const joinProfileMenuItems = (
+    payload: DragPayload
+  ): ContextMenuItem[] => {
+    const profileId = ca.activeProfileId;
+    if (!profileId) {
+      return [{ id: "join-disabled", label: "加入档案（需先选中档案）", disabled: true }];
+    }
+    return [
+      {
+        id: "join-active",
+        label: "加入档案 / 活跃资源",
+        run: () => ca.dropToProfile(profileId, payload, true)
+      },
+      {
+        id: "join-disabled",
+        label: "加入档案 / 停用资源",
+        run: () => ca.dropToProfile(profileId, payload, false)
+      }
+    ];
+  };
   const standardLeafMenu = (
     e: React.MouseEvent,
     leaf: LeafNode<PlatformResourceInstance>
   ): void => {
     cm.open(e, [
+      ...joinProfileMenuItems({ kind: "standard", resource: leaf.data }),
+      { separator: true },
       { id: "rename", label: "重命名…", run: () => ca.renameLeaf("standard", leaf) },
       { separator: true },
       { id: "delete", label: "删除", run: () => ca.deleteLeaf(leaf.id, leaf.name) }
@@ -137,6 +159,8 @@ export function ChainAssemblyView() {
   };
   const customLeafMenu = (e: React.MouseEvent, leaf: LeafNode<CustomNodeConfig>): void => {
     cm.open(e, [
+      ...joinProfileMenuItems({ kind: "custom", node: leaf.data }),
+      { separator: true },
       { id: "rename", label: "重命名…", run: () => ca.renameLeaf("custom", leaf) },
       { separator: true },
       { id: "delete", label: "删除", run: () => ca.deleteLeaf(leaf.id, leaf.name) }
@@ -147,7 +171,20 @@ export function ChainAssemblyView() {
     profileId: string,
     item: ProfileResourceItem
   ): ContextMenuItem[] | void => {
+    const toggle: ContextMenuItem = item.enabled
+      ? {
+          id: "deactivate",
+          label: "停用",
+          run: () => ca.setProfileResourceEnabled(profileId, item, false)
+        }
+      : {
+          id: "activate",
+          label: "激活",
+          run: () => ca.setProfileResourceEnabled(profileId, item, true)
+        };
     cm.open(e, [
+      toggle,
+      { separator: true },
       { id: "delete", label: "从档案中移除", run: () => ca.removeFromProfile(profileId, item) }
     ]);
   };

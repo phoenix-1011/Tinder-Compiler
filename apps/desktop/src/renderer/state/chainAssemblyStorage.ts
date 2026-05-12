@@ -80,6 +80,8 @@ export interface ProfileResourceItem {
   kind: "standard" | "custom";
   source: "binding" | "extra-standard" | "profile-custom";
   resourceId: string;
+  /** Mirrors the underlying `ProfileResourceRef.enabled` so menus can show the right action. */
+  enabled: boolean;
   bindingRef?: { domain: "platform" | "signal" | "environment"; node_id: string };
 }
 
@@ -190,7 +192,8 @@ export function profileResourceItems(
         label: found?.display_name ?? ref.resource_instance_id,
         kind: "standard",
         source: ref.variant_id === "default" ? "extra-standard" : "binding",
-        resourceId: ref.resource_instance_id
+        resourceId: ref.resource_instance_id,
+        enabled: ref.enabled
       };
     }
     const found = customCatalog?.find(
@@ -201,7 +204,8 @@ export function profileResourceItems(
       label: found?.display_name ?? ref.resource_instance_id,
       kind: "custom",
       source: "profile-custom",
-      resourceId: ref.resource_instance_id
+      resourceId: ref.resource_instance_id,
+      enabled: ref.enabled
     };
   });
 }

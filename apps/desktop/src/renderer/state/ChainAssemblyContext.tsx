@@ -86,6 +86,12 @@ export interface ChainAssemblyValue {
     enabled: boolean
   ) => Promise<void>;
   removeFromProfile: (profileId: string, item: ProfileResourceItem) => Promise<void>;
+  /** Flip an existing profile resource ref between 活跃 and 停用. */
+  setProfileResourceEnabled: (
+    profileId: string,
+    item: ProfileResourceItem,
+    enabled: boolean
+  ) => Promise<void>;
 }
 
 const ChainAssemblyContext = createContext<ChainAssemblyValue | null>(null);
@@ -513,6 +519,51 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
     [disk, dialog, reload, setCollapse]
   );
 
+  const setProfileResourceEnabled = useCallback(
+    async (profileId: string, item: ProfileResourceItem, enabled: boolean) => {
+      if (!disk) return;
+      const target = disk.profiles.find((p) => p.id === profileId);
+      if (!target) return;
+      const refs = target.project.resources ?? [];
+      const matchIdx = refs.findIndex((r) =>
+        item.kind === "standard"
+          ? r.kind === "standard" && r.resource_instance_id === item.resourceId
+          : r.kind === "custom" && r.resource_instance_id === item.resourceId
+      );
+      if (matchIdx < 0 || refs[matchIdx]!.enabled === enabled) return;
+      const nextRefs = refs.map((r, i) =>
+        i === matchIdx ? { ...r, enabled } : r
+      );
+      const updatedProject: GuiProjectFile = {
+        ...target.project,
+        resources: nextRefs,
+        custom_node_usages: target.project.custom_node_usages ?? []
+      };
+      try {
+        await window.tinder.writeText(
+          target.id,
+          JSON.stringify(updatedProject, null, 2)
+        );
+        await reload();
+        setCollapse((prev) => ({
+          ...prev,
+          profileActive: enabled
+            ? { ...prev.profileActive, [profileId]: true }
+            : prev.profileActive,
+          profileDisabled: !enabled
+            ? { ...prev.profileDisabled, [profileId]: true }
+            : prev.profileDisabled
+        }));
+      } catch (err) {
+        await dialog.notify({
+          title: enabled ? "激活失败" : "停用失败",
+          message: String(err)
+        });
+      }
+    },
+    [disk, dialog, reload, setCollapse]
+  );
+
   const removeFromProfile = useCallback(
     async (profileId: string, item: ProfileResourceItem) => {
       if (!disk) return;
@@ -620,7 +671,8 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
       renameFolder,
       deleteFolder,
       dropToProfile,
-      removeFromProfile
+      removeFromProfile,
+      setProfileResourceEnabled
     }),
     [
       dataRoot,
@@ -644,7 +696,8 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
       renameFolder,
       deleteFolder,
       dropToProfile,
-      removeFromProfile
+      removeFromProfile,
+      setProfileResourceEnabled
     ]
   );
 
