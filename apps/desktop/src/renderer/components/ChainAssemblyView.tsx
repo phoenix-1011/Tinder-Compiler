@@ -12,6 +12,7 @@ import {
 import { ContextMenu, useContextMenu, type ContextMenuItem } from "./ContextMenu";
 import { useCa } from "../state/ChainAssemblyContext";
 import {
+  basenameNoExt,
   dragState,
   flattenLeaves,
   profileFolderKey,
@@ -137,6 +138,11 @@ export function ChainAssemblyView() {
       profileFolders: { ...prev.profileFolders, [key]: !prev.profileFolders[key] }
     }));
   };
+  const toggleProfileUsage = (id: string) =>
+    setCollapse((prev) => ({
+      ...prev,
+      profileUsage: { ...prev.profileUsage, [id]: !prev.profileUsage[id] }
+    }));
 
   const profileMenu = (e: React.MouseEvent, profile: ProfileEntry): void => {
     cm.open(e, [
@@ -387,7 +393,49 @@ export function ChainAssemblyView() {
                           ca.dropToProfile
                         )}
                       </DropZone>
-                      <Row depth={1} label="使用与版本" onClick={() => {}} />
+                      <Row
+                        depth={1}
+                        label="使用与版本"
+                        expandable
+                        expanded={collapse.profileUsage[profile.id] ?? false}
+                        onClick={() => toggleProfileUsage(profile.id)}
+                      />
+                      {(collapse.profileUsage[profile.id] ?? false) && (
+                        <>
+                          <Row
+                            depth={2}
+                            label={`路径：${basenameNoExt(profile.id) || "(无)"}`}
+                            hint={profile.id}
+                            onClick={() => ca.revealProfileInOs(profile)}
+                          />
+                          <Row
+                            depth={2}
+                            label={`Schema：v${profile.project.version ?? 1}`}
+                            muted
+                            onClick={() => {}}
+                          />
+                          <Row
+                            depth={2}
+                            label="创建副本…"
+                            onClick={() => ca.duplicateProfile(profile)}
+                          />
+                          <Row
+                            depth={2}
+                            label="重命名…"
+                            onClick={() => ca.renameProfileById(profile)}
+                          />
+                          <Row
+                            depth={2}
+                            label="在文件管理器中显示"
+                            onClick={() => ca.revealProfileInOs(profile)}
+                          />
+                          <Row
+                            depth={2}
+                            label="删除档案"
+                            onClick={() => ca.deleteProfileById(profile)}
+                          />
+                        </>
+                      )}
                     </>
                   )}
                 </div>
@@ -536,6 +584,8 @@ interface RowProps {
   expanded?: boolean;
   active?: boolean;
   muted?: boolean;
+  /** Native tooltip; useful for long file paths and other overflow content. */
+  hint?: string;
   actions?: RowAction[];
   draggable?: boolean;
   dragPayload?: DragPayload;
@@ -557,6 +607,7 @@ function Row({
   expanded,
   active,
   muted,
+  hint,
   actions,
   draggable,
   dragPayload,
@@ -577,6 +628,7 @@ function Row({
       className={className}
       style={indent}
       data-depth={depth}
+      title={hint}
       onClick={onClick}
       onContextMenu={onContextMenu}
       draggable={draggable}

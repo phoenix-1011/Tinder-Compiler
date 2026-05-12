@@ -68,6 +68,10 @@ export interface ChainAssemblyValue {
 
   renameProfileById: (entry: ProfileEntry) => Promise<void>;
   deleteProfileById: (entry: ProfileEntry) => Promise<void>;
+  /** Clone a profile JSON next to the original with a user-supplied name. */
+  duplicateProfile: (entry: ProfileEntry) => Promise<void>;
+  /** Open the OS file manager pointed at the profile JSON. */
+  revealProfileInOs: (entry: ProfileEntry) => Promise<void>;
   renameLeaf: (
     where: "standard" | "custom",
     leaf: LeafNode<PlatformResourceInstance> | LeafNode<CustomNodeConfig>
@@ -347,6 +351,51 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
       }
     },
     [disk, dialog, reload, writeExtras]
+  );
+
+  const duplicateProfile = useCallback(
+    async (entry: ProfileEntry) => {
+      if (!disk) return;
+      const next = await dialog.prompt({
+        title: "创建副本",
+        placeholder: "新档案名",
+        defaultValue: `${entry.name} 副本`
+      });
+      if (!next?.trim() || next.trim() === entry.name) return;
+      const trimmed = next.trim();
+      try {
+        const newPath = await uniqueFilePath(
+          disk.paths.profilesDir,
+          slugify(trimmed),
+          ".json"
+        );
+        const cloned: GuiProjectFile = {
+          ...entry.project,
+          project_name: trimmed
+        };
+        await window.tinder.writeText(newPath, JSON.stringify(cloned, null, 2));
+        await reload();
+        setActiveProfileId(newPath);
+        setCollapse((prev) => ({
+          ...prev,
+          profiles: { ...(prev.profiles ?? {}), [newPath]: true }
+        }));
+      } catch (err) {
+        await dialog.notify({ title: "创建副本失败", message: String(err) });
+      }
+    },
+    [disk, dialog, reload, setCollapse]
+  );
+
+  const revealProfileInOs = useCallback(
+    async (entry: ProfileEntry) => {
+      try {
+        await window.tinder.revealInOs(entry.id);
+      } catch (err) {
+        await dialog.notify({ title: "打开失败", message: String(err) });
+      }
+    },
+    [dialog]
   );
 
   const deleteProfileById = useCallback(
@@ -750,6 +799,8 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
       promptNewFolder,
       renameProfileById,
       deleteProfileById,
+      duplicateProfile,
+      revealProfileInOs,
       renameLeaf,
       deleteLeaf,
       renameFolder,
@@ -777,6 +828,8 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
       promptNewFolder,
       renameProfileById,
       deleteProfileById,
+      duplicateProfile,
+      revealProfileInOs,
       renameLeaf,
       deleteLeaf,
       renameFolder,
