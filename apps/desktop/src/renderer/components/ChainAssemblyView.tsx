@@ -25,6 +25,12 @@ import {
   type ProfileResourceItem,
   type TreeNode
 } from "../state/chainAssemblyStorage";
+import {
+  buildChainProjection,
+  type ChainProjectionRow
+} from "../state/chainProjection";
+import { useWorkspace } from "../state/WorkspaceContext";
+import { useChainHelp } from "../help/ChainHelpContext";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Drop zone — wraps the "资源" row + (when expanded) its children
@@ -78,12 +84,23 @@ function DropZone({
 export function ChainAssemblyView() {
   const ca = useCa();
   const cm = useContextMenu();
+  const { setActiveView } = useWorkspace();
+  const help = useChainHelp();
   const { dataRoot, disk, loading, loadError, collapse, setCollapse } = ca;
 
   const flatStandard = useMemo(
     () => (disk ? flattenLeaves(disk.standardTree) : []),
     [disk]
   );
+  const flatCustom = useMemo(
+    () => (disk ? flattenLeaves(disk.customTree) : []),
+    [disk]
+  );
+
+  const openChainNodeInHelp = (nodeId: string) => {
+    help.selectNode(nodeId);
+    setActiveView("help");
+  };
   const activeProfile = useMemo(
     () => disk?.profiles.find((p) => p.id === ca.activeProfileId) ?? null,
     [disk, ca.activeProfileId]
@@ -142,6 +159,11 @@ export function ChainAssemblyView() {
     setCollapse((prev) => ({
       ...prev,
       profileUsage: { ...prev.profileUsage, [id]: !prev.profileUsage[id] }
+    }));
+  const toggleProfileChain = (id: string) =>
+    setCollapse((prev) => ({
+      ...prev,
+      profileChain: { ...prev.profileChain, [id]: !prev.profileChain[id] }
     }));
 
   const profileMenu = (e: React.MouseEvent, profile: ProfileEntry): void => {
@@ -328,6 +350,10 @@ export function ChainAssemblyView() {
 
               const activeRoot = profileResourcesByFolder(activeRefs);
               const disabledRoot = profileResourcesByFolder(disabledRefs);
+              const chainOpen = collapse.profileChain[profile.id] ?? false;
+              const projection = chainOpen
+                ? buildChainProjection(profile.project, flatStandard, flatCustom)
+                : null;
 
               return (
                 <div key={profile.id}>
@@ -342,7 +368,17 @@ export function ChainAssemblyView() {
                   />
                   {expanded && (
                     <>
-                      <Row depth={1} label="链路" onClick={() => {}} />
+                      <Row
+                        depth={1}
+                        label="链路"
+                        expandable
+                        expanded={chainOpen}
+                        onClick={() => toggleProfileChain(profile.id)}
+                      />
+                      {chainOpen &&
+                        projection!.map((row, idx) =>
+                          renderChainProjectionRow(row, idx, openChainNodeInHelp)
+                        )}
                       <DropZone
                         onDrop={(payload) =>
                           ca.dropToProfile(profile.id, payload, true)
@@ -671,6 +707,49 @@ function Row({
         </div>
       )}
     </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// `链路` projection rows
+// ─────────────────────────────────────────────────────────────────────────────
+
+function renderChainProjectionRow(
+  row: ChainProjectionRow,
+  idx: number,
+  openChainNodeInHelp: (nodeId: string) => void
+): ReactNode {
+  if (row.kind === "custom") {
+    const hint = `自定义节点 · ${row.usage.resource_instance_id}/${row.usage.node_id}`;
+    return (
+      <Row
+        key={`custom-${idx}-${row.usage.resource_instance_id}-${row.usage.node_id}`}
+        depth={2}
+        label={`⌬ ${row.displayName}`}
+        hint={hint}
+        onClick={() => {}}
+      />
+    );
+  }
+  const statusLabel =
+    row.coverage.status === "missing"
+      ? "缺失"
+      : row.coverage.status === "covered"
+        ? "已覆盖"
+        : `多实现 ×${row.coverage.count}`;
+  const label =
+    row.coverage.status === "multi"
+      ? `${row.order}. ${row.displayName} (×${row.coverage.count})`
+      : `${row.order}. ${row.displayName}`;
+  return (
+    <Row
+      key={`chain-${row.nodeId}`}
+      depth={2}
+      label={label}
+      muted={row.coverage.status === "missing"}
+      hint={`${row.nodeId} · ${statusLabel}`}
+      onClick={() => openChainNodeInHelp(row.nodeId)}
+    />
   );
 }
 
