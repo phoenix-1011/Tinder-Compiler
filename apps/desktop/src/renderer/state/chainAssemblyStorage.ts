@@ -1,8 +1,10 @@
 import type {
   CustomNodeConfig,
   GuiProjectFile,
-  PlatformResourceInstance
+  PlatformResourceInstance,
+  ProfileResourceRef
 } from "@tinder/nextstep";
+import { migrateProfileFromV1 } from "@tinder/nextstep";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Domain types
@@ -164,52 +166,55 @@ export function basenameNoExt(filePath: string, ext: string = ".json"): string {
   return base.endsWith(ext) ? base.slice(0, -ext.length) : base;
 }
 
+/**
+ * Render-ready list of resources participating in a profile. Reads from
+ * `profile.resources[]` (always populated after the load-time migration);
+ * legacy v1 fields are migrated upstream and no longer consulted here.
+ *
+ * `extras` is accepted for signature stability with prior callers, but is
+ * unused — extras are folded into `resources[]` at load time. Pass `null` to
+ * make that intent explicit.
+ */
 export function profileResourceList(
   profile: GuiProjectFile,
-  extras: ProfileExtras,
-  standardCatalog: PlatformResourceInstance[]
+  _extras: ProfileExtras | null,
+  standardCatalog: PlatformResourceInstance[],
+  customCatalog?: CustomNodeConfig[]
 ): ProfileResourceItem[] {
-  const seen = new Set<string>();
   const out: ProfileResourceItem[] = [];
-  for (const cfg of profile.builtin_node_configs) {
-    const rid = cfg.binding_resource_id;
-    if (!rid) continue;
-    const key = `binding:${cfg.domain}.${cfg.node_id}:${rid}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    const found = standardCatalog.find((r) => r.resource_instance_id === rid);
-    out.push({
-      id: `std:${rid}@${cfg.domain}.${cfg.node_id}`,
-      label: found?.display_name ?? rid,
-      kind: "standard",
-      source: "binding",
-      resourceId: rid,
-      bindingRef: { domain: cfg.domain, node_id: cfg.node_id }
-    });
-  }
-  for (const rid of extras.extraStandardIds) {
-    const key = `extra:${rid}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    const found = standardCatalog.find((r) => r.resource_instance_id === rid);
-    out.push({
-      id: `std-extra:${rid}`,
-      label: found?.display_name ?? rid,
-      kind: "standard",
-      source: "extra-standard",
-      resourceId: rid
-    });
-  }
-  for (const cn of profile.custom_nodes) {
-    out.push({
-      id: `custom:${cn.custom_node_id}`,
-      label: cn.display_name || cn.custom_node_id,
-      kind: "custom",
-      source: "profile-custom",
-      resourceId: cn.custom_node_id
-    });
+  for (const ref of profile.resources ?? []) {
+    if (ref.kind === "standard") {
+      const found = standardCatalog.find(
+        (r) => r.resource_instance_id === ref.resource_instance_id
+      );
+      out.push({
+        id: profileResourceListItemId(ref),
+        label: found?.display_name ?? ref.resource_instance_id,
+        kind: "standard",
+        source: ref.variant_id === "default" ? "extra-standard" : "binding",
+        resourceId: ref.resource_instance_id
+      });
+    } else {
+      const found = customCatalog?.find(
+        (c) => c.custom_node_id === ref.resource_instance_id
+      );
+      out.push({
+        id: profileResourceListItemId(ref),
+        label: found?.display_name ?? ref.resource_instance_id,
+        kind: "custom",
+        source: "profile-custom",
+        resourceId: ref.resource_instance_id
+      });
+    }
   }
   return out;
+}
+
+/** Stable id used by the sidebar row's React key. */
+function profileResourceListItemId(ref: ProfileResourceRef): string {
+  return ref.kind === "standard"
+    ? `std:${ref.resource_instance_id}#${ref.variant_id}`
+    : `custom:${ref.resource_instance_id}`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -355,7 +360,7 @@ async function loadExtras(tinderDir: string): Promise<Record<string, ProfileExtr
 
 export async function loadFromDisk(root: string): Promise<DiskState> {
   const paths = await ensureRootStructure(root);
-  const [profiles, standardTree, customTree, extras] = await Promise.all([
+  const [rawProfiles, standardTree, customTree, extras] = await Promise.all([
     loadProfiles(paths.profilesDir),
     loadResourceTree<PlatformResourceInstance>(
       paths.standardDir,
@@ -369,6 +374,13 @@ export async function loadFromDisk(root: string): Promise<DiskState> {
     ),
     loadExtras(paths.tinderDir)
   ]);
+  // Apply lazy v1 → v2 migration so downstream code can rely on
+  // `project.resources[]` being populated. Disk shape is left untouched
+  // until the user explicitly saves a profile.
+  const profiles = rawProfiles.map((entry) => ({
+    ...entry,
+    project: migrateProfileFromV1(entry.project, extras[entry.extrasKey])
+  }));
   return { profiles, standardTree, customTree, extras, paths };
 }
 
