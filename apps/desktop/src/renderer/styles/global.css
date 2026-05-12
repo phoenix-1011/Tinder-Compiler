@@ -787,15 +787,6 @@ button:focus-visible {
   white-space: nowrap;
 }
 
-.chain-editor-path {
-  font-size: 11.5px;
-  color: var(--tc-fg-muted);
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .chain-editor-actions {
   display: flex;
   align-items: center;

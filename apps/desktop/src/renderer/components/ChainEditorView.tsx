@@ -231,10 +231,7 @@ export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
     <div className="chain-editor">
       <header className="chain-editor-header">
         <div className="chain-editor-title">
-          <h1>{profile.name}</h1>
-          <code className="chain-editor-path" title={profile.id}>
-            {profile.id}
-          </code>
+          <h1 title={profile.id}>{profile.name}</h1>
         </div>
         <div className="chain-editor-actions">
           <button
