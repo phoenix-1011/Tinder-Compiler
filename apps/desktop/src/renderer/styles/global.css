@@ -842,6 +842,69 @@ button:focus-visible {
   cursor: default;
 }
 
+/* Profile lifecycle (使用与版本) main pane ------------------- */
+.profile-lifecycle {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 18px 24px 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.profile-lifecycle-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.profile-lifecycle-section h2 {
+  margin: 0;
+  font-size: 13px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--tc-fg-muted);
+  font-weight: 600;
+}
+
+.profile-lifecycle-grid {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  gap: 4px 16px;
+  margin: 0;
+  font-size: 13px;
+}
+.profile-lifecycle-grid dt {
+  color: var(--tc-fg-muted);
+}
+.profile-lifecycle-grid dd {
+  margin: 0;
+  color: var(--tc-fg-default);
+  overflow-wrap: anywhere;
+}
+.profile-lifecycle-grid code {
+  font-size: 12px;
+  background: var(--tc-bg-sidebar);
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+
+.profile-lifecycle-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chain-editor-action-btn.is-danger {
+  border-color: rgba(244, 135, 113, 0.45);
+  color: var(--tc-fg-error);
+}
+.chain-editor-action-btn.is-danger:hover:not(:disabled) {
+  background: rgba(244, 135, 113, 0.12);
+  color: var(--tc-fg-error);
+}
+
 /* Runtime report modal -------------------------------------- */
 .runtime-report-card {
   width: 600px;
@@ -969,7 +1032,9 @@ button:focus-visible {
 
 .chain-editor-row {
   display: grid;
-  grid-template-columns: 48px 1fr minmax(120px, 280px) 110px auto;
+  /* Leading actions column (查看文档 / empty placeholder for custom rows) */
+  /* keeps width reserved so the rest of the row doesn't shift on hover. */
+  grid-template-columns: 92px 48px 1fr minmax(120px, 280px) 110px;
   align-items: center;
   gap: 12px;
   padding: 6px 24px;
@@ -978,12 +1043,18 @@ button:focus-visible {
   position: relative;
 }
 
+.chain-editor-row-actions {
+  display: block;
+  height: 1px;
+}
+
 .chain-editor-row.is-chain:hover {
   background: var(--tc-bg-hover);
 }
 
 .chain-editor-row-doc {
   visibility: hidden;
+  justify-self: start;
   background: transparent;
   border: 1px solid var(--tc-border-popup);
   color: var(--tc-fg-default);
@@ -993,7 +1064,7 @@ button:focus-visible {
   cursor: pointer;
   white-space: nowrap;
 }
-.chain-editor-row:hover .chain-editor-row-doc {
+.chain-editor-row.is-chain:hover .chain-editor-row-doc {
   visibility: visible;
 }
 .chain-editor-row-doc:hover {

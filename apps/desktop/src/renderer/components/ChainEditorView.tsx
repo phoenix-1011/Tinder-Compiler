@@ -31,12 +31,14 @@ export function ChainEditorView() {
   } | null>(null);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
 
+  const profileId =
+    ca.mainPaneTarget?.kind === "chain-editor"
+      ? ca.mainPaneTarget.profileId
+      : null;
   const profile = useMemo(() => {
-    if (!ca.disk || !ca.chainEditorProfileId) return null;
-    return (
-      ca.disk.profiles.find((p) => p.id === ca.chainEditorProfileId) ?? null
-    );
-  }, [ca.disk, ca.chainEditorProfileId]);
+    if (!ca.disk || !profileId) return null;
+    return ca.disk.profiles.find((p) => p.id === profileId) ?? null;
+  }, [ca.disk, profileId]);
 
   const flatStandard = useMemo(
     () => (ca.disk ? flattenLeaves(ca.disk.standardTree) : []),
@@ -60,7 +62,7 @@ export function ChainEditorView() {
         <button
           type="button"
           className="primary-button"
-          onClick={ca.closeChainEditor}
+          onClick={ca.closeMainPane}
         >
           关闭链路编辑
         </button>
@@ -203,7 +205,7 @@ export function ChainEditorView() {
           <button
             type="button"
             className="chain-editor-close"
-            onClick={ca.closeChainEditor}
+            onClick={ca.closeMainPane}
             title="关闭链路编辑"
             aria-label="关闭链路编辑"
           >
@@ -262,6 +264,7 @@ function renderRow(
         className={`chain-editor-row is-custom${row.usage.enabled ? "" : " is-disabled"}`}
         onContextMenu={(e) => customMenu(e, row)}
       >
+        <span className="chain-editor-row-actions" aria-hidden="true" />
         <span className="chain-editor-row-marker">⌬</span>
         <span className="chain-editor-row-label">{row.displayName}</span>
         <span className="chain-editor-row-id">
@@ -285,10 +288,6 @@ function renderRow(
       className={`chain-editor-row is-chain is-${row.coverage.status}`}
       title={row.nodeId}
     >
-      <span className="chain-editor-row-order">{row.order}</span>
-      <span className="chain-editor-row-label">{row.displayName}</span>
-      <span className="chain-editor-row-id">{row.nodeId}</span>
-      <span className="chain-editor-row-status">{statusText}</span>
       <button
         type="button"
         className="chain-editor-row-doc"
@@ -300,6 +299,10 @@ function renderRow(
       >
         查看文档
       </button>
+      <span className="chain-editor-row-order">{row.order}</span>
+      <span className="chain-editor-row-label">{row.displayName}</span>
+      <span className="chain-editor-row-id">{row.nodeId}</span>
+      <span className="chain-editor-row-status">{statusText}</span>
     </div>
   );
 }

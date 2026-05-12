@@ -12,7 +12,6 @@ import {
 import { ContextMenu, useContextMenu, type ContextMenuItem } from "./ContextMenu";
 import { useCa } from "../state/ChainAssemblyContext";
 import {
-  basenameNoExt,
   dragState,
   flattenLeaves,
   profileFolderKey,
@@ -142,11 +141,6 @@ export function ChainAssemblyView() {
       profileFolders: { ...prev.profileFolders, [key]: !prev.profileFolders[key] }
     }));
   };
-  const toggleProfileUsage = (id: string) =>
-    setCollapse((prev) => ({
-      ...prev,
-      profileUsage: { ...prev.profileUsage, [id]: !prev.profileUsage[id] }
-    }));
 
   const profileMenu = (e: React.MouseEvent, profile: ProfileEntry): void => {
     cm.open(e, [
@@ -347,7 +341,12 @@ export function ChainAssemblyView() {
 
               const activeRoot = profileResourcesByFolder(activeRefs);
               const disabledRoot = profileResourcesByFolder(disabledRefs);
-              const chainEditorOpen = ca.chainEditorProfileId === profile.id;
+              const chainEditorOpen =
+                ca.mainPaneTarget?.kind === "chain-editor" &&
+                ca.mainPaneTarget.profileId === profile.id;
+              const lifecycleOpen =
+                ca.mainPaneTarget?.kind === "profile-lifecycle" &&
+                ca.mainPaneTarget.profileId === profile.id;
 
               return (
                 <div key={profile.id}>
@@ -366,7 +365,9 @@ export function ChainAssemblyView() {
                         depth={1}
                         label="链路"
                         active={chainEditorOpen}
-                        onClick={() => ca.openChainEditor(profile.id)}
+                        onClick={() =>
+                          ca.openMainPane("chain-editor", profile.id)
+                        }
                       />
                       <DropZone
                         onDrop={(payload) =>
@@ -421,46 +422,11 @@ export function ChainAssemblyView() {
                       <Row
                         depth={1}
                         label="使用与版本"
-                        expandable
-                        expanded={collapse.profileUsage[profile.id] ?? false}
-                        onClick={() => toggleProfileUsage(profile.id)}
+                        active={lifecycleOpen}
+                        onClick={() =>
+                          ca.openMainPane("profile-lifecycle", profile.id)
+                        }
                       />
-                      {(collapse.profileUsage[profile.id] ?? false) && (
-                        <>
-                          <Row
-                            depth={2}
-                            label={`路径：${basenameNoExt(profile.id) || "(无)"}`}
-                            hint={profile.id}
-                            onClick={() => ca.revealProfileInOs(profile)}
-                          />
-                          <Row
-                            depth={2}
-                            label={`Schema：v${profile.project.version ?? 1}`}
-                            muted
-                            onClick={() => {}}
-                          />
-                          <Row
-                            depth={2}
-                            label="创建副本…"
-                            onClick={() => ca.duplicateProfile(profile)}
-                          />
-                          <Row
-                            depth={2}
-                            label="重命名…"
-                            onClick={() => ca.renameProfileById(profile)}
-                          />
-                          <Row
-                            depth={2}
-                            label="在文件管理器中显示"
-                            onClick={() => ca.revealProfileInOs(profile)}
-                          />
-                          <Row
-                            depth={2}
-                            label="删除档案"
-                            onClick={() => ca.deleteProfileById(profile)}
-                          />
-                        </>
-                      )}
                     </>
                   )}
                 </div>

@@ -27,6 +27,7 @@ import { ChainAssemblyProvider, useCa } from "./state/ChainAssemblyContext";
 import { ChainHelpProvider } from "./help/ChainHelpContext";
 import { ChainHelpView } from "./help/ChainHelpView";
 import { ChainEditorView } from "./components/ChainEditorView";
+import { ProfileLifecycleView } from "./components/ProfileLifecycleView";
 
 function Workbench() {
   const {
@@ -43,7 +44,7 @@ function Workbench() {
     isSettingsOpen
   } = useUI();
   const { activeView } = useWorkspace();
-  const { chainEditorProfileId } = useCa();
+  const { mainPaneTarget } = useCa();
 
   const bodyTemplate = sidebarVisible
     ? `var(--tc-activitybar-w) ${sidebarWidth}px 4px 1fr`
@@ -71,8 +72,10 @@ function Workbench() {
             <SettingsView />
           ) : activeView === "help" ? (
             <ChainHelpView />
-          ) : activeView === "chain-assembly" && chainEditorProfileId ? (
+          ) : activeView === "chain-assembly" && mainPaneTarget?.kind === "chain-editor" ? (
             <ChainEditorView />
+          ) : activeView === "chain-assembly" && mainPaneTarget?.kind === "profile-lifecycle" ? (
+            <ProfileLifecycleView />
           ) : (
             <EditorArea />
           )}
