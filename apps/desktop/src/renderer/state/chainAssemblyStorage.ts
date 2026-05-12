@@ -58,7 +58,10 @@ export interface CollapseState {
   standardSub: boolean;
   customSub: boolean;
   profiles: Record<string, boolean>;
-  profileResources: Record<string, boolean>;
+  /** Whether each profile's `活跃资源` subsection is expanded. */
+  profileActive: Record<string, boolean>;
+  /** Whether each profile's `停用资源` subsection is expanded. */
+  profileDisabled: Record<string, boolean>;
   folders: Record<string, boolean>;
 }
 
@@ -92,7 +95,8 @@ export const INITIAL_COLLAPSE: CollapseState = {
   standardSub: true,
   customSub: true,
   profiles: {},
-  profileResources: {},
+  profileActive: {},
+  profileDisabled: {},
   folders: {}
 };
 
@@ -106,7 +110,8 @@ export function loadCollapse(): CollapseState {
       ...parsed,
       sections: { ...INITIAL_COLLAPSE.sections, ...(parsed.sections ?? {}) },
       profiles: parsed.profiles ?? {},
-      profileResources: parsed.profileResources ?? {},
+      profileActive: parsed.profileActive ?? {},
+      profileDisabled: parsed.profileDisabled ?? {},
       folders: parsed.folders ?? {}
     };
   } catch {
@@ -167,13 +172,43 @@ export function basenameNoExt(filePath: string, ext: string = ".json"): string {
 }
 
 /**
- * Render-ready list of resources participating in a profile. Reads from
- * `profile.resources[]` (always populated after the load-time migration);
- * legacy v1 fields are migrated upstream and no longer consulted here.
- *
- * `extras` is accepted for signature stability with prior callers, but is
- * unused — extras are folded into `resources[]` at load time. Pass `null` to
- * make that intent explicit.
+ * Render-ready items for a list of v2 profile resource refs. Used by both
+ * `活跃资源` and `停用资源` after the caller filters by `enabled`.
+ */
+export function profileResourceItems(
+  refs: ProfileResourceRef[],
+  standardCatalog: PlatformResourceInstance[],
+  customCatalog?: CustomNodeConfig[]
+): ProfileResourceItem[] {
+  return refs.map((ref) => {
+    if (ref.kind === "standard") {
+      const found = standardCatalog.find(
+        (r) => r.resource_instance_id === ref.resource_instance_id
+      );
+      return {
+        id: profileResourceListItemId(ref),
+        label: found?.display_name ?? ref.resource_instance_id,
+        kind: "standard",
+        source: ref.variant_id === "default" ? "extra-standard" : "binding",
+        resourceId: ref.resource_instance_id
+      };
+    }
+    const found = customCatalog?.find(
+      (c) => c.custom_node_id === ref.resource_instance_id
+    );
+    return {
+      id: profileResourceListItemId(ref),
+      label: found?.display_name ?? ref.resource_instance_id,
+      kind: "custom",
+      source: "profile-custom",
+      resourceId: ref.resource_instance_id
+    };
+  });
+}
+
+/**
+ * Whole-profile convenience that returns items for every ref regardless of
+ * `enabled`. Kept for callers that still want a flat resource list.
  */
 export function profileResourceList(
   profile: GuiProjectFile,
@@ -181,33 +216,11 @@ export function profileResourceList(
   standardCatalog: PlatformResourceInstance[],
   customCatalog?: CustomNodeConfig[]
 ): ProfileResourceItem[] {
-  const out: ProfileResourceItem[] = [];
-  for (const ref of profile.resources ?? []) {
-    if (ref.kind === "standard") {
-      const found = standardCatalog.find(
-        (r) => r.resource_instance_id === ref.resource_instance_id
-      );
-      out.push({
-        id: profileResourceListItemId(ref),
-        label: found?.display_name ?? ref.resource_instance_id,
-        kind: "standard",
-        source: ref.variant_id === "default" ? "extra-standard" : "binding",
-        resourceId: ref.resource_instance_id
-      });
-    } else {
-      const found = customCatalog?.find(
-        (c) => c.custom_node_id === ref.resource_instance_id
-      );
-      out.push({
-        id: profileResourceListItemId(ref),
-        label: found?.display_name ?? ref.resource_instance_id,
-        kind: "custom",
-        source: "profile-custom",
-        resourceId: ref.resource_instance_id
-      });
-    }
-  }
-  return out;
+  return profileResourceItems(
+    profile.resources ?? [],
+    standardCatalog,
+    customCatalog
+  );
 }
 
 /** Stable id used by the sidebar row's React key. */

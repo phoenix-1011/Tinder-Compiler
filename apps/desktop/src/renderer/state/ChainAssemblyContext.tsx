@@ -11,14 +11,21 @@ import {
 import type {
   CustomNodeConfig,
   GuiProjectFile,
-  PlatformResourceInstance
+  PlatformResourceInstance,
+  ProfileResourceRef
 } from "@tinder/nextstep";
-import { createEmptyProject } from "@tinder/nextstep";
+import {
+  DEFAULT_PROFILE_VARIANT_ID,
+  createEmptyProject,
+  nextCustomActionIndex,
+  profileResourceRefKey
+} from "@tinder/nextstep";
 import {
   EXTRAS_FILE,
   TINDER_DIR,
   basenameNoExt,
   copyTree,
+  flattenLeaves,
   loadCollapse,
   loadDataRoot,
   loadFromDisk,
@@ -69,7 +76,15 @@ export interface ChainAssemblyValue {
   renameFolder: (folder: FolderNode<unknown>) => Promise<void>;
   deleteFolder: (folder: FolderNode<unknown>) => Promise<void>;
 
-  dropToProfile: (profileId: string, payload: DragPayload) => Promise<void>;
+  /**
+   * Add or update a profile resource ref from a drag/drop. `enabled` is
+   * driven by which drop zone received the payload: 活跃 → true, 停用 → false.
+   */
+  dropToProfile: (
+    profileId: string,
+    payload: DragPayload,
+    enabled: boolean
+  ) => Promise<void>;
   removeFromProfile: (profileId: string, item: ProfileResourceItem) => Promise<void>;
 }
 
@@ -259,14 +274,22 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
     try {
       const path = await uniqueFilePath(disk.paths.customDir, slugify(trimmed), ".json");
       const slug = slugify(trimmed);
+      const globalCustomNodes = [
+        ...disk.profiles.flatMap((profile) => profile.project.custom_nodes),
+        ...flattenLeaves(disk.customTree)
+      ];
       const data: CustomNodeConfig = {
         custom_node_id: slug,
+        resource_instance_id: slug,
+        node_id: slug,
         display_name: trimmed,
         description: "",
         module_id: slug,
         impl_kind: "python_script",
         location: `scripts/${slug}.py`,
-        input: '{"action_index":0,"parameters":{}}',
+        action_index: nextCustomActionIndex(globalCustomNodes),
+        default_parameters: {},
+        input: "",
         enabled: true
       };
       await window.tinder.writeText(path, JSON.stringify(data, null, 2));
@@ -408,46 +431,86 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
   );
 
   const dropToProfile = useCallback(
-    async (profileId: string, payload: DragPayload) => {
+    async (profileId: string, payload: DragPayload, enabled: boolean) => {
       if (!disk) return;
       const target = disk.profiles.find((p) => p.id === profileId);
       if (!target) return;
       try {
+        let updatedProject: GuiProjectFile = target.project;
+        let newRef: ProfileResourceRef;
+
         if (payload.kind === "standard") {
-          const cur = disk.extras[target.extrasKey] ?? { extraStandardIds: [] };
-          if (cur.extraStandardIds.includes(payload.resource.resource_instance_id)) return;
-          const nextExtras = {
-            ...disk.extras,
-            [target.extrasKey]: {
-              ...cur,
-              extraStandardIds: [...cur.extraStandardIds, payload.resource.resource_instance_id]
-            }
+          newRef = {
+            kind: "standard",
+            resource_instance_id: payload.resource.resource_instance_id,
+            variant_id: DEFAULT_PROFILE_VARIANT_ID,
+            enabled
           };
-          await writeExtras(nextExtras);
         } else {
+          // Custom resources still live as inline `custom_nodes[]` entries in
+          // v1 storage; clone the source node into the target profile so the
+          // ref has a stable id, then point `resources[]` at the clone. The
+          // broader custom-resource refactor (multi-node, action_index
+          // allocation, etc.) is owned by the resource-editor task package.
           const orig = payload.node;
           const suffix = Math.random().toString(36).slice(2, 6);
+          const customNodeId = `${orig.custom_node_id}-${suffix}`;
           const cloned: CustomNodeConfig = {
             ...orig,
-            custom_node_id: `${orig.custom_node_id}-${suffix}`,
-            module_id: `${orig.module_id || orig.custom_node_id}-${suffix}`
+            custom_node_id: customNodeId,
+            resource_instance_id: `${orig.resource_instance_id || orig.custom_node_id}-${suffix}`,
+            node_id: orig.node_id || orig.custom_node_id,
+            module_id: `${orig.module_id || orig.custom_node_id}-${suffix}`,
+            action_index: nextCustomActionIndex(target.project.custom_nodes),
+            input: ""
           };
-          const updatedProject: GuiProjectFile = {
-            ...target.project,
-            custom_nodes: [...target.project.custom_nodes, cloned]
+          updatedProject = {
+            ...updatedProject,
+            custom_nodes: [...updatedProject.custom_nodes, cloned]
           };
-          await window.tinder.writeText(target.id, JSON.stringify(updatedProject, null, 2));
+          newRef = {
+            kind: "custom",
+            resource_instance_id: customNodeId,
+            enabled
+          };
         }
+
+        const currentRefs = updatedProject.resources ?? [];
+        const key = profileResourceRefKey(newRef);
+        const existingIdx = currentRefs.findIndex(
+          (r) => profileResourceRefKey(r) === key
+        );
+        const nextRefs =
+          existingIdx >= 0
+            ? currentRefs.map((r, i) =>
+                i === existingIdx ? { ...r, enabled } : r
+              )
+            : [...currentRefs, newRef];
+        updatedProject = {
+          ...updatedProject,
+          resources: nextRefs,
+          custom_node_usages: updatedProject.custom_node_usages ?? []
+        };
+
+        await window.tinder.writeText(
+          target.id,
+          JSON.stringify(updatedProject, null, 2)
+        );
         await reload();
         setCollapse((prev) => ({
           ...prev,
-          profileResources: { ...(prev.profileResources ?? {}), [profileId]: true }
+          profileActive: enabled
+            ? { ...prev.profileActive, [profileId]: true }
+            : prev.profileActive,
+          profileDisabled: !enabled
+            ? { ...prev.profileDisabled, [profileId]: true }
+            : prev.profileDisabled
         }));
       } catch (err) {
-        await dialog.notify({ title: "复制失败", message: String(err) });
+        await dialog.notify({ title: "加入档案失败", message: String(err) });
       }
     },
-    [disk, dialog, reload, setCollapse, writeExtras]
+    [disk, dialog, reload, setCollapse]
   );
 
   const removeFromProfile = useCallback(
@@ -462,40 +525,69 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
       const target = disk.profiles.find((p) => p.id === profileId);
       if (!target) return;
       try {
-        if (item.source === "extra-standard") {
+        // Primary v2 path: drop the matching ref from `resources[]`. Match by
+        // (kind, resource_instance_id) so we hit both the active and disabled
+        // variants if they ever exist for the same id.
+        let updatedProject: GuiProjectFile = {
+          ...target.project,
+          resources: (target.project.resources ?? []).filter((ref) => {
+            if (item.kind === "standard")
+              return !(
+                ref.kind === "standard" &&
+                ref.resource_instance_id === item.resourceId
+              );
+            return !(
+              ref.kind === "custom" &&
+              ref.resource_instance_id === item.resourceId
+            );
+          })
+        };
+
+        // Custom resources still live inline in `custom_nodes[]` until the
+        // resource-editor task package extracts them; drop the matching node
+        // so the profile file doesn't keep an orphan definition.
+        if (item.kind === "custom") {
+          updatedProject = {
+            ...updatedProject,
+            custom_nodes: updatedProject.custom_nodes.filter(
+              (cn) => cn.custom_node_id !== item.resourceId
+            )
+          };
+        }
+
+        // Legacy v1 cleanup: clear binding fields and the extras entry so a
+        // future re-load doesn't migrate the ref back in.
+        if (item.kind === "standard") {
+          updatedProject = {
+            ...updatedProject,
+            builtin_node_configs: updatedProject.builtin_node_configs.map((cfg) =>
+              cfg.binding_resource_id === item.resourceId
+                ? (() => {
+                    const { binding_resource_id: _drop, ...rest } = cfg;
+                    return rest;
+                  })()
+                : cfg
+            )
+          };
           const cur = disk.extras[target.extrasKey];
-          if (cur) {
+          if (cur?.extraStandardIds.includes(item.resourceId)) {
             const nextExtras = {
               ...disk.extras,
               [target.extrasKey]: {
                 ...cur,
-                extraStandardIds: cur.extraStandardIds.filter((rid) => rid !== item.resourceId)
+                extraStandardIds: cur.extraStandardIds.filter(
+                  (rid) => rid !== item.resourceId
+                )
               }
             };
             await writeExtras(nextExtras);
           }
-        } else if (item.source === "binding" && item.bindingRef) {
-          const ref = item.bindingRef;
-          const updatedProject: GuiProjectFile = {
-            ...target.project,
-            builtin_node_configs: target.project.builtin_node_configs.map((cfg) => {
-              if (cfg.domain === ref.domain && cfg.node_id === ref.node_id) {
-                const { binding_resource_id: _drop, ...rest } = cfg;
-                return rest;
-              }
-              return cfg;
-            })
-          };
-          await window.tinder.writeText(target.id, JSON.stringify(updatedProject, null, 2));
-        } else if (item.source === "profile-custom") {
-          const updatedProject: GuiProjectFile = {
-            ...target.project,
-            custom_nodes: target.project.custom_nodes.filter(
-              (cn) => cn.custom_node_id !== item.resourceId
-            )
-          };
-          await window.tinder.writeText(target.id, JSON.stringify(updatedProject, null, 2));
         }
+
+        await window.tinder.writeText(
+          target.id,
+          JSON.stringify(updatedProject, null, 2)
+        );
         await reload();
       } catch (err) {
         await dialog.notify({ title: "移除失败", message: String(err) });

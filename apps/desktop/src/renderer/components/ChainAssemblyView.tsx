@@ -6,7 +6,7 @@ import { useCa } from "../state/ChainAssemblyContext";
 import {
   dragState,
   flattenLeaves,
-  profileResourceList,
+  profileResourceItems,
   type CollapseState,
   type DragPayload,
   type FolderNode,
@@ -100,13 +100,15 @@ export function ChainAssemblyView() {
     }));
     ca.setActiveProfileId(id);
   };
-  const toggleProfileResources = (id: string) =>
+  const toggleProfileActive = (id: string) =>
     setCollapse((prev) => ({
       ...prev,
-      profileResources: {
-        ...(prev.profileResources ?? {}),
-        [id]: !prev.profileResources?.[id]
-      }
+      profileActive: { ...prev.profileActive, [id]: !prev.profileActive[id] }
+    }));
+  const toggleProfileDisabled = (id: string) =>
+    setCollapse((prev) => ({
+      ...prev,
+      profileDisabled: { ...prev.profileDisabled, [id]: !prev.profileDisabled[id] }
     }));
 
   const profileMenu = (e: React.MouseEvent, profile: ProfileEntry): void => {
@@ -227,9 +229,17 @@ export function ChainAssemblyView() {
             {disk.profiles.map((profile) => {
               const expanded = collapse.profiles?.[profile.id] ?? false;
               const isActive = profile.id === ca.activeProfileId;
-              const resOpen = collapse.profileResources?.[profile.id] ?? false;
-              const extras = disk.extras[profile.extrasKey] ?? { extraStandardIds: [] };
-              const resList = profileResourceList(profile.project, extras, flatStandard);
+              const activeOpen = collapse.profileActive[profile.id] ?? false;
+              const disabledOpen = collapse.profileDisabled[profile.id] ?? false;
+              const refs = profile.project.resources ?? [];
+              const activeItems = profileResourceItems(
+                refs.filter((r) => r.enabled),
+                flatStandard
+              );
+              const disabledItems = profileResourceItems(
+                refs.filter((r) => !r.enabled),
+                flatStandard
+              );
               return (
                 <div key={profile.id}>
                   <Row
@@ -244,29 +254,63 @@ export function ChainAssemblyView() {
                   {expanded && (
                     <>
                       <Row depth={1} label="链路" onClick={() => {}} />
-                      <Row depth={1} label="概览" onClick={() => {}} />
-                      <DropZone onDrop={(payload) => ca.dropToProfile(profile.id, payload)}>
+                      <DropZone
+                        onDrop={(payload) =>
+                          ca.dropToProfile(profile.id, payload, true)
+                        }
+                      >
                         <Row
                           depth={1}
-                          label="资源"
+                          label="活跃资源"
                           expandable
-                          expanded={resOpen}
-                          onClick={() => toggleProfileResources(profile.id)}
+                          expanded={activeOpen}
+                          onClick={() => toggleProfileActive(profile.id)}
                         />
-                        {resOpen && resList.length === 0 && (
+                        {activeOpen && activeItems.length === 0 && (
                           <Row depth={2} label="(无)" muted onClick={() => {}} />
                         )}
-                        {resOpen &&
-                          resList.map((r) => (
+                        {activeOpen &&
+                          activeItems.map((r) => (
                             <Row
                               key={r.id}
                               depth={2}
                               label={r.label}
                               onClick={() => {}}
-                              onContextMenu={(e) => profileResourceMenu(e, profile.id, r)}
+                              onContextMenu={(e) =>
+                                profileResourceMenu(e, profile.id, r)
+                              }
                             />
                           ))}
                       </DropZone>
+                      <DropZone
+                        onDrop={(payload) =>
+                          ca.dropToProfile(profile.id, payload, false)
+                        }
+                      >
+                        <Row
+                          depth={1}
+                          label="停用资源"
+                          expandable
+                          expanded={disabledOpen}
+                          onClick={() => toggleProfileDisabled(profile.id)}
+                        />
+                        {disabledOpen && disabledItems.length === 0 && (
+                          <Row depth={2} label="(无)" muted onClick={() => {}} />
+                        )}
+                        {disabledOpen &&
+                          disabledItems.map((r) => (
+                            <Row
+                              key={r.id}
+                              depth={2}
+                              label={r.label}
+                              onClick={() => {}}
+                              onContextMenu={(e) =>
+                                profileResourceMenu(e, profile.id, r)
+                              }
+                            />
+                          ))}
+                      </DropZone>
+                      <Row depth={1} label="使用与版本" onClick={() => {}} />
                     </>
                   )}
                 </div>
