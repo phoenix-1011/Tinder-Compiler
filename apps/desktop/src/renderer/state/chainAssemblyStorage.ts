@@ -68,10 +68,6 @@ export interface CollapseState {
    * where section is `"active"` or `"disabled"`.
    */
   profileFolders: Record<string, boolean>;
-  /** Whether each profile's `使用与版本` subsection is expanded. */
-  profileUsage: Record<string, boolean>;
-  /** Whether each profile's `链路` subsection is expanded. */
-  profileChain: Record<string, boolean>;
   folders: Record<string, boolean>;
 }
 
@@ -110,8 +106,6 @@ export const INITIAL_COLLAPSE: CollapseState = {
   profileActive: {},
   profileDisabled: {},
   profileFolders: {},
-  profileUsage: {},
-  profileChain: {},
   folders: {}
 };
 
@@ -128,8 +122,6 @@ export function loadCollapse(): CollapseState {
       profileActive: parsed.profileActive ?? {},
       profileDisabled: parsed.profileDisabled ?? {},
       profileFolders: parsed.profileFolders ?? {},
-      profileUsage: parsed.profileUsage ?? {},
-      profileChain: parsed.profileChain ?? {},
       folders: parsed.folders ?? {}
     };
   } catch {

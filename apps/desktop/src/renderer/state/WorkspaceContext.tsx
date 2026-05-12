@@ -12,14 +12,20 @@ import { CHAIN_CATALOG } from "../help/chain-catalog.generated";
 
 export type EolKind = "lf" | "crlf";
 
-export type DocumentKind = "file" | "help-doc";
+export type DocumentKind =
+  | "file"
+  | "help-doc"
+  | "chain-editor"
+  | "profile-lifecycle";
 
 export interface OpenDocument {
   uri: string;
   name: string;
   /**
    * Classifies what kind of content this tab holds. `file` uses Monaco;
-   * `help-doc` renders a chain catalog node section as Markdown.
+   * `help-doc` renders a chain catalog node section as Markdown;
+   * `chain-editor` and `profile-lifecycle` host the chain-assembly main
+   * views inside the regular tab strip.
    */
   kind: DocumentKind;
   /**
@@ -37,6 +43,8 @@ export interface OpenDocument {
   eol: EolKind;
   /** Help-doc tabs carry the canonical chain node id they render. */
   helpNodeId?: string;
+  /** Profile id for chain-editor / profile-lifecycle tabs. */
+  profileId?: string;
 }
 
 export type ActivityView =
@@ -111,6 +119,14 @@ interface WorkspaceActions {
    * opens focus the existing tab.
    */
   openHelpDoc(nodeId: string, options?: OpenHelpDocOptions): void;
+  /**
+   * Open the chain editor for a configuration profile as a tab.
+   * Synthetic uri `chain-editor://<profileId>` — re-opening focuses the
+   * existing tab.
+   */
+  openChainEditor(profileId: string, displayName: string): void;
+  /** Open the profile lifecycle view as a tab. Same pattern as openChainEditor. */
+  openProfileLifecycle(profileId: string, displayName: string): void;
   closeFile(uri: string): void;
   closeActiveFile(): void;
   cycleTab(direction: 1 | -1): void;
@@ -335,6 +351,85 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     );
   }, []);
 
+  /**
+   * Open or focus a synthetic tab for one of the chain-assembly views.
+   * Shared by openChainEditor / openProfileLifecycle so they don't
+   * duplicate the preview-replacement logic.
+   */
+  const openSyntheticTab = useCallback(
+    (params: {
+      uri: string;
+      name: string;
+      kind: Extract<DocumentKind, "chain-editor" | "profile-lifecycle">;
+      profileId: string;
+      preview: boolean;
+    }) => {
+      const existing = docsRef.current.find((d) => d.uri === params.uri);
+      if (existing) {
+        setActiveUri(params.uri);
+        if (!params.preview && existing.preview) {
+          setDocuments((prev) =>
+            prev.map((d) =>
+              d.uri === params.uri ? { ...d, preview: false } : d
+            )
+          );
+        }
+        return;
+      }
+      const doc: OpenDocument = {
+        uri: params.uri,
+        name: params.name,
+        kind: params.kind,
+        preview: params.preview,
+        language: "plaintext",
+        content: "",
+        baseline: "",
+        dirty: false,
+        eol: "lf",
+        profileId: params.profileId
+      };
+      setDocuments((prev) => {
+        if (!params.preview) return [...prev, doc];
+        const previewIdx = prev.findIndex((d) => d.preview);
+        if (previewIdx < 0) return [...prev, doc];
+        const next = prev.slice();
+        next[previewIdx] = doc;
+        return next;
+      });
+      setActiveUri(params.uri);
+    },
+    []
+  );
+
+  const openChainEditor = useCallback(
+    (profileId: string, displayName: string) => {
+      // Chain-editor tabs default to pinned so they survive subsequent
+      // preview opens; the user opens the editor with intent, not as a
+      // throwaway look.
+      openSyntheticTab({
+        uri: `chain-editor://${profileId}`,
+        name: `${displayName} · 链路`,
+        kind: "chain-editor",
+        profileId,
+        preview: false
+      });
+    },
+    [openSyntheticTab]
+  );
+
+  const openProfileLifecycle = useCallback(
+    (profileId: string, displayName: string) => {
+      openSyntheticTab({
+        uri: `profile-lifecycle://${profileId}`,
+        name: `${displayName} · 使用与版本`,
+        kind: "profile-lifecycle",
+        profileId,
+        preview: false
+      });
+    },
+    [openSyntheticTab]
+  );
+
   const closeFile = useCallback((uri: string) => {
     setDocuments((prev) => prev.filter((d) => d.uri !== uri));
     setActiveUri((current) => {
@@ -482,6 +577,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       goForward,
       openFile,
       openHelpDoc,
+      openChainEditor,
+      openProfileLifecycle,
       closeFile,
       closeActiveFile,
       cycleTab,
@@ -511,6 +608,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       goForward,
       openFile,
       openHelpDoc,
+      openChainEditor,
+      openProfileLifecycle,
       closeFile,
       setActive,
       pinDocument,

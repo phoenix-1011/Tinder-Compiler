@@ -50,18 +50,6 @@ import {
 } from "./chainAssemblyStorage";
 import { DialogModal, useDialog } from "../components/ChainAssemblyDialog";
 
-export type MainPaneKind = "chain-editor" | "profile-lifecycle";
-
-/**
- * Which chain-assembly view (if any) is currently rendered in the workbench
- * main pane. `null` means the workbench falls back to the regular editor
- * area. Mutually exclusive by design — only one view can claim the pane.
- */
-export interface MainPaneTarget {
-  kind: MainPaneKind;
-  profileId: string;
-}
-
 export interface ChainAssemblyValue {
   dataRoot: string | null;
   disk: DiskState | null;
@@ -71,9 +59,6 @@ export interface ChainAssemblyValue {
   setCollapse: (updater: (prev: CollapseState) => CollapseState) => void;
   activeProfileId: string | null;
   setActiveProfileId: (id: string | null) => void;
-  mainPaneTarget: MainPaneTarget | null;
-  openMainPane: (kind: MainPaneKind, profileId: string) => void;
-  closeMainPane: () => void;
 
   pickDataRoot: () => Promise<void>;
   saveAsNewRoot: () => Promise<void>;
@@ -227,20 +212,8 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [activeProfileId, setActiveProfileId] = useState<string | null>(null);
-  const [mainPaneTarget, setMainPaneTarget] = useState<MainPaneTarget | null>(
-    null
-  );
   const [collapse, _setCollapse] = useState<CollapseState>(() => loadCollapse());
   const dialog = useDialog();
-
-  const openMainPane = useCallback(
-    (kind: MainPaneKind, profileId: string) => {
-      setActiveProfileId(profileId);
-      setMainPaneTarget({ kind, profileId });
-    },
-    []
-  );
-  const closeMainPane = useCallback(() => setMainPaneTarget(null), []);
 
   /** Monotonic load token — newer loads invalidate in-flight previous loads. */
   const loadVersionRef = useRef(0);
@@ -947,15 +920,9 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
         resources: target.project.resources ?? [],
         custom_node_usages: [...usages, newUsage]
       };
-      const ok = await writeProfile(target, updated, "添加失败");
-      if (ok) {
-        setCollapse((prev) => ({
-          ...prev,
-          profileChain: { ...prev.profileChain, [profileId]: true }
-        }));
-      }
+      await writeProfile(target, updated, "添加失败");
     },
-    [disk, setCollapse, writeProfile]
+    [disk, writeProfile]
   );
 
   const promptAddCustomUsage = useCallback(
@@ -1100,9 +1067,6 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
       setCollapse,
       activeProfileId,
       setActiveProfileId,
-      mainPaneTarget,
-      openMainPane,
-      closeMainPane,
       pickDataRoot,
       saveAsNewRoot,
       reload,
@@ -1138,9 +1102,6 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
       collapse,
       setCollapse,
       activeProfileId,
-      mainPaneTarget,
-      openMainPane,
-      closeMainPane,
       pickDataRoot,
       saveAsNewRoot,
       reload,

@@ -5,6 +5,8 @@ import { WelcomeView } from "./WelcomeView";
 import { ContextMenu, useContextMenu, type ContextMenuItem } from "./ContextMenu";
 import { Breadcrumbs } from "./Breadcrumbs";
 import { HelpDocTab } from "./HelpDocTab";
+import { ChainEditorView } from "./ChainEditorView";
+import { ProfileLifecycleView } from "./ProfileLifecycleView";
 
 export function EditorArea() {
   const {
@@ -151,6 +153,13 @@ export function EditorArea() {
           <WelcomeView />
         ) : active.kind === "help-doc" ? (
           <HelpDocTab nodeId={active.helpNodeId ?? ""} />
+        ) : active.kind === "chain-editor" ? (
+          <ChainEditorView profileId={active.profileId ?? ""} tabUri={active.uri} />
+        ) : active.kind === "profile-lifecycle" ? (
+          <ProfileLifecycleView
+            profileId={active.profileId ?? ""}
+            tabUri={active.uri}
+          />
         ) : (
           <MonacoEditor
             key={active.uri}

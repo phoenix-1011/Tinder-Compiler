@@ -169,10 +169,8 @@ export function buildRuntimeReport(
  */
 export function buildRuntimeConfig(
   profile: GuiProjectFile,
-  standardCatalog: PlatformResourceInstance[],
   customCatalog: CustomNodeConfig[]
 ): RuntimeConfigV2 {
-  void standardCatalog;
   const usages = (profile.custom_node_usages ?? []).filter((u) => u.enabled);
   const customById = new Map(
     customCatalog.map((c) => [c.resource_instance_id ?? c.custom_node_id, c] as const)

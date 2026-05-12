@@ -21,9 +21,15 @@ import { RuntimeReportModal } from "./RuntimeReportModal";
  * Layout: header (profile name + close button) over the projection table
  * showing canonical chain coverage plus active custom node placements.
  */
-export function ChainEditorView() {
+interface ChainEditorViewProps {
+  profileId: string;
+  /** Synthetic tab uri — used by the close button to call closeFile. */
+  tabUri: string;
+}
+
+export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
   const ca = useCa();
-  const { openHelpDoc } = useWorkspace();
+  const { openHelpDoc, closeFile } = useWorkspace();
   const cm = useContextMenu();
   const [reportState, setReportState] = useState<{
     report: RuntimeReport;
@@ -37,10 +43,6 @@ export function ChainEditorView() {
    */
   const [chainFilter, setChainFilter] = useState<"all" | "effective">("all");
 
-  const profileId =
-    ca.mainPaneTarget?.kind === "chain-editor"
-      ? ca.mainPaneTarget.profileId
-      : null;
   const profile = useMemo(() => {
     if (!ca.disk || !profileId) return null;
     return ca.disk.profiles.find((p) => p.id === profileId) ?? null;
@@ -75,7 +77,7 @@ export function ChainEditorView() {
         <button
           type="button"
           className="primary-button"
-          onClick={ca.closeMainPane}
+          onClick={() => closeFile(tabUri)}
         >
           关闭链路编辑
         </button>
@@ -158,11 +160,7 @@ export function ChainEditorView() {
 
   const onExport = async () => {
     if (!reportState) return;
-    const config = buildRuntimeConfig(
-      profile.project,
-      flatStandard,
-      flatCustom
-    );
+    const config = buildRuntimeConfig(profile.project, flatCustom);
     await window.tinder.writeText(
       reportState.exportPath,
       JSON.stringify(config, null, 2)
@@ -218,7 +216,7 @@ export function ChainEditorView() {
           <button
             type="button"
             className="chain-editor-close"
-            onClick={ca.closeMainPane}
+            onClick={() => closeFile(tabUri)}
             title="关闭链路编辑"
             aria-label="关闭链路编辑"
           >

@@ -1,19 +1,28 @@
 import { useMemo } from "react";
 import { useCa } from "../state/ChainAssemblyContext";
+import { useWorkspace } from "../state/WorkspaceContext";
 import { basenameNoExt } from "../state/chainAssemblyStorage";
 
+interface ProfileLifecycleViewProps {
+  profileId: string;
+  /** Synthetic tab uri — used by the close button. */
+  tabUri: string;
+}
+
 /**
- * Main-pane companion to `链路`. Surfaces profile lifecycle actions
- * (rename, duplicate, reveal, delete) and the canonical metadata
- * (file path, schema version, resource counts) that previously lived
- * as inline rows under the sidebar's `使用与版本` section.
+ * Tab companion to `链路`. Surfaces profile lifecycle actions (rename,
+ * duplicate, reveal, delete) and the canonical metadata (file path,
+ * schema version, resource counts) that previously lived as inline rows
+ * under the sidebar's `使用与版本` section. Rendered as a synthetic
+ * `profile-lifecycle://` tab inside EditorArea so it shares the tab
+ * strip with files and chain docs.
  */
-export function ProfileLifecycleView() {
+export function ProfileLifecycleView({
+  profileId,
+  tabUri
+}: ProfileLifecycleViewProps) {
   const ca = useCa();
-  const profileId =
-    ca.mainPaneTarget?.kind === "profile-lifecycle"
-      ? ca.mainPaneTarget.profileId
-      : null;
+  const { closeFile } = useWorkspace();
   const profile = useMemo(() => {
     if (!ca.disk || !profileId) return null;
     return ca.disk.profiles.find((p) => p.id === profileId) ?? null;
@@ -26,7 +35,7 @@ export function ProfileLifecycleView() {
         <button
           type="button"
           className="primary-button"
-          onClick={ca.closeMainPane}
+          onClick={() => closeFile(tabUri)}
         >
           关闭
         </button>
@@ -53,7 +62,7 @@ export function ProfileLifecycleView() {
           <button
             type="button"
             className="chain-editor-close"
-            onClick={ca.closeMainPane}
+            onClick={() => closeFile(tabUri)}
             title="关闭"
             aria-label="关闭"
           >

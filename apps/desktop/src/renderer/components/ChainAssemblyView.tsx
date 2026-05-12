@@ -11,6 +11,7 @@ import {
 } from "@tinder/nextstep";
 import { ContextMenu, useContextMenu, type ContextMenuItem } from "./ContextMenu";
 import { useCa } from "../state/ChainAssemblyContext";
+import { useWorkspace } from "../state/WorkspaceContext";
 import {
   dragState,
   flattenLeaves,
@@ -77,6 +78,7 @@ function DropZone({
 export function ChainAssemblyView() {
   const ca = useCa();
   const cm = useContextMenu();
+  const { activeUri, openChainEditor, openProfileLifecycle } = useWorkspace();
   const { dataRoot, disk, loading, loadError, collapse, setCollapse } = ca;
 
   const flatStandard = useMemo(
@@ -342,11 +344,9 @@ export function ChainAssemblyView() {
               const activeRoot = profileResourcesByFolder(activeRefs);
               const disabledRoot = profileResourcesByFolder(disabledRefs);
               const chainEditorOpen =
-                ca.mainPaneTarget?.kind === "chain-editor" &&
-                ca.mainPaneTarget.profileId === profile.id;
+                activeUri === `chain-editor://${profile.id}`;
               const lifecycleOpen =
-                ca.mainPaneTarget?.kind === "profile-lifecycle" &&
-                ca.mainPaneTarget.profileId === profile.id;
+                activeUri === `profile-lifecycle://${profile.id}`;
 
               return (
                 <div key={profile.id}>
@@ -365,9 +365,7 @@ export function ChainAssemblyView() {
                         depth={1}
                         label="链路"
                         active={chainEditorOpen}
-                        onClick={() =>
-                          ca.openMainPane("chain-editor", profile.id)
-                        }
+                        onClick={() => openChainEditor(profile.id, profile.name)}
                       />
                       <DropZone
                         onDrop={(payload) =>
@@ -423,9 +421,7 @@ export function ChainAssemblyView() {
                         depth={1}
                         label="使用与版本"
                         active={lifecycleOpen}
-                        onClick={() =>
-                          ca.openMainPane("profile-lifecycle", profile.id)
-                        }
+                        onClick={() => openProfileLifecycle(profile.id, profile.name)}
                       />
                     </>
                   )}
