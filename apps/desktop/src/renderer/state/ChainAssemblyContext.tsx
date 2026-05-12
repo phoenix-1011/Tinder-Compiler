@@ -59,6 +59,13 @@ export interface ChainAssemblyValue {
   setCollapse: (updater: (prev: CollapseState) => CollapseState) => void;
   activeProfileId: string | null;
   setActiveProfileId: (id: string | null) => void;
+  /**
+   * Profile whose chain editor is open in the main pane. `null` means the
+   * editor is closed and the workbench shows the regular editor area.
+   */
+  chainEditorProfileId: string | null;
+  openChainEditor: (profileId: string) => void;
+  closeChainEditor: () => void;
 
   pickDataRoot: () => Promise<void>;
   saveAsNewRoot: () => Promise<void>;
@@ -212,8 +219,17 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [activeProfileId, setActiveProfileId] = useState<string | null>(null);
+  const [chainEditorProfileId, setChainEditorProfileId] = useState<string | null>(
+    null
+  );
   const [collapse, _setCollapse] = useState<CollapseState>(() => loadCollapse());
   const dialog = useDialog();
+
+  const openChainEditor = useCallback((profileId: string) => {
+    setActiveProfileId(profileId);
+    setChainEditorProfileId(profileId);
+  }, []);
+  const closeChainEditor = useCallback(() => setChainEditorProfileId(null), []);
 
   /** Monotonic load token — newer loads invalidate in-flight previous loads. */
   const loadVersionRef = useRef(0);
@@ -1073,6 +1089,9 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
       setCollapse,
       activeProfileId,
       setActiveProfileId,
+      chainEditorProfileId,
+      openChainEditor,
+      closeChainEditor,
       pickDataRoot,
       saveAsNewRoot,
       reload,
@@ -1108,6 +1127,9 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
       collapse,
       setCollapse,
       activeProfileId,
+      chainEditorProfileId,
+      openChainEditor,
+      closeChainEditor,
       pickDataRoot,
       saveAsNewRoot,
       reload,

@@ -23,9 +23,10 @@ import { UIProvider, useUI } from "./state/UIContext";
 import { KeyboardShortcuts } from "./state/KeyboardShortcuts";
 import { BuiltInCommands } from "./state/BuiltInCommands";
 import { LspBootstrap } from "./state/LspBootstrap";
-import { ChainAssemblyProvider } from "./state/ChainAssemblyContext";
+import { ChainAssemblyProvider, useCa } from "./state/ChainAssemblyContext";
 import { ChainHelpProvider } from "./help/ChainHelpContext";
 import { ChainHelpView } from "./help/ChainHelpView";
+import { ChainEditorView } from "./components/ChainEditorView";
 
 function Workbench() {
   const {
@@ -42,6 +43,7 @@ function Workbench() {
     isSettingsOpen
   } = useUI();
   const { activeView } = useWorkspace();
+  const { chainEditorProfileId } = useCa();
 
   const bodyTemplate = sidebarVisible
     ? `var(--tc-activitybar-w) ${sidebarWidth}px 4px 1fr`
@@ -69,6 +71,8 @@ function Workbench() {
             <SettingsView />
           ) : activeView === "help" ? (
             <ChainHelpView />
+          ) : activeView === "chain-assembly" && chainEditorProfileId ? (
+            <ChainEditorView />
           ) : (
             <EditorArea />
           )}

@@ -25,12 +25,6 @@ import {
   type ProfileResourceItem,
   type TreeNode
 } from "../state/chainAssemblyStorage";
-import {
-  buildChainProjection,
-  type ChainProjectionRow
-} from "../state/chainProjection";
-import { useWorkspace } from "../state/WorkspaceContext";
-import { useChainHelp } from "../help/ChainHelpContext";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Drop zone — wraps the "资源" row + (when expanded) its children
@@ -84,8 +78,6 @@ function DropZone({
 export function ChainAssemblyView() {
   const ca = useCa();
   const cm = useContextMenu();
-  const { setActiveView } = useWorkspace();
-  const help = useChainHelp();
   const { dataRoot, disk, loading, loadError, collapse, setCollapse } = ca;
 
   const flatStandard = useMemo(
@@ -96,11 +88,6 @@ export function ChainAssemblyView() {
     () => (disk ? flattenLeaves(disk.customTree) : []),
     [disk]
   );
-
-  const openChainNodeInHelp = (nodeId: string) => {
-    help.selectNode(nodeId);
-    setActiveView("help");
-  };
   const activeProfile = useMemo(
     () => disk?.profiles.find((p) => p.id === ca.activeProfileId) ?? null,
     [disk, ca.activeProfileId]
@@ -159,11 +146,6 @@ export function ChainAssemblyView() {
     setCollapse((prev) => ({
       ...prev,
       profileUsage: { ...prev.profileUsage, [id]: !prev.profileUsage[id] }
-    }));
-  const toggleProfileChain = (id: string) =>
-    setCollapse((prev) => ({
-      ...prev,
-      profileChain: { ...prev.profileChain, [id]: !prev.profileChain[id] }
     }));
 
   const profileMenu = (e: React.MouseEvent, profile: ProfileEntry): void => {
@@ -264,47 +246,6 @@ export function ChainAssemblyView() {
     cm.open(e, items);
   };
 
-  const customUsageMenu = (
-    e: React.MouseEvent,
-    profileId: string,
-    row: ChainProjectionRow & { kind: "custom" }
-  ): void => {
-    const items: ContextMenuItem[] = [
-      {
-        id: "up",
-        label: "上移",
-        run: () => ca.shiftCustomUsage(profileId, row.arrayIndex, -1)
-      },
-      {
-        id: "down",
-        label: "下移",
-        run: () => ca.shiftCustomUsage(profileId, row.arrayIndex, 1)
-      },
-      {
-        id: "move",
-        label: "移到锚点…",
-        run: () => ca.promptMoveCustomUsage(profileId, row.arrayIndex)
-      },
-      { separator: true },
-      row.usage.enabled
-        ? {
-            id: "disable",
-            label: "停用",
-            run: () => ca.setCustomUsageEnabled(profileId, row.arrayIndex, false)
-          }
-        : {
-            id: "enable",
-            label: "激活",
-            run: () => ca.setCustomUsageEnabled(profileId, row.arrayIndex, true)
-          },
-      {
-        id: "remove",
-        label: "移出链路",
-        run: () => ca.removeCustomUsage(profileId, row.arrayIndex)
-      }
-    ];
-    cm.open(e, items);
-  };
 
   const renderResourceTree = <L,>(
     nodes: TreeNode<L>[],
@@ -406,10 +347,7 @@ export function ChainAssemblyView() {
 
               const activeRoot = profileResourcesByFolder(activeRefs);
               const disabledRoot = profileResourcesByFolder(disabledRefs);
-              const chainOpen = collapse.profileChain[profile.id] ?? false;
-              const projection = chainOpen
-                ? buildChainProjection(profile.project, flatStandard, flatCustom)
-                : null;
+              const chainEditorOpen = ca.chainEditorProfileId === profile.id;
 
               return (
                 <div key={profile.id}>
@@ -427,19 +365,9 @@ export function ChainAssemblyView() {
                       <Row
                         depth={1}
                         label="链路"
-                        expandable
-                        expanded={chainOpen}
-                        onClick={() => toggleProfileChain(profile.id)}
+                        active={chainEditorOpen}
+                        onClick={() => ca.openChainEditor(profile.id)}
                       />
-                      {chainOpen &&
-                        projection!.map((row, idx) =>
-                          renderChainProjectionRow(
-                            row,
-                            idx,
-                            openChainNodeInHelp,
-                            (e, r) => customUsageMenu(e, profile.id, r)
-                          )
-                        )}
                       <DropZone
                         onDrop={(payload) =>
                           ca.dropToProfile(profile.id, payload, true)
@@ -768,55 +696,6 @@ function Row({
         </div>
       )}
     </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// `链路` projection rows
-// ─────────────────────────────────────────────────────────────────────────────
-
-function renderChainProjectionRow(
-  row: ChainProjectionRow,
-  idx: number,
-  openChainNodeInHelp: (nodeId: string) => void,
-  onCustomContextMenu: (
-    e: React.MouseEvent,
-    row: ChainProjectionRow & { kind: "custom" }
-  ) => void
-): ReactNode {
-  if (row.kind === "custom") {
-    const hint = `自定义节点 · ${row.usage.resource_instance_id}/${row.usage.node_id}`;
-    return (
-      <Row
-        key={`custom-${idx}-${row.arrayIndex}`}
-        depth={2}
-        label={`⌬ ${row.displayName}`}
-        hint={hint}
-        muted={!row.usage.enabled}
-        onClick={() => {}}
-        onContextMenu={(e) => onCustomContextMenu(e, row)}
-      />
-    );
-  }
-  const statusLabel =
-    row.coverage.status === "missing"
-      ? "缺失"
-      : row.coverage.status === "covered"
-        ? "已覆盖"
-        : `多实现 ×${row.coverage.count}`;
-  const label =
-    row.coverage.status === "multi"
-      ? `${row.order}. ${row.displayName} (×${row.coverage.count})`
-      : `${row.order}. ${row.displayName}`;
-  return (
-    <Row
-      key={`chain-${row.nodeId}`}
-      depth={2}
-      label={label}
-      muted={row.coverage.status === "missing"}
-      hint={`${row.nodeId} · ${statusLabel}`}
-      onClick={() => openChainNodeInHelp(row.nodeId)}
-    />
   );
 }
 
