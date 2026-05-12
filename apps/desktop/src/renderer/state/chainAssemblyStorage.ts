@@ -1,10 +1,19 @@
 import type {
+  ComputeResourceTemplate,
+  ComputeResourceV2,
+  CustomComputeResource,
   CustomNodeConfig,
   GuiProjectFile,
   PlatformResourceInstance,
-  ProfileResourceRef
+  ProfileResourceRef,
+  StandardComputeResource
 } from "@tinder/nextstep";
-import { migrateProfileFromV1 } from "@tinder/nextstep";
+import {
+  migrateProfileFromV1,
+  parseComputeResource,
+  projectCustomResourceToV1,
+  projectStandardResourceToV1
+} from "@tinder/nextstep";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Domain types
@@ -35,6 +44,16 @@ export interface LeafNode<L> {
   id: string;
   name: string;
   data: L;
+  /**
+   * Per-leaf v2 metadata attached during disk load. Existing chain assembly
+   * consumers continue reading `data` (legacy v1 shape); the resource editor
+   * (slice 3b+) reads `resource` and `packagePath` instead.
+   *
+   * `packagePath` is the directory containing `resource.json` for v2 packages
+   * and `null` for legacy single-file resources.
+   */
+  resource?: ComputeResourceV2;
+  packagePath?: string | null;
 }
 export type TreeNode<L> = FolderNode<L> | LeafNode<L>;
 
@@ -77,7 +96,21 @@ export interface DiskState {
   customTree: TreeNode<CustomNodeConfig>[];
   /** Keyed by profile basename (extrasKey) so it survives root rename / 另存为. */
   extras: Record<string, ProfileExtras>;
-  paths: { tinderDir: string; profilesDir: string; standardDir: string; customDir: string };
+  /**
+   * Resource templates available for the create-resource dialog. Combines
+   * built-in templates (shipped with the app) and project templates
+   * discovered under `.tinder/resource-templates/`. Built-in templates are
+   * loaded by the consumer (chain assembly context) and merged before this
+   * shape leaves the renderer.
+   */
+  templates: ComputeResourceTemplate[];
+  paths: {
+    tinderDir: string;
+    profilesDir: string;
+    standardDir: string;
+    customDir: string;
+    templatesDir: string;
+  };
 }
 
 export interface ProfileResourceItem {
@@ -261,6 +294,14 @@ export const RESOURCES_DIR = "resources";
 export const STANDARD_DIR = "standard";
 export const CUSTOM_DIR = "custom";
 export const EXTRAS_FILE = "profile-extras.json";
+/** Canonical metadata file inside a v2 resource package directory. */
+export const RESOURCE_PACKAGE_FILE = "resource.json";
+/** Subdirectories created in new resource packages. */
+export const RESOURCE_SRC_DIR = "src";
+export const RESOURCE_INCLUDE_DIR = "include";
+export const RESOURCE_ARTIFACT_DIR = "artifact";
+/** Project-template store. */
+export const RESOURCE_TEMPLATES_DIR = "resource-templates";
 
 export async function join(...segs: string[]): Promise<string> {
   return window.tinder.joinPath(...segs);
@@ -290,18 +331,23 @@ export async function ensureRootStructure(root: string): Promise<{
   profilesDir: string;
   standardDir: string;
   customDir: string;
+  templatesDir: string;
 }> {
   const tinderDir = await join(root, TINDER_DIR);
   const profilesDir = await join(tinderDir, PROFILES_DIR);
   const resourcesDir = await join(tinderDir, RESOURCES_DIR);
   const standardDir = await join(resourcesDir, STANDARD_DIR);
   const customDir = await join(resourcesDir, CUSTOM_DIR);
+  const templatesDir = await join(tinderDir, RESOURCE_TEMPLATES_DIR);
   await ensureDir(tinderDir);
   await ensureDir(profilesDir);
   await ensureDir(resourcesDir);
   await ensureDir(standardDir);
   await ensureDir(customDir);
-  return { tinderDir, profilesDir, standardDir, customDir };
+  // templatesDir is *not* eagerly created — keeping it absent until the user
+  // saves their first project template avoids polluting fresh roots with
+  // empty directories.
+  return { tinderDir, profilesDir, standardDir, customDir, templatesDir };
 }
 export async function uniqueFilePath(
   dir: string,
@@ -352,26 +398,96 @@ async function loadProfiles(profilesDir: string): Promise<ProfileEntry[]> {
   return out;
 }
 
+/**
+ * Cheap probe: a v2 resource package is a directory that directly contains
+ * `resource.json`. We check by attempting a read; absence is treated as
+ * "not a package" and the caller continues recursing as a virtual folder.
+ */
+async function readResourcePackageFile(
+  dirPath: string
+): Promise<string | null> {
+  const candidate = await join(dirPath, RESOURCE_PACKAGE_FILE);
+  try {
+    return await window.tinder.readText(candidate);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Builds the legacy-shape sidebar tree from `.tinder/resources/<kind>/`.
+ *
+ * Each leaf can come from one of two on-disk shapes:
+ *
+ * 1. Legacy single file: `<kind>/<id>.json` parsed directly as v1.
+ * 2. v2 package: `<kind>/<id>/resource.json` parsed as `ComputeResourceV2`,
+ *    then down-projected to v1 so the existing sidebar/chain projection code
+ *    keeps working. The leaf also carries the parsed v2 object and
+ *    `packagePath` so the resource editor can reload the same source.
+ *
+ * Virtual subfolders (sidebar grouping) are still supported: a directory
+ * without `resource.json` is treated as a folder and recursed into.
+ */
 async function loadResourceTree<L>(
   dir: string,
-  parseLeaf: (text: string) => L,
+  kind: "standard" | "custom",
+  projectV2: (resource: ComputeResourceV2) => L,
+  parseV1: (text: string) => L,
   leafLabel: (data: L) => string
 ): Promise<TreeNode<L>[]> {
   const items = await window.tinder.listDir(dir);
   const out: TreeNode<L>[] = [];
   for (const item of items) {
     if (item.isDirectory) {
-      const children = await loadResourceTree(item.path, parseLeaf, leafLabel);
+      const packageText = await readResourcePackageFile(item.path);
+      if (packageText !== null) {
+        try {
+          const resource = parseComputeResource(packageText, kind);
+          const data = projectV2(resource);
+          out.push({
+            kind: "leaf",
+            id: item.path,
+            name: leafLabel(data) || resource.display_name || item.name,
+            data,
+            resource,
+            packagePath: item.path
+          });
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            "[chain-assembly] skipping malformed resource package",
+            item.path,
+            err
+          );
+        }
+        continue;
+      }
+      // Not a package — treat as a virtual subfolder and recurse.
+      const children = await loadResourceTree(
+        item.path,
+        kind,
+        projectV2,
+        parseV1,
+        leafLabel
+      );
       out.push({ kind: "folder", id: item.path, name: item.name, children });
     } else if (item.name.endsWith(".json")) {
       try {
         const text = await window.tinder.readText(item.path);
-        const data = parseLeaf(text);
+        const data = parseV1(text);
+        let resource: ComputeResourceV2 | undefined;
+        try {
+          resource = parseComputeResource(text, kind);
+        } catch {
+          resource = undefined;
+        }
         out.push({
           kind: "leaf",
           id: item.path,
           name: leafLabel(data) || item.name.replace(/\.json$/, ""),
-          data
+          data,
+          resource,
+          packagePath: null
         });
       } catch (err) {
         // eslint-disable-next-line no-console
@@ -392,21 +508,74 @@ async function loadExtras(tinderDir: string): Promise<Record<string, ProfileExtr
   }
 }
 
-export async function loadFromDisk(root: string): Promise<DiskState> {
+/**
+ * Load project-scope resource templates from `.tinder/resource-templates/`.
+ * Each file is a single template JSON; malformed entries are skipped with
+ * a warning so one broken template can't block the whole pane.
+ *
+ * The `source` field is forced to `"project"` regardless of what the file
+ * declares — built-in templates come from a different code path and the
+ * editor uses this field for the source badge.
+ */
+export async function loadResourceTemplates(
+  templatesDir: string
+): Promise<ComputeResourceTemplate[]> {
+  let items: Array<{ name: string; path: string; isDirectory: boolean }>;
+  try {
+    items = await window.tinder.listDir(templatesDir);
+  } catch {
+    return []; // directory may not exist yet — fine
+  }
+  const out: ComputeResourceTemplate[] = [];
+  for (const item of items) {
+    if (item.isDirectory || !item.name.endsWith(".json")) continue;
+    try {
+      const text = await window.tinder.readText(item.path);
+      const parsed = JSON.parse(text) as ComputeResourceTemplate;
+      out.push({ ...parsed, source: "project" });
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        "[chain-assembly] skipping malformed resource template",
+        item.path,
+        err
+      );
+    }
+  }
+  return out;
+}
+
+export async function loadFromDisk(
+  root: string,
+  builtInTemplates: ComputeResourceTemplate[] = []
+): Promise<DiskState> {
   const paths = await ensureRootStructure(root);
-  const [rawProfiles, standardTree, customTree, extras] = await Promise.all([
+  const [
+    rawProfiles,
+    standardTree,
+    customTree,
+    extras,
+    projectTemplates
+  ] = await Promise.all([
     loadProfiles(paths.profilesDir),
     loadResourceTree<PlatformResourceInstance>(
       paths.standardDir,
+      "standard",
+      (resource) =>
+        projectStandardResourceToV1(resource as StandardComputeResource),
       (text) => JSON.parse(text) as PlatformResourceInstance,
       (data) => data.display_name ?? data.resource_instance_id
     ),
     loadResourceTree<CustomNodeConfig>(
       paths.customDir,
+      "custom",
+      (resource) =>
+        projectCustomResourceToV1(resource as CustomComputeResource),
       (text) => JSON.parse(text) as CustomNodeConfig,
       (data) => data.display_name ?? data.custom_node_id
     ),
-    loadExtras(paths.tinderDir)
+    loadExtras(paths.tinderDir),
+    loadResourceTemplates(paths.templatesDir)
   ]);
   // Apply lazy v1 → v2 migration so downstream code can rely on
   // `project.resources[]` being populated. Disk shape is left untouched
@@ -415,7 +584,16 @@ export async function loadFromDisk(root: string): Promise<DiskState> {
     ...entry,
     project: migrateProfileFromV1(entry.project, extras[entry.extrasKey])
   }));
-  return { profiles, standardTree, customTree, extras, paths };
+  // Project templates win on conflict with the same `template_id` — matches
+  // the dev-docs decision (R21): project layer overrides built-in.
+  const projectIds = new Set(projectTemplates.map((t) => t.template_id));
+  const templates: ComputeResourceTemplate[] = [
+    ...builtInTemplates
+      .filter((t) => !projectIds.has(t.template_id))
+      .map((t) => ({ ...t, source: "built_in" as const })),
+    ...projectTemplates
+  ];
+  return { profiles, standardTree, customTree, extras, templates, paths };
 }
 
 export async function copyTree(src: string, dst: string): Promise<void> {
@@ -429,4 +607,142 @@ export async function copyTree(src: string, dst: string): Promise<void> {
       await window.tinder.writeText(childDst, text);
     }
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// v2 resource package read/write
+//
+// Persistence helpers used by the compute resource editor. Kept independent
+// of `loadResourceTree` so the resource editor can read/write a single
+// resource without touching the sidebar's projection cache.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Absolute path of `.tinder/resources/<kind>/<resource_instance_id>`. */
+export async function resourcePackageDir(
+  paths: DiskState["paths"],
+  kind: "standard" | "custom",
+  resourceInstanceId: string
+): Promise<string> {
+  const root = kind === "standard" ? paths.standardDir : paths.customDir;
+  return await join(root, resourceInstanceId);
+}
+
+/** Absolute path of the `resource.json` inside a package directory. */
+export async function resourcePackageMetadataPath(
+  packageDir: string
+): Promise<string> {
+  return await join(packageDir, RESOURCE_PACKAGE_FILE);
+}
+
+/**
+ * Read and parse a v2 resource package from `<packageDir>/resource.json`.
+ * Caller must ensure the package directory exists; legacy single-file
+ * resources should go through `readLegacyResourceFile` instead.
+ */
+export async function readResourcePackage(
+  packageDir: string,
+  kind: "standard" | "custom"
+): Promise<ComputeResourceV2> {
+  const metadataPath = await resourcePackageMetadataPath(packageDir);
+  const text = await window.tinder.readText(metadataPath);
+  return parseComputeResource(text, kind);
+}
+
+/**
+ * Read a legacy single-file resource JSON (`.tinder/resources/<kind>/x.json`)
+ * and return its v2 in-memory shape.
+ */
+export async function readLegacyResourceFile(
+  filePath: string,
+  kind: "standard" | "custom"
+): Promise<ComputeResourceV2> {
+  const text = await window.tinder.readText(filePath);
+  return parseComputeResource(text, kind);
+}
+
+/**
+ * Walk both standard and custom resource trees and return every leaf that
+ * carries a parsed v2 `ComputeResourceV2`. Useful for cross-resource
+ * validation such as global `action_index` allocation.
+ */
+export function collectV2Resources(disk: DiskState): ComputeResourceV2[] {
+  const out: ComputeResourceV2[] = [];
+  function walk<L>(nodes: TreeNode<L>[]): void {
+    for (const node of nodes) {
+      if (node.kind === "folder") walk(node.children);
+      else if (node.resource) out.push(node.resource);
+    }
+  }
+  walk(disk.standardTree);
+  walk(disk.customTree);
+  return out;
+}
+
+/**
+ * Action indexes already claimed across all known sources:
+ * - v2 custom resources' `custom_nodes[].action_index`
+ * - legacy v1 single-file custom resources' `action_index`
+ * - profile-embedded `custom_nodes[].action_index`
+ *
+ * Skips entries for an optional `excludeResourceInstanceId` so the resource
+ * editor can exclude its own current draft from the global pool while
+ * computing the next free index.
+ */
+export function collectAllCustomActionIndexes(
+  disk: DiskState,
+  excludeResourceInstanceId?: string
+): Set<number> {
+  const used = new Set<number>();
+  for (const resource of collectV2Resources(disk)) {
+    if (resource.resource_kind !== "custom") continue;
+    if (resource.resource_instance_id === excludeResourceInstanceId) continue;
+    for (const node of (resource as CustomComputeResource).custom_nodes) {
+      if (typeof node.action_index === "number") used.add(node.action_index);
+    }
+  }
+  // Legacy v1 custom leaves without a v2 resource attached.
+  for (const leaf of flattenLeaves(disk.customTree)) {
+    if (
+      leaf.resource_instance_id === excludeResourceInstanceId ||
+      leaf.custom_node_id === excludeResourceInstanceId
+    ) {
+      continue;
+    }
+    if (typeof leaf.action_index === "number") used.add(leaf.action_index);
+  }
+  for (const profile of disk.profiles) {
+    for (const node of profile.project.custom_nodes) {
+      if (typeof node.action_index === "number") used.add(node.action_index);
+    }
+  }
+  return used;
+}
+
+/**
+ * Create the package directory layout and write `resource.json`. Sibling
+ * `src/`, `include/`, and `artifact/` subdirectories are created lazily so
+ * draft resources without source files don't pollute the tree.
+ *
+ * Returns the absolute path of the written `resource.json`.
+ */
+export async function writeResourcePackage(
+  paths: DiskState["paths"],
+  resource: ComputeResourceV2,
+  options: { ensureSubdirs?: boolean } = {}
+): Promise<{ packageDir: string; metadataPath: string }> {
+  const kind: "standard" | "custom" = resource.resource_kind;
+  const packageDir = await resourcePackageDir(
+    paths,
+    kind,
+    resource.resource_instance_id
+  );
+  await ensureDir(packageDir);
+  if (options.ensureSubdirs) {
+    await ensureDir(await join(packageDir, RESOURCE_SRC_DIR));
+    await ensureDir(await join(packageDir, RESOURCE_INCLUDE_DIR));
+    await ensureDir(await join(packageDir, RESOURCE_ARTIFACT_DIR));
+  }
+  const metadataPath = await resourcePackageMetadataPath(packageDir);
+  await window.tinder.writeText(metadataPath, JSON.stringify(resource, null, 2));
+  return { packageDir, metadataPath };
 }

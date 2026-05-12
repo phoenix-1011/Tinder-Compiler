@@ -7,6 +7,7 @@ import { Breadcrumbs } from "./Breadcrumbs";
 import { HelpDocTab } from "./HelpDocTab";
 import { ChainEditorView } from "./ChainEditorView";
 import { ProfileLifecycleView } from "./ProfileLifecycleView";
+import { ResourceEditorView } from "./ResourceEditorView";
 
 export function EditorArea() {
   const {
@@ -158,6 +159,13 @@ export function EditorArea() {
         ) : active.kind === "profile-lifecycle" ? (
           <ProfileLifecycleView
             profileId={active.profileId ?? ""}
+            tabUri={active.uri}
+          />
+        ) : active.kind === "resource-editor" ? (
+          <ResourceEditorView
+            resourceId={active.resourceId ?? ""}
+            resourceKind={active.resourceKind ?? "standard"}
+            sourcePath={active.resourceSourcePath ?? null}
             tabUri={active.uri}
           />
         ) : (

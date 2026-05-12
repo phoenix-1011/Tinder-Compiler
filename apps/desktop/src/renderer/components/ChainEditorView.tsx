@@ -2,7 +2,10 @@ import { useMemo, useState } from "react";
 import { ContextMenu, useContextMenu, type ContextMenuItem } from "./ContextMenu";
 import { useCa } from "../state/ChainAssemblyContext";
 import { useWorkspace } from "../state/WorkspaceContext";
-import { flattenLeaves } from "../state/chainAssemblyStorage";
+import {
+  collectV2Resources,
+  flattenLeaves
+} from "../state/chainAssemblyStorage";
 import {
   buildChainProjection,
   buildExecutionProjection,
@@ -71,6 +74,16 @@ export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
   );
   const flatCustom = useMemo(
     () => (ca.disk ? flattenLeaves(ca.disk.customTree) : []),
+    [ca.disk]
+  );
+  /**
+   * v2 form of every compute resource — includes legacy single-file
+   * resources via the on-read migration. Used by runtime report/config
+   * builders so the export reflects implementation.runtime_artifact and
+   * variant-resolved effective candidates.
+   */
+  const v2Resources = useMemo(
+    () => (ca.disk ? collectV2Resources(ca.disk) : []),
     [ca.disk]
   );
 
@@ -209,17 +222,13 @@ export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
   };
 
   const onGenerate = () => {
-    const report = buildRuntimeReport(
-      profile.project,
-      flatStandard,
-      flatCustom
-    );
+    const report = buildRuntimeReport(profile.project, v2Resources);
     setReportState({ report, exportPath: runtimeExportPath });
   };
 
   const onExport = async () => {
     if (!reportState) return;
-    const config = buildRuntimeConfig(profile.project, flatCustom);
+    const config = buildRuntimeConfig(profile.project, v2Resources);
     await window.tinder.writeText(
       reportState.exportPath,
       JSON.stringify(config, null, 2)

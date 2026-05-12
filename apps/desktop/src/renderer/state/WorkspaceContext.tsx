@@ -16,7 +16,10 @@ export type DocumentKind =
   | "file"
   | "help-doc"
   | "chain-editor"
-  | "profile-lifecycle";
+  | "profile-lifecycle"
+  | "resource-editor";
+
+export type ResourceEditorKind = "standard" | "custom";
 
 export interface OpenDocument {
   uri: string;
@@ -25,7 +28,8 @@ export interface OpenDocument {
    * Classifies what kind of content this tab holds. `file` uses Monaco;
    * `help-doc` renders a chain catalog node section as Markdown;
    * `chain-editor` and `profile-lifecycle` host the chain-assembly main
-   * views inside the regular tab strip.
+   * views inside the regular tab strip; `resource-editor` hosts the
+   * compute resource editor.
    */
   kind: DocumentKind;
   /**
@@ -45,6 +49,16 @@ export interface OpenDocument {
   helpNodeId?: string;
   /** Profile id for chain-editor / profile-lifecycle tabs. */
   profileId?: string;
+  /** Resource instance id for resource-editor tabs. */
+  resourceId?: string;
+  /** Standard vs custom for resource-editor tabs. */
+  resourceKind?: ResourceEditorKind;
+  /**
+   * Disk location used to reload the resource. v2 packages point at the
+   * package directory; legacy single-file resources point at the JSON path.
+   * Null means a draft that has not been saved yet.
+   */
+  resourceSourcePath?: string | null;
 }
 
 export type ActivityView =
@@ -127,6 +141,18 @@ interface WorkspaceActions {
   openChainEditor(profileId: string, displayName: string): void;
   /** Open the profile lifecycle view as a tab. Same pattern as openChainEditor. */
   openProfileLifecycle(profileId: string, displayName: string): void;
+  /**
+   * Open the compute resource editor as a tab. Synthetic uri
+   * `resource-editor://<resourceKind>/<resourceId>` — re-opening focuses
+   * the existing tab. `sourcePath` lets the editor reload the on-disk
+   * resource; pass `null` for unsaved drafts.
+   */
+  openResourceEditor(params: {
+    resourceId: string;
+    resourceKind: ResourceEditorKind;
+    displayName: string;
+    sourcePath: string | null;
+  }): void;
   closeFile(uri: string): void;
   closeActiveFile(): void;
   cycleTab(direction: 1 | -1): void;
@@ -134,6 +160,12 @@ interface WorkspaceActions {
   /** Promote a preview tab to a pinned tab. No-op when already pinned. */
   pinDocument(uri: string): void;
   updateContent(uri: string, content: string): void;
+  /**
+   * Drive the dirty dot on a synthetic tab (chain-editor / profile-lifecycle
+   * / resource-editor) without going through Monaco. Lets non-Monaco editors
+   * surface unsaved-changes state to the tab strip.
+   */
+  setSyntheticDirty(uri: string, dirty: boolean): void;
   saveDocument(uri: string): Promise<boolean>;
   saveActive(): Promise<boolean>;
   revealAt(uri: string, position: EditorPosition): void;
@@ -360,8 +392,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     (params: {
       uri: string;
       name: string;
-      kind: Extract<DocumentKind, "chain-editor" | "profile-lifecycle">;
-      profileId: string;
+      kind: Extract<
+        DocumentKind,
+        "chain-editor" | "profile-lifecycle" | "resource-editor"
+      >;
+      profileId?: string;
+      resourceId?: string;
+      resourceKind?: ResourceEditorKind;
+      resourceSourcePath?: string | null;
       preview: boolean;
     }) => {
       const existing = docsRef.current.find((d) => d.uri === params.uri);
@@ -371,6 +409,20 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           setDocuments((prev) =>
             prev.map((d) =>
               d.uri === params.uri ? { ...d, preview: false } : d
+            )
+          );
+        }
+        // Refresh source path so a saved draft can teach the existing tab
+        // where its on-disk package now lives.
+        if (
+          params.resourceSourcePath !== undefined &&
+          existing.resourceSourcePath !== params.resourceSourcePath
+        ) {
+          setDocuments((prev) =>
+            prev.map((d) =>
+              d.uri === params.uri
+                ? { ...d, resourceSourcePath: params.resourceSourcePath }
+                : d
             )
           );
         }
@@ -386,7 +438,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         baseline: "",
         dirty: false,
         eol: "lf",
-        profileId: params.profileId
+        profileId: params.profileId,
+        resourceId: params.resourceId,
+        resourceKind: params.resourceKind,
+        resourceSourcePath: params.resourceSourcePath
       };
       setDocuments((prev) => {
         if (!params.preview) return [...prev, doc];
@@ -430,6 +485,26 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [openSyntheticTab]
   );
 
+  const openResourceEditor = useCallback(
+    (params: {
+      resourceId: string;
+      resourceKind: ResourceEditorKind;
+      displayName: string;
+      sourcePath: string | null;
+    }) => {
+      openSyntheticTab({
+        uri: `resource-editor://${params.resourceKind}/${params.resourceId}`,
+        name: `${params.displayName} · 计算实例`,
+        kind: "resource-editor",
+        resourceId: params.resourceId,
+        resourceKind: params.resourceKind,
+        resourceSourcePath: params.sourcePath,
+        preview: false
+      });
+    },
+    [openSyntheticTab]
+  );
+
   const closeFile = useCallback((uri: string) => {
     setDocuments((prev) => prev.filter((d) => d.uri !== uri));
     setActiveUri((current) => {
@@ -461,6 +536,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     const idx = cur ? docs.findIndex((d) => d.uri === cur) : -1;
     const nextIdx = (idx + direction + docs.length) % docs.length;
     setActiveUri(docs[nextIdx]!.uri);
+  }, []);
+
+  const setSyntheticDirty = useCallback((uri: string, dirty: boolean) => {
+    setDocuments((prev) =>
+      prev.map((d) => (d.uri === uri ? { ...d, dirty } : d))
+    );
   }, []);
 
   const updateContent = useCallback((uri: string, content: string) => {
@@ -579,12 +660,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       openHelpDoc,
       openChainEditor,
       openProfileLifecycle,
+      openResourceEditor,
       closeFile,
       closeActiveFile,
       cycleTab,
       setActive,
       pinDocument,
       updateContent,
+      setSyntheticDirty,
       saveDocument,
       saveActive,
       revealAt,
@@ -610,10 +693,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       openHelpDoc,
       openChainEditor,
       openProfileLifecycle,
+      openResourceEditor,
       closeFile,
       setActive,
       pinDocument,
       updateContent,
+      setSyntheticDirty,
       saveDocument,
       saveActive,
       revealAt,

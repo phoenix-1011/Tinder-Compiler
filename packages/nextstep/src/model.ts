@@ -1,9 +1,17 @@
 import type {
   BuiltinNodeConfig,
   CatalogBuiltinNode,
+  ComputeResourceImplementation,
+  ComputeResourceV2,
+  CustomComputeNodeDef,
+  CustomComputeResource,
   CustomNodeConfig,
   ExecutionItem,
   GuiProjectFile,
+  ImplementationFileLanguage,
+  ImplementationFileRef,
+  ImplementationKind,
+  PlatformComputeNode,
   PlatformResourceInstance,
   PlatformTemplate,
   ProfileCustomResourceRef,
@@ -11,8 +19,12 @@ import type {
   ProfileStandardVariantRef,
   ResourceCatalogEntry,
   ResourceCatalogFile,
+  ResourceModelVariant,
+  RuntimeArtifactKind,
   RuntimeCustomNodeConfig,
   RuntimeConfigFile,
+  StandardComputeCandidate,
+  StandardComputeResource,
   ValidationIssue,
 } from "./types";
 
@@ -690,3 +702,278 @@ export function profileResourcesByFolder(
   }
   return root;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Compute resource v1 ↔ v2
+//
+// Existing single-file resource JSONs use the v1 shape (top-level `location`
+// + `impl_kind`). The v2 schema lifts those into `implementation.*`. The
+// migration runs in memory on read: on-disk shapes are only rewritten when
+// the user explicitly saves through the resource editor.
+//
+// `projectToV1` exists so callers that still consume the legacy
+// `PlatformResourceInstance` / `CustomNodeConfig` shape (sidebar tree, chain
+// projection) keep working while the v2 storage layer rolls in.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const DEFAULT_RESOURCE_STATUS = "draft" as const;
+export const DEFAULT_IMPLEMENTATION_KIND: ImplementationKind = "python_script";
+
+/** Whether a parsed object is already in v2 shape. Cheap structural check. */
+export function isComputeResourceV2(value: unknown): value is ComputeResourceV2 {
+  if (!value || typeof value !== "object") return false;
+  const obj = value as Record<string, unknown>;
+  return (
+    obj.schema_version === 2 &&
+    typeof obj.resource_kind === "string" &&
+    (obj.resource_kind === "standard" || obj.resource_kind === "custom") &&
+    typeof obj.resource_instance_id === "string" &&
+    typeof obj.implementation === "object" &&
+    obj.implementation !== null
+  );
+}
+
+function inferLanguageFromPath(path: string): ImplementationFileLanguage {
+  const lower = path.toLowerCase();
+  if (lower.endsWith(".py")) return "python";
+  if (
+    lower.endsWith(".cpp") ||
+    lower.endsWith(".cc") ||
+    lower.endsWith(".cxx") ||
+    lower.endsWith(".hpp")
+  ) {
+    return "cpp";
+  }
+  if (lower.endsWith(".c") || lower.endsWith(".h")) return "c";
+  return "unknown";
+}
+
+function inferImplementationKindFromLegacy(
+  implKind: string | undefined,
+  location: string | undefined,
+): ImplementationKind {
+  if (implKind === "python_script" || implKind === "cpp_dylib") {
+    return implKind === "cpp_dylib" ? "cpp_library" : "python_script";
+  }
+  if (location && location.toLowerCase().endsWith(".py")) return "python_script";
+  if (location && /\.(dll|so|dylib)$/i.test(location)) return "cpp_library";
+  return DEFAULT_IMPLEMENTATION_KIND;
+}
+
+function runtimeArtifactKindFor(kind: ImplementationKind): RuntimeArtifactKind {
+  return kind === "cpp_library" ? "cpp_dylib" : "python_script";
+}
+
+function emptyImplementation(kind: ImplementationKind): ComputeResourceImplementation {
+  return {
+    kind,
+    source_files: [],
+    runtime_artifact: {
+      path: "",
+      kind: runtimeArtifactKindFor(kind),
+      required_for_export: true,
+    },
+    status: { interface_status: "unknown" },
+  };
+}
+
+function legacyLocationToImplementation(
+  location: string | undefined,
+  implKind: string | undefined,
+  fileIdSeed: string,
+): ComputeResourceImplementation {
+  const kind = inferImplementationKindFromLegacy(implKind, location);
+  const impl = emptyImplementation(kind);
+  if (location && location.trim().length > 0) {
+    const language = inferLanguageFromPath(location);
+    const ref: ImplementationFileRef = {
+      file_id: `${fileIdSeed}:primary`,
+      // Legacy single-file resources don't have a managed package root, so
+      // any pre-existing location is treated as external until the user
+      // re-saves into the new package layout.
+      path: location,
+      storage: "external",
+      role: "primary",
+      language,
+    };
+    impl.source_files = [ref];
+    impl.runtime_artifact = {
+      path: location,
+      kind: runtimeArtifactKindFor(kind),
+      required_for_export: true,
+    };
+  }
+  return impl;
+}
+
+/**
+ * Lift a legacy `PlatformResourceInstance` (one JSON per resource) to the v2
+ * `StandardComputeResource` shape. Does not touch disk.
+ */
+export function migrateStandardResourceFromV1(
+  v1: PlatformResourceInstance,
+): StandardComputeResource {
+  const implementation = legacyLocationToImplementation(
+    v1.location,
+    v1.impl_kind,
+    v1.resource_instance_id,
+  );
+  const compute_nodes: StandardComputeCandidate[] = (v1.compute_nodes ?? []).map(
+    (n) => ({ ...n }),
+  );
+  return {
+    schema_version: 2,
+    resource_kind: "standard",
+    resource_instance_id: v1.resource_instance_id,
+    display_name: v1.display_name,
+    description: v1.description,
+    status: DEFAULT_RESOURCE_STATUS,
+    implementation,
+    compute_nodes,
+    model_variants: [],
+  };
+}
+
+/**
+ * Lift a legacy single-file `CustomNodeConfig` (one node per JSON) into a v2
+ * `CustomComputeResource` containing exactly that one custom node.
+ */
+export function migrateCustomResourceFromV1(
+  v1: CustomNodeConfig,
+): CustomComputeResource {
+  const implementation = legacyLocationToImplementation(
+    v1.location,
+    v1.impl_kind,
+    v1.resource_instance_id ?? v1.custom_node_id,
+  );
+  const node: CustomComputeNodeDef = {
+    node_id: v1.node_id ?? v1.custom_node_id,
+    display_name: v1.display_name,
+    description: v1.description,
+    action_index: customNodeActionIndex(v1),
+    default_parameters: v1.default_parameters,
+  };
+  return {
+    schema_version: 2,
+    resource_kind: "custom",
+    resource_instance_id: v1.resource_instance_id ?? v1.custom_node_id,
+    display_name: v1.display_name,
+    description: v1.description,
+    status: v1.enabled === false ? "disabled" : DEFAULT_RESOURCE_STATUS,
+    implementation,
+    custom_nodes: [node],
+  };
+}
+
+/**
+ * Down-project a v2 standard resource to the legacy shape consumed by the
+ * existing sidebar tree and chain projection. Lossy on candidate metadata
+ * and `model_variants` — fields the legacy code path never read anyway.
+ */
+export function projectStandardResourceToV1(
+  v2: StandardComputeResource,
+): PlatformResourceInstance {
+  const compute_nodes: PlatformComputeNode[] = v2.compute_nodes.map((c) => ({
+    node_id: c.node_id,
+    display_name: c.display_name,
+    node_type: c.node_type,
+  }));
+  return {
+    resource_instance_id: v2.resource_instance_id,
+    display_name: v2.display_name,
+    description: v2.description,
+    location: v2.implementation.runtime_artifact.path || undefined,
+    impl_kind:
+      v2.implementation.kind === "cpp_library" ? "cpp_dylib" : "python_script",
+    compute_nodes,
+  };
+}
+
+/**
+ * Down-project a v2 custom resource to the legacy `CustomNodeConfig` used by
+ * existing sidebar/chain code. v2 custom resources may carry multiple nodes;
+ * the projection picks the first as the headline node since the legacy data
+ * model only represented one node per file.
+ */
+export function projectCustomResourceToV1(
+  v2: CustomComputeResource,
+): CustomNodeConfig {
+  const headline = v2.custom_nodes[0];
+  const implKind: Exclude<CustomNodeConfig["impl_kind"], "builtin"> =
+    v2.implementation.kind === "cpp_library" ? "cpp_dylib" : "python_script";
+  return {
+    custom_node_id: v2.resource_instance_id,
+    resource_instance_id: v2.resource_instance_id,
+    node_id: headline?.node_id ?? v2.resource_instance_id,
+    display_name: v2.display_name,
+    description: v2.description ?? headline?.description ?? "",
+    module_id: v2.resource_instance_id,
+    impl_kind: implKind,
+    location: v2.implementation.runtime_artifact.path ?? "",
+    action_index: headline?.action_index ?? 0,
+    default_parameters: headline?.default_parameters,
+    enabled: v2.status !== "disabled",
+  };
+}
+
+/**
+ * Return the smallest non-negative integer that is not present in `used`.
+ * Used by the resource editor when allocating fresh `action_index` values
+ * for newly added custom nodes.
+ */
+export function nextFreeIndex(used: Iterable<number>): number {
+  const set = used instanceof Set ? used : new Set(used);
+  let n = 0;
+  while (set.has(n)) n += 1;
+  return n;
+}
+
+/**
+ * Allocate `action_index` for any custom nodes in the given v2 resource that
+ * are eligible (non-empty `description`) but still missing one. Returns a
+ * new resource object with the updated nodes; the original is not mutated.
+ *
+ * `usedExternally` should be the union of action indexes already taken by
+ * other custom resources and profile-embedded custom nodes — callers pass
+ * the global set so allocation stays globally unique.
+ */
+export function allocateCustomActionIndexes(
+  resource: CustomComputeResource,
+  usedExternally: Iterable<number>,
+): CustomComputeResource {
+  const taken = new Set<number>(usedExternally);
+  for (const node of resource.custom_nodes) {
+    if (typeof node.action_index === "number") taken.add(node.action_index);
+  }
+  let mutated = false;
+  const next = resource.custom_nodes.map((node) => {
+    if (typeof node.action_index === "number") return node;
+    if (!node.description?.trim()) return node;
+    const idx = nextFreeIndex(taken);
+    taken.add(idx);
+    mutated = true;
+    return { ...node, action_index: idx };
+  });
+  return mutated ? { ...resource, custom_nodes: next } : resource;
+}
+
+/**
+ * Parse the contents of a `resource.json` (or legacy single-file resource
+ * JSON) and return the v2 shape, regardless of which schema the file uses
+ * on disk. Throws on malformed JSON.
+ */
+export function parseComputeResource(
+  text: string,
+  hint: ComputeResourceV2["resource_kind"],
+): ComputeResourceV2 {
+  const parsed = JSON.parse(text) as unknown;
+  if (isComputeResourceV2(parsed)) return parsed;
+  if (hint === "standard") {
+    return migrateStandardResourceFromV1(parsed as PlatformResourceInstance);
+  }
+  return migrateCustomResourceFromV1(parsed as CustomNodeConfig);
+}
+
+// Re-export so callers don't need to import the variant type just to satisfy
+// `noUnusedLocals` in stricter tsconfigs.
+export type { ResourceModelVariant };

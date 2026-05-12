@@ -1,19 +1,27 @@
 import type {
-  CustomNodeConfig,
+  ComputeResourceV2,
+  CustomComputeResource,
+  CustomNodeUsage,
   GuiProjectFile,
-  PlatformResourceInstance,
   ProfileCustomResourceRef,
-  ProfileStandardVariantRef
+  ProfileStandardVariantRef,
+  StandardComputeResource
 } from "@tinder/nextstep";
 import { CHAIN_CATALOG } from "../help/chain-catalog.generated";
 
 /**
  * Validation + export model for `生成运行配置`.
  *
- * The MVP report has three severity buckets per task package decisions
- * D32–D34: blocking failures prevent export, warnings allow export but
- * remain visible, info items summarise the run. Each item carries an
- * optional locator string so the UI can hint at where to fix it.
+ * The MVP report has three severity buckets: blocking failures prevent
+ * export, warnings allow export but remain visible, info items summarise
+ * the run. Each item carries an optional locator string so the UI can
+ * hint at where to fix it.
+ *
+ * Slice 4 (Phase 4 A+B): consumes v2 `ComputeResourceV2` directly so the
+ * exported config reflects `implementation.runtime_artifact`,
+ * `model_variants[].effective_candidates`, and the actual per-node
+ * `action_index` / `handler_function` from `custom_nodes[]` — rather than
+ * the lossy v1 single-file projection.
  */
 export interface RuntimeReportItem {
   id: string;
@@ -56,14 +64,87 @@ export interface RuntimeCustomNodeExport {
   enabled: boolean;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Internal helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+function indexResources(resources: ComputeResourceV2[]) {
+  const standardById = new Map<string, StandardComputeResource>();
+  const customById = new Map<string, CustomComputeResource>();
+  for (const r of resources) {
+    if (r.resource_kind === "standard") {
+      standardById.set(r.resource_instance_id, r);
+    } else {
+      customById.set(r.resource_instance_id, r);
+    }
+  }
+  return { standardById, customById };
+}
+
+function implKindForExport(
+  r: ComputeResourceV2
+): "python_script" | "cpp_dylib" {
+  return r.implementation.kind === "cpp_library" ? "cpp_dylib" : "python_script";
+}
+
+function customNodeFor(
+  resource: CustomComputeResource,
+  nodeId: string
+): CustomComputeResource["custom_nodes"][number] | null {
+  // CustomNodeUsage stores `node_id` referencing one entry in custom_nodes[].
+  // Lookup is by exact match; node_id was assigned by the editor.
+  return resource.custom_nodes.find((n) => n.node_id === nodeId) ?? null;
+}
+
+/**
+ * Has the resource shipped any source-file `generated_region_status` that
+ * blocks export? "conflict" → blocking; "missing"/"malformed" → warning.
+ */
+function generatedStatusIssues(
+  resource: ComputeResourceV2,
+  blocking: RuntimeReportItem[],
+  warning: RuntimeReportItem[]
+): void {
+  for (const ref of resource.implementation.source_files) {
+    const status = ref.generated_region_status ?? "unknown";
+    if (status === "conflict") {
+      blocking.push({
+        id: `gen-conflict-${resource.resource_instance_id}-${ref.file_id}`,
+        title: `资源「${resource.display_name}」的源文件有生成区冲突`,
+        detail: `${ref.path}: ${status}`,
+        locator: `resource:${resource.resource_instance_id}`
+      });
+    } else if (status === "malformed") {
+      warning.push({
+        id: `gen-malformed-${resource.resource_instance_id}-${ref.file_id}`,
+        title: `${ref.path}: 生成区标记损坏`,
+        locator: `resource:${resource.resource_instance_id}`
+      });
+    } else if (status === "missing") {
+      warning.push({
+        id: `gen-missing-${resource.resource_instance_id}-${ref.file_id}`,
+        title: `${ref.path}: 生成区标记缺失`,
+        locator: `resource:${resource.resource_instance_id}`
+      });
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Report
+// ─────────────────────────────────────────────────────────────────────────────
+
 /**
  * Run validation only — no JSON is built. Useful for the report-only
  * preview path where the user just wants to see what's wrong.
+ *
+ * `v2Resources` is the v2 form of *every* compute resource discovered on
+ * disk (`collectV2Resources(disk)`); both legacy single-file resources
+ * and v2 package resources are included via the migration in `loadResourceTree`.
  */
 export function buildRuntimeReport(
   profile: GuiProjectFile,
-  standardCatalog: PlatformResourceInstance[],
-  customCatalog: CustomNodeConfig[]
+  v2Resources: ComputeResourceV2[]
 ): RuntimeReport {
   const blocking: RuntimeReportItem[] = [];
   const warning: RuntimeReportItem[] = [];
@@ -80,18 +161,13 @@ export function buildRuntimeReport(
   );
   const activeUsages = usages.filter((u) => u.enabled);
 
-  const standardById = new Map(
-    standardCatalog.map((r) => [r.resource_instance_id, r] as const)
-  );
-  const customById = new Map(
-    customCatalog.map((c) => [c.resource_instance_id ?? c.custom_node_id, c] as const)
-  );
+  const { standardById, customById } = indexResources(v2Resources);
   const activeCustomRefIds = new Set(
     activeCustomRefs.map((r) => r.resource_instance_id)
   );
   const validChainIds = new Set(CHAIN_CATALOG.orderedNodes.map((n) => n.nodeId));
 
-  // ── Blocking: missing standard / custom resources ─────────────────────
+  // ── Blocking: missing resources in the v2 catalog ──────────────────────
   for (const ref of activeStandardRefs) {
     if (!standardById.has(ref.resource_instance_id)) {
       blocking.push({
@@ -113,7 +189,21 @@ export function buildRuntimeReport(
     }
   }
 
-  // ── Blocking: custom usage references ───────────────────────────────────
+  // ── Blocking: per-resource activation / artifact / variant integrity ───
+  for (const ref of activeStandardRefs) {
+    const resource = standardById.get(ref.resource_instance_id);
+    if (!resource) continue;
+    validateResourceForExport(resource, blocking, warning, ref.variant_id);
+    generatedStatusIssues(resource, blocking, warning);
+  }
+  for (const ref of activeCustomRefs) {
+    const resource = customById.get(ref.resource_instance_id);
+    if (!resource) continue;
+    validateResourceForExport(resource, blocking, warning);
+    generatedStatusIssues(resource, blocking, warning);
+  }
+
+  // ── Blocking: custom usage references ──────────────────────────────────
   for (const usage of activeUsages) {
     if (!activeCustomRefIds.has(usage.resource_instance_id)) {
       blocking.push({
@@ -122,6 +212,27 @@ export function buildRuntimeReport(
         detail: `${usage.resource_instance_id}/${usage.node_id}`,
         locator: `usage:${usage.resource_instance_id}/${usage.node_id}`
       });
+    }
+    // Validate that the usage's node_id actually exists in the v2 resource.
+    const resource = customById.get(usage.resource_instance_id);
+    if (resource && !customNodeFor(resource, usage.node_id)) {
+      blocking.push({
+        id: `usage-missing-node-${usage.resource_instance_id}-${usage.node_id}`,
+        title: `自定义节点用法引用了不存在的 node_id`,
+        detail: `${usage.resource_instance_id}/${usage.node_id} 不在资源的 custom_nodes[] 中`,
+        locator: `resource:${usage.resource_instance_id}`
+      });
+    }
+    if (resource) {
+      const node = customNodeFor(resource, usage.node_id);
+      if (node && typeof node.action_index !== "number") {
+        blocking.push({
+          id: `usage-unalloc-action-${usage.resource_instance_id}-${usage.node_id}`,
+          title: `自定义节点未分配 action_index`,
+          detail: `${usage.resource_instance_id}/${usage.node_id} (描述可能为空)`,
+          locator: `resource:${usage.resource_instance_id}`
+        });
+      }
     }
     const anchor = usage.insert_before;
     if (anchor && anchor.kind === "builtin_core_chain") {
@@ -163,22 +274,95 @@ export function buildRuntimeReport(
 }
 
 /**
+ * Per-resource activation gates: draft status, required runtime_artifact
+ * presence, and (for standard) at least one effective candidate in the
+ * selected variant.
+ */
+function validateResourceForExport(
+  resource: ComputeResourceV2,
+  blocking: RuntimeReportItem[],
+  warning: RuntimeReportItem[],
+  selectedVariantId?: string
+): void {
+  if (resource.status === "draft") {
+    blocking.push({
+      id: `draft-${resource.resource_instance_id}`,
+      title: `资源「${resource.display_name}」仍为草稿`,
+      detail: `状态须先置为 active 才能导出`,
+      locator: `resource:${resource.resource_instance_id}`
+    });
+  } else if (resource.status === "disabled") {
+    // Disabled at resource level is unusual when the profile reference is
+    // active — treat as warning, not blocking, since the profile ref state
+    // takes precedence at runtime.
+    warning.push({
+      id: `disabled-${resource.resource_instance_id}`,
+      title: `资源「${resource.display_name}」在资源层标记为停用`,
+      locator: `resource:${resource.resource_instance_id}`
+    });
+  }
+
+  const artifact = resource.implementation.runtime_artifact;
+  if (artifact.required_for_export && !artifact.path.trim()) {
+    blocking.push({
+      id: `no-artifact-${resource.resource_instance_id}`,
+      title: `资源「${resource.display_name}」缺少运行时产物路径`,
+      detail: `implementation.runtime_artifact.path 为空`,
+      locator: `resource:${resource.resource_instance_id}`
+    });
+  }
+
+  if (resource.resource_kind === "standard" && selectedVariantId) {
+    const variant = resource.model_variants.find(
+      (v) => v.variant_id === selectedVariantId
+    );
+    if (!variant) {
+      blocking.push({
+        id: `unknown-variant-${resource.resource_instance_id}-${selectedVariantId}`,
+        title: `档案引用了不存在的资源变体`,
+        detail: `资源「${resource.display_name}」没有 variant_id = ${selectedVariantId}`,
+        locator: `resource:${resource.resource_instance_id}`
+      });
+    } else {
+      const effectiveCount = Object.keys(
+        variant.effective_candidates ?? {}
+      ).length;
+      if (effectiveCount === 0) {
+        warning.push({
+          id: `no-effective-${resource.resource_instance_id}-${selectedVariantId}`,
+          title: `资源「${resource.display_name}」的变体「${variant.display_name}」未选择任何有效候选`,
+          locator: `resource:${resource.resource_instance_id}`
+        });
+      }
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Config build
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
  * Build the flat runtime config JSON for the engine. Caller is expected
  * to have called `buildRuntimeReport` first and confirmed
  * `blocking.length === 0`. Disabled refs / usages are excluded.
+ *
+ * Uses v2 resource state to populate per-export fields:
+ * - `impl_kind` ← `resource.implementation.kind`
+ * - `location` ← `resource.implementation.runtime_artifact.path`
+ * - `action_index` / `description` ← the matching entry in
+ *   `resource.custom_nodes[]` looked up by `usage.node_id`
  */
 export function buildRuntimeConfig(
   profile: GuiProjectFile,
-  customCatalog: CustomNodeConfig[]
+  v2Resources: ComputeResourceV2[]
 ): RuntimeConfigV2 {
   const usages = (profile.custom_node_usages ?? []).filter((u) => u.enabled);
-  const customById = new Map(
-    customCatalog.map((c) => [c.resource_instance_id ?? c.custom_node_id, c] as const)
-  );
+  const { customById } = indexResources(v2Resources);
 
   // Group usages by insert_before anchor key. The same grouping logic as the
   // sidebar projection so the exported order matches what the user sees.
-  type KeyedUsage = { usage: (typeof usages)[number]; anchorChainId: string | null };
+  type KeyedUsage = { usage: CustomNodeUsage; anchorChainId: string | null };
   const usagesByAnchor = new Map<string, KeyedUsage[]>();
   const tail: KeyedUsage[] = [];
   for (const usage of usages) {
@@ -217,17 +401,23 @@ export function buildRuntimeConfig(
   }
 
   const custom_nodes: RuntimeCustomNodeExport[] = usages.map((usage) => {
-    const leaf = customById.get(usage.resource_instance_id);
+    const resource = customById.get(usage.resource_instance_id);
+    const node = resource ? customNodeFor(resource, usage.node_id) : null;
     return {
       custom_node_id: `${usage.resource_instance_id}.${usage.node_id}`,
       resource_instance_id: usage.resource_instance_id,
       node_id: usage.node_id,
-      display_name: leaf?.display_name ?? usage.node_id,
-      description: leaf?.description ?? "",
-      module_id: leaf?.module_id ?? usage.resource_instance_id,
-      impl_kind: leaf?.impl_kind ?? "python_script",
-      location: leaf?.location ?? "",
-      action_index: leaf?.action_index ?? 0,
+      display_name:
+        node?.display_name ?? resource?.display_name ?? usage.node_id,
+      description: node?.description ?? resource?.description ?? "",
+      // Module id has no v2 equivalent; use the resource instance id which
+      // is what export-time module loaders care about anyway.
+      module_id: usage.resource_instance_id,
+      impl_kind: resource
+        ? implKindForExport(resource)
+        : "python_script",
+      location: resource?.implementation.runtime_artifact.path ?? "",
+      action_index: typeof node?.action_index === "number" ? node.action_index : 0,
       enabled: true
     };
   });

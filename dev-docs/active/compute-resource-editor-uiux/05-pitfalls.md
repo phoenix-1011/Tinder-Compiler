@@ -1,11 +1,32 @@
 # 05 Pitfalls
 
 - Do not make resource editing profile-local by accident.
-- Do not duplicate build config into every profile that uses a resource.
+- Do not duplicate implementation or runtime artifact config into every profile that uses a resource.
 - Do not treat source files as draggable profile resources.
+- Do not require full capability, implementation file, or artifact setup before a resource draft can be saved.
+- Do not let draft resources become active/exported without explicit validation passing.
+- Do not model templates as separate resource schema branches.
+- Do not add a user-template layer in MVP; use project templates for reusable user/team templates.
+- Do not include concrete implementation files, runtime artifacts, generated state, or profile usage when saving a resource as a template.
+- Do not use templates when the user expects a full implementation copy; use resource copy for that.
+- Do not create shared source-file references when copying a resource.
+- Do not default copy-resource to a structure-only copy; default to copying code implementation into a new directory.
+- Do not keep original custom `action_index` values in copied custom resources.
+- Do not silently overwrite files when copying implementation files.
+- Do not introduce `.tinder/compute-resources`; use the existing `.tinder/resources` library.
+- Do not store managed source refs as absolute paths; keep them resource-package-relative.
+- Do not write external source files without explicit confirmation.
+- Do not merge resource config save, code save, and interface generation into one ambiguous action.
+- Do not hide which artifact is dirty or which save action is required.
+- Do not overwrite externally modified files automatically.
+- Do not add a redundant nested left file tree in code edit mode.
+- Do not treat the AI panel placeholder as implemented automation.
 - Do not auto-modify user code outside generated regions.
-- Do not assume all C++ resources use the same build system.
+- Do not make the resource editor responsible for chain execution order or custom-node placement.
+- Do not allow more than one effective standard candidate for the same resource variant and standard `node_id`.
+- Do not introduce build-system UI while this slice is focused on resource editing UX.
 - Do not require compilation for Python resources.
-- Do not hide stale or missing build outputs when runtime export depends on them.
-- Do not let usage views mutate profiles implicitly.
+- Do not hide missing runtime artifacts when runtime export depends on them.
+- Do not make profile usage a heavyweight top-level resource editor tab in MVP.
+- Do not let the usage summary mutate profiles implicitly.
 - Do not keep old `location` / top-level `impl_kind` implementation semantics in the target schema.

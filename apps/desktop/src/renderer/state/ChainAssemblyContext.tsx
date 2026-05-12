@@ -10,11 +10,21 @@ import {
 } from "react";
 import type {
   BuiltinExecutionAnchor,
+  ComputeResourceImplementation,
+  ComputeResourceTemplate,
+  ComputeResourceV2,
+  CustomComputeNodeDef,
+  CustomComputeResource,
   CustomNodeConfig,
   CustomNodeUsage,
   GuiProjectFile,
+  ImplementationFileRef,
+  ImplementationKind,
   PlatformResourceInstance,
-  ProfileResourceRef
+  ProfileResourceRef,
+  ResourceModelVariant,
+  StandardComputeCandidate,
+  StandardComputeResource
 } from "@tinder/nextstep";
 import {
   DEFAULT_PROFILE_VARIANT_ID,
@@ -22,23 +32,39 @@ import {
   nextCustomActionIndex,
   profileResourceRefKey
 } from "@tinder/nextstep";
+import { BUILT_IN_RESOURCE_TEMPLATES } from "./builtInResourceTemplates";
+import {
+  executeGenerationPlan,
+  hashText,
+  planResourceGeneration,
+  type GenerationApproval,
+  type GenerationPlan,
+  type GenerationResult
+} from "./interfaceGeneration";
 import { CHAIN_CATALOG } from "../help/chain-catalog.generated";
 import {
   EXTRAS_FILE,
   TINDER_DIR,
   basenameNoExt,
+  collectAllCustomActionIndexes,
   copyTree,
   flattenLeaves,
   loadCollapse,
   loadDataRoot,
   loadFromDisk,
   pathExists,
+  resourcePackageDir,
   saveCollapse,
   saveDataRoot,
   slugify,
   uniqueDirPath,
   uniqueFilePath,
+  writeResourcePackage,
+  ensureDir,
   join,
+  RESOURCE_SRC_DIR,
+  RESOURCE_INCLUDE_DIR,
+  RESOURCE_TEMPLATES_DIR,
   type CollapseState,
   type DiskState,
   type DragPayload,
@@ -49,6 +75,11 @@ import {
   type ProfileResourceItem
 } from "./chainAssemblyStorage";
 import { DialogModal, useDialog } from "../components/ChainAssemblyDialog";
+import {
+  NewResourceDialog,
+  useNewResourceDialog,
+  type NewResourceDialogResult
+} from "../components/NewResourceDialog";
 
 export interface ChainAssemblyValue {
   dataRoot: string | null;
@@ -65,8 +96,23 @@ export interface ChainAssemblyValue {
   reload: () => Promise<void>;
 
   newProfile: () => Promise<void>;
-  newStandardInstance: () => Promise<void>;
-  newCustomNode: () => Promise<void>;
+  /**
+   * Open the new-resource creation dialog. Returns the new resource info on
+   * success so callers can immediately open the editor on it, or `null`
+   * when the user cancels. `kind` seeds the initial type toggle but the
+   * user can still flip it inside the dialog.
+   */
+  promptNewResource: (
+    kind: "standard" | "custom"
+  ) => Promise<
+    | {
+        resourceInstanceId: string;
+        packagePath: string;
+        displayName: string;
+        kind: "standard" | "custom";
+      }
+    | null
+  >;
   promptNewFolder: (where: "standard" | "custom", parentPath: string | null) => Promise<void>;
 
   renameProfileById: (entry: ProfileEntry) => Promise<void>;
@@ -153,9 +199,179 @@ export interface ChainAssemblyValue {
   ) => Promise<void>;
   /** Remove a usage entry entirely. */
   removeCustomUsage: (profileId: string, arrayIndex: number) => Promise<void>;
+
+  // ─────────────── Compute resource editor (slice 3b) ────────────────
+
+  /**
+   * Persist a v2 compute resource into its package directory. Writes
+   * `.tinder/resources/<kind>/<resource_instance_id>/resource.json` and
+   * reloads disk state so the sidebar and other consumers see the update.
+   * Returns the absolute path of the package directory (the editor's new
+   * `resourceSourcePath`).
+   */
+  saveResourceConfig: (
+    resource: ComputeResourceV2,
+    options?: {
+      previousSourcePath?: string | null;
+      /**
+       * Hash captured when the editor loaded the on-disk resource.json. If
+       * the on-disk file's current hash drifts from this value, the save
+       * will throw a `SaveExternallyModifiedError` so the editor can prompt
+       * the user (reload vs overwrite vs cancel). Pass `null` to skip the
+       * check (used for first-time creates).
+       */
+      expectedDiskHash?: string | null;
+      /**
+       * Set to true to overwrite even when expectedDiskHash mismatches.
+       * Resets the externally-modified state.
+       */
+      overwriteExternal?: boolean;
+    }
+  ) => Promise<{ packagePath: string; diskHash: string }>;
+  /**
+   * Copy a compute resource into a new package. When `copyCode` is true,
+   * source files are duplicated under the new package's `src/` (or
+   * `include/`) and refs are rewritten as managed paths. When false, only
+   * structural metadata is copied; source refs and runtime artifact path
+   * are cleared.
+   */
+  copyResource: (
+    resource: ComputeResourceV2,
+    options: {
+      newDisplayName: string;
+      copyCode: boolean;
+      sourcePath: string | null;
+    }
+  ) => Promise<{ resourceInstanceId: string; packagePath: string }>;
+  /**
+   * Two-step dialog wrapper around `copyResource`. Prompts for a new
+   * display name, asks whether to duplicate code implementation, and runs
+   * the copy. Returns the created resource info, or `null` if the user
+   * cancelled at any prompt or no v2 metadata is available on the leaf.
+   */
+  promptCopyResource: (
+    leaf:
+      | LeafNode<PlatformResourceInstance>
+      | LeafNode<CustomNodeConfig>
+  ) => Promise<
+    | {
+        resourceInstanceId: string;
+        packagePath: string;
+        displayName: string;
+        kind: "standard" | "custom";
+      }
+    | null
+  >;
+
+  /**
+   * Thin wrappers around the shared dialog instance. Re-exposed so child
+   * components (resource editor, future capability editors) can drive the
+   * same modal without instantiating their own.
+   */
+  dialogPrompt: (opts: {
+    title: string;
+    defaultValue?: string;
+    placeholder?: string;
+    okLabel?: string;
+  }) => Promise<string | null>;
+  dialogConfirm: (opts: {
+    title: string;
+    message?: string;
+    okLabel?: string;
+    destructive?: boolean;
+  }) => Promise<boolean>;
+  dialogNotify: (opts: {
+    title: string;
+    message?: string;
+  }) => Promise<void>;
+
+  // ─────────────── Compute resource templates (slice 3d) ─────────────
+
+  /**
+   * Create a new draft compute resource from the given inputs, optionally
+   * prefilled by a template. Writes a fresh package directory with
+   * `status = draft`, suggested category/description/tags, and (for
+   * standard resources) the suggested model variant or standard nodes.
+   *
+   * Returns the new resource info so the caller can immediately open the
+   * editor on it.
+   */
+  createDraftResource: (params: {
+    kind: "standard" | "custom";
+    displayName: string;
+    template?: ComputeResourceTemplate | null;
+  }) => Promise<{
+    resourceInstanceId: string;
+    packagePath: string;
+    displayName: string;
+    kind: "standard" | "custom";
+  }>;
+
+  /**
+   * Persist the current resource as a *project* template under
+   * `.tinder/resource-templates/<template_id>.json`. The export strips
+   * implementation source files, runtime artifact, generated state, and
+   * profile usage; only reusable structure and suggestions are kept.
+   */
+  saveResourceAsTemplate: (
+    resource: ComputeResourceV2,
+    options: {
+      templateId: string;
+      templateVersion: string;
+      displayName: string;
+    }
+  ) => Promise<{ templatePath: string }>;
+
+  // ─────────────── Interface generation (slice 3f) ───────────────────
+
+  /**
+   * Build a generation plan for the given resource against the current
+   * on-disk state. The plan lists every source file that would be written
+   * and the human-readable summary of resource.json fields that would
+   * change. Returns warnings instead of throwing for unsupported
+   * configurations (e.g. C++ in this slice).
+   */
+  planResourceInterface: (
+    resource: ComputeResourceV2,
+    packagePath: string | null
+  ) => Promise<GenerationPlan>;
+
+  /**
+   * Execute a generation plan that the user has approved. External files
+   * require explicit per-file approval via `approvedExternalFileIds`; any
+   * external file not in the set is skipped (not overwritten).
+   *
+   * The result includes an `updatedResource` that the caller should pass
+   * to `saveResourceConfig` so the resource JSON picks up the new marker
+   * statuses. Source-file writes happen inside this action; resource.json
+   * is *not* written here.
+   */
+  executeResourceInterface: (
+    resource: ComputeResourceV2,
+    plan: GenerationPlan,
+    approval: GenerationApproval
+  ) => Promise<GenerationResult>;
 }
 
 const ChainAssemblyContext = createContext<ChainAssemblyValue | null>(null);
+
+/**
+ * Thrown by `saveResourceConfig` when the on-disk resource.json content
+ * hash differs from the hash the editor captured at load. Editors should
+ * catch this and prompt the user before retrying with `overwriteExternal`.
+ */
+export class SaveExternallyModifiedError extends Error {
+  public readonly currentDiskHash: string;
+  public readonly expectedHash: string;
+  constructor(opts: { currentDiskHash: string; expectedHash: string }) {
+    super(
+      `Resource JSON was modified externally (disk hash ${opts.currentDiskHash}, expected ${opts.expectedHash}).`
+    );
+    this.name = "SaveExternallyModifiedError";
+    this.currentDiskHash = opts.currentDiskHash;
+    this.expectedHash = opts.expectedHash;
+  }
+}
 
 // ──────────────────────────────────────────────────────────────────────────
 // Anchor helpers (used by custom node placement actions)
@@ -206,6 +422,121 @@ export function useCa(): ChainAssemblyValue {
   return ctx;
 }
 
+interface CopyImplementationSummary {
+  refs: ImplementationFileRef[];
+  suggestedArtifact?: ComputeResourceV2["implementation"]["runtime_artifact"];
+  warnings: string[];
+}
+
+/**
+ * Copy a resource's source files into a new package's `src/` or `include/`
+ * subdirectory. Managed refs are rebased against the original package dir;
+ * external refs are read by absolute path. Either way the resulting refs in
+ * the new package are `storage: "managed"` with package-relative paths.
+ *
+ * Naming conflicts inside the new package are resolved by appending `-2`,
+ * `-3`, etc. so the operation never silently overwrites a file.
+ */
+async function copyImplementationFiles(
+  resource: ComputeResourceV2,
+  newPackageDir: string,
+  originalSourcePath: string | null
+): Promise<CopyImplementationSummary> {
+  const warnings: string[] = [];
+  const refs: ImplementationFileRef[] = [];
+  const originalPackageDir =
+    originalSourcePath && !originalSourcePath.endsWith(".json")
+      ? originalSourcePath
+      : null;
+
+  let suggestedArtifact: CopyImplementationSummary["suggestedArtifact"];
+  const oldArtifactPath = resource.implementation.runtime_artifact.path ?? "";
+
+  for (const ref of resource.implementation.source_files) {
+    // Resolve the on-disk source path.
+    let srcAbs: string | null = null;
+    if (ref.storage === "managed" && originalPackageDir) {
+      srcAbs = await window.tinder.joinPath(originalPackageDir, ref.path);
+    } else if (ref.storage === "external") {
+      srcAbs = ref.path;
+    } else {
+      warnings.push(`无法定位源文件 ${ref.path}，已跳过`);
+      continue;
+    }
+
+    // Decide which sub-directory to drop the copy into.
+    const isHeader = ref.role === "header" || /\.(h|hpp|hxx)$/i.test(ref.path);
+    const subdir = isHeader ? RESOURCE_INCLUDE_DIR : RESOURCE_SRC_DIR;
+    const subdirAbs = await window.tinder.joinPath(newPackageDir, subdir);
+    try {
+      await window.tinder.createDir(subdirAbs);
+    } catch {
+      /* already exists */
+    }
+    const basename =
+      ref.path.split(/[\\/]/).pop() ?? `source-${refs.length + 1}`;
+    const dotIdx = basename.lastIndexOf(".");
+    const stem = dotIdx > 0 ? basename.slice(0, dotIdx) : basename;
+    const ext = dotIdx > 0 ? basename.slice(dotIdx) : "";
+
+    // Resolve naming conflict by appending -2, -3, …
+    let candidateName = basename;
+    let candidateAbs = await window.tinder.joinPath(subdirAbs, candidateName);
+    let n = 2;
+    while (await pathExistsLocal(candidateAbs)) {
+      candidateName = `${stem}-${n}${ext}`;
+      candidateAbs = await window.tinder.joinPath(subdirAbs, candidateName);
+      n += 1;
+    }
+    if (candidateName !== basename) {
+      warnings.push(`目标已存在同名文件，复制为 ${candidateName}`);
+    }
+
+    try {
+      const text = await window.tinder.readText(srcAbs);
+      await window.tinder.writeText(candidateAbs, text);
+    } catch (err) {
+      warnings.push(`复制 ${ref.path} 失败：${String(err)}`);
+      continue;
+    }
+
+    const relPath = `${subdir}/${candidateName}`;
+    refs.push({
+      file_id: `${resource.resource_instance_id}:${refs.length + 1}`,
+      path: relPath,
+      storage: "managed",
+      role: ref.role,
+      language: ref.language,
+      generated_region_status: "unknown"
+    });
+
+    if (oldArtifactPath && srcAbs && oldArtifactPath === ref.path) {
+      suggestedArtifact = {
+        path: relPath,
+        kind: resource.implementation.runtime_artifact.kind,
+        required_for_export:
+          resource.implementation.runtime_artifact.required_for_export
+      };
+    }
+  }
+
+  return { refs, suggestedArtifact, warnings };
+}
+
+async function pathExistsLocal(p: string): Promise<boolean> {
+  try {
+    await window.tinder.readText(p);
+    return true;
+  } catch {
+    try {
+      await window.tinder.listDir(p);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
 export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
   const [dataRoot, setDataRoot] = useState<string | null>(() => loadDataRoot());
   const [disk, setDisk] = useState<DiskState | null>(null);
@@ -214,6 +545,7 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
   const [activeProfileId, setActiveProfileId] = useState<string | null>(null);
   const [collapse, _setCollapse] = useState<CollapseState>(() => loadCollapse());
   const dialog = useDialog();
+  const newResourceDialog = useNewResourceDialog();
 
   /** Monotonic load token — newer loads invalidate in-flight previous loads. */
   const loadVersionRef = useRef(0);
@@ -237,7 +569,7 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
     const myToken = ++loadVersionRef.current;
     setLoading(true);
     setLoadError(null);
-    loadFromDisk(dataRoot)
+    loadFromDisk(dataRoot, BUILT_IN_RESOURCE_TEMPLATES)
       .then((d) => {
         if (myToken !== loadVersionRef.current) return;
         setDisk(d);
@@ -257,7 +589,7 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
     const myToken = ++loadVersionRef.current;
     setLoading(true);
     try {
-      const d = await loadFromDisk(dataRoot);
+      const d = await loadFromDisk(dataRoot, BUILT_IN_RESOURCE_TEMPLATES);
       if (myToken !== loadVersionRef.current) return;
       setDisk(d);
     } catch (err) {
@@ -356,58 +688,6 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
       await dialog.notify({ title: "创建失败", message: String(err) });
     }
   }, [disk, dialog, reload, setCollapse]);
-
-  const newStandardInstance = useCallback(async () => {
-    if (!disk) return;
-    const name = await dialog.prompt({ title: "新建标准实例", placeholder: "实例名" });
-    if (!name?.trim()) return;
-    const trimmed = name.trim();
-    try {
-      const path = await uniqueFilePath(disk.paths.standardDir, slugify(trimmed), ".json");
-      const data: PlatformResourceInstance = {
-        resource_instance_id: slugify(trimmed),
-        display_name: trimmed,
-        compute_nodes: []
-      };
-      await window.tinder.writeText(path, JSON.stringify(data, null, 2));
-      await reload();
-    } catch (err) {
-      await dialog.notify({ title: "创建失败", message: String(err) });
-    }
-  }, [disk, dialog, reload]);
-
-  const newCustomNode = useCallback(async () => {
-    if (!disk) return;
-    const name = await dialog.prompt({ title: "新建自定义节点", placeholder: "节点名" });
-    if (!name?.trim()) return;
-    const trimmed = name.trim();
-    try {
-      const path = await uniqueFilePath(disk.paths.customDir, slugify(trimmed), ".json");
-      const slug = slugify(trimmed);
-      const globalCustomNodes = [
-        ...disk.profiles.flatMap((profile) => profile.project.custom_nodes),
-        ...flattenLeaves(disk.customTree)
-      ];
-      const data: CustomNodeConfig = {
-        custom_node_id: slug,
-        resource_instance_id: slug,
-        node_id: slug,
-        display_name: trimmed,
-        description: "",
-        module_id: slug,
-        impl_kind: "python_script",
-        location: `scripts/${slug}.py`,
-        action_index: nextCustomActionIndex(globalCustomNodes),
-        default_parameters: {},
-        input: "",
-        enabled: true
-      };
-      await window.tinder.writeText(path, JSON.stringify(data, null, 2));
-      await reload();
-    } catch (err) {
-      await dialog.notify({ title: "创建失败", message: String(err) });
-    }
-  }, [disk, dialog, reload]);
 
   const renameProfileById = useCallback(
     async (entry: ProfileEntry) => {
@@ -1057,6 +1337,529 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
     [dialog, disk, writeProfile]
   );
 
+  // ────────────────────────── Resource editor ──────────────────────────
+
+  const saveResourceConfig = useCallback(
+    async (
+      resource: ComputeResourceV2,
+      options: {
+        previousSourcePath?: string | null;
+        expectedDiskHash?: string | null;
+        overwriteExternal?: boolean;
+      } = {}
+    ): Promise<{ packagePath: string; diskHash: string }> => {
+      if (!disk) throw new Error("数据根目录未选择");
+
+      // External-modification guard. We compare hashes against the file at
+      // the previous source path: that's where the editor read its
+      // baseline from. After the write we recompute the hash from the
+      // serialized text so the caller has a fresh baseline to track.
+      const prev = options.previousSourcePath ?? null;
+      if (
+        prev &&
+        options.expectedDiskHash &&
+        !options.overwriteExternal
+      ) {
+        // For package directories we compare against the inner resource.json.
+        let currentDiskPath: string;
+        if (prev.endsWith(".json")) {
+          currentDiskPath = prev;
+        } else {
+          currentDiskPath = await join(prev, "resource.json");
+        }
+        let currentText: string;
+        try {
+          currentText = await window.tinder.readText(currentDiskPath);
+        } catch {
+          // File disappeared — treat as no conflict and proceed.
+          currentText = "";
+        }
+        if (currentText) {
+          const currentDiskHash = hashText(currentText);
+          if (currentDiskHash !== options.expectedDiskHash) {
+            throw new SaveExternallyModifiedError({
+              currentDiskHash,
+              expectedHash: options.expectedDiskHash
+            });
+          }
+        }
+      }
+
+      const stamped: ComputeResourceV2 = {
+        ...resource,
+        updated_at: new Date().toISOString(),
+        created_at: resource.created_at ?? new Date().toISOString()
+      } as ComputeResourceV2;
+      const { packageDir, metadataPath } = await writeResourcePackage(
+        disk.paths,
+        stamped
+      );
+      // If we are migrating from a legacy single-file resource on disk,
+      // move the old file aside so the package directory becomes the
+      // canonical source on the next reload. Skipped when the previous
+      // source already was the same package directory.
+      if (prev && prev !== packageDir) {
+        try {
+          await window.tinder.trash(prev);
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            "[resource-editor] failed to remove legacy resource at",
+            prev,
+            err
+          );
+        }
+      }
+      // Read back what we just wrote to compute a stable disk hash for the
+      // next save's external-mod baseline. Doing this from disk (rather
+      // than hashing the in-memory string) ensures the comparison is on
+      // bytes the next compare will see.
+      let writtenText: string;
+      try {
+        writtenText = await window.tinder.readText(metadataPath);
+      } catch {
+        writtenText = JSON.stringify(stamped, null, 2);
+      }
+      const diskHash = hashText(writtenText);
+      await reload();
+      return { packagePath: packageDir, diskHash };
+    },
+    [disk, reload]
+  );
+
+  const copyResource = useCallback(
+    async (
+      resource: ComputeResourceV2,
+      options: {
+        newDisplayName: string;
+        copyCode: boolean;
+        sourcePath: string | null;
+      }
+    ): Promise<{ resourceInstanceId: string; packagePath: string }> => {
+      if (!disk) throw new Error("数据根目录未选择");
+      const newName = options.newDisplayName.trim();
+      if (!newName) throw new Error("新名称不能为空");
+      const kind = resource.resource_kind;
+      const baseRoot =
+        kind === "standard" ? disk.paths.standardDir : disk.paths.customDir;
+      // Allocate a directory name from the slug; fall back to suffixed
+      // variants when the slug collides with an existing resource package.
+      const newPackageDir = await uniqueDirPath(baseRoot, slugify(newName));
+      const newId = newPackageDir.split(/[\\/]/).pop() ?? slugify(newName);
+      const now = new Date().toISOString();
+
+      let copied: ComputeResourceV2;
+      if (resource.resource_kind === "standard") {
+        copied = {
+          ...resource,
+          resource_instance_id: newId,
+          display_name: newName,
+          status: "draft",
+          created_at: now,
+          updated_at: now,
+          // Variants/candidates carry over structurally; clear effective
+          // candidate maps so the user re-confirms in the new resource.
+          model_variants: (resource.model_variants ?? []).map((v) => ({
+            ...v,
+            effective_candidates: {}
+          })),
+          compute_nodes: resource.compute_nodes.map((c) => ({ ...c }))
+        } as StandardComputeResource;
+      } else {
+        // Reassign action_index globally for the copy so two resources
+        // never share allocated indexes. The pool must include v2
+        // custom resources' per-node indexes too — a v1-only walk only
+        // sees the first node of each legacy custom resource and would
+        // happily reuse indexes belonging to the 2nd+ nodes of a v2
+        // resource.
+        const taken = new Set<number>(
+          collectAllCustomActionIndexes(disk, resource.resource_instance_id)
+        );
+        const customNodes = resource.custom_nodes.map((n) => {
+          let idx = 0;
+          while (taken.has(idx)) idx += 1;
+          taken.add(idx);
+          return { ...n, action_index: idx };
+        });
+        copied = {
+          ...resource,
+          resource_instance_id: newId,
+          display_name: newName,
+          status: "draft",
+          created_at: now,
+          updated_at: now,
+          custom_nodes: customNodes
+        } as CustomComputeResource;
+      }
+
+      const implementation: ComputeResourceV2["implementation"] = {
+        ...resource.implementation,
+        source_files: [],
+        runtime_artifact: {
+          ...resource.implementation.runtime_artifact,
+          path: ""
+        },
+        status: { interface_status: "pending" }
+      };
+      copied = { ...copied, implementation };
+
+      // Ensure base package directory exists. Source-file copies need the
+      // src/ and include/ subdirs.
+      await window.tinder.createDir(newPackageDir);
+
+      if (options.copyCode) {
+        const summary = await copyImplementationFiles(
+          resource,
+          newPackageDir,
+          options.sourcePath ?? null
+        );
+        copied = {
+          ...copied,
+          implementation: {
+            ...copied.implementation,
+            source_files: summary.refs,
+            runtime_artifact:
+              summary.suggestedArtifact ?? copied.implementation.runtime_artifact
+          }
+        };
+        if (summary.warnings.length > 0) {
+          await dialog.notify({
+            title: "复制结果",
+            message: summary.warnings.join("\n")
+          });
+        }
+      }
+
+      await writeResourcePackage(disk.paths, copied, { ensureSubdirs: false });
+      await reload();
+      return { resourceInstanceId: newId, packagePath: newPackageDir };
+    },
+    [disk, dialog, reload]
+  );
+
+  const createDraftResource = useCallback(
+    async (params: {
+      kind: "standard" | "custom";
+      displayName: string;
+      template?: ComputeResourceTemplate | null;
+    }) => {
+      if (!disk) throw new Error("数据根目录未选择");
+      const name = params.displayName.trim();
+      if (!name) throw new Error("名称不能为空");
+      const template = params.template ?? null;
+
+      // Resource instance id derives from the user-provided name, not the
+      // template — the name is the *thing* the user is creating, the
+      // template is just suggestion prefill.
+      const baseRoot =
+        params.kind === "standard" ? disk.paths.standardDir : disk.paths.customDir;
+      const newPackageDir = await uniqueDirPath(baseRoot, slugify(name));
+      const newId = newPackageDir.split(/[\\/]/).pop() ?? slugify(name);
+      const now = new Date().toISOString();
+
+      const implementationKind: ImplementationKind =
+        template?.default_implementation_kind ?? "python_script";
+      const implementation: ComputeResourceImplementation = {
+        kind: implementationKind,
+        source_files: [],
+        runtime_artifact: {
+          path: "",
+          kind:
+            implementationKind === "cpp_library" ? "cpp_dylib" : "python_script",
+          required_for_export: true
+        },
+        status: { interface_status: "unknown" }
+      };
+
+      let resource: ComputeResourceV2;
+      if (params.kind === "standard") {
+        const suggestedVariant: ResourceModelVariant | null = template?.suggested_variant
+          ? {
+              variant_id: slugify(template.suggested_variant.variant_name),
+              display_name: template.suggested_variant.variant_name,
+              effective_candidates: {},
+              model_binding_required:
+                template.suggested_variant.model_binding_required
+            }
+          : null;
+        const suggestedCandidates: StandardComputeCandidate[] = (
+          template?.suggested_standard_node_ids ?? []
+        ).map((nodeId, i) => ({
+          node_id: nodeId,
+          display_name: nodeId,
+          node_type: "pathway",
+          candidate_id: `${slugify(nodeId)}-c${i + 1}`,
+          status: "draft"
+        }));
+        resource = {
+          schema_version: 2,
+          resource_kind: "standard",
+          resource_instance_id: newId,
+          display_name: name,
+          description: template?.default_description ?? "",
+          tags: template?.default_tags ? [...template.default_tags] : [],
+          resource_category: template?.category,
+          template_origin: template
+            ? {
+                template_id: template.template_id,
+                template_version: template.template_version
+              }
+            : undefined,
+          status: "draft",
+          implementation,
+          compute_nodes: suggestedCandidates,
+          model_variants: suggestedVariant ? [suggestedVariant] : [],
+          created_at: now,
+          updated_at: now
+        };
+      } else {
+        // For custom: build empty CustomComputeNodeDef[] from suggestions.
+        // action_index left undefined so allocation deferred until the user
+        // confirms descriptions (description must be non-empty to allocate).
+        const suggestedNodes: CustomComputeNodeDef[] = (
+          template?.suggested_custom_actions ?? []
+        ).map((action) => ({
+          node_id: slugify(action.display_name),
+          display_name: action.display_name,
+          description: action.description,
+          default_parameters: action.default_parameters,
+          status: "draft"
+        }));
+        resource = {
+          schema_version: 2,
+          resource_kind: "custom",
+          resource_instance_id: newId,
+          display_name: name,
+          description: template?.default_description ?? "",
+          tags: template?.default_tags ? [...template.default_tags] : [],
+          resource_category: template?.category,
+          template_origin: template
+            ? {
+                template_id: template.template_id,
+                template_version: template.template_version
+              }
+            : undefined,
+          status: "draft",
+          implementation,
+          custom_nodes: suggestedNodes,
+          created_at: now,
+          updated_at: now
+        };
+      }
+
+      // Allocate action_index for any suggested custom nodes that already
+      // have a description (templates can pre-supply non-empty descriptions).
+      // Pool includes every existing v1+v2 custom node + every profile-local
+      // custom node so allocation is globally unique on first save.
+      if (resource.resource_kind === "custom") {
+        const taken = new Set<number>(
+          collectAllCustomActionIndexes(disk, resource.resource_instance_id)
+        );
+        resource = {
+          ...resource,
+          custom_nodes: resource.custom_nodes.map((node) => {
+            if (typeof node.action_index === "number") return node;
+            if (!node.description?.trim()) return node;
+            let idx = 0;
+            while (taken.has(idx)) idx += 1;
+            taken.add(idx);
+            return { ...node, action_index: idx };
+          })
+        };
+      }
+
+      await writeResourcePackage(disk.paths, resource);
+      await reload();
+      return {
+        resourceInstanceId: newId,
+        packagePath: newPackageDir,
+        displayName: name,
+        kind: params.kind
+      };
+    },
+    [disk, reload]
+  );
+
+  const saveResourceAsTemplate = useCallback(
+    async (
+      resource: ComputeResourceV2,
+      options: {
+        templateId: string;
+        templateVersion: string;
+        displayName: string;
+      }
+    ): Promise<{ templatePath: string }> => {
+      if (!disk) throw new Error("数据根目录未选择");
+      const templateId = options.templateId.trim();
+      if (!templateId) throw new Error("template_id 不能为空");
+      // Ensure target directory exists. This is the first place we
+      // actually need .tinder/resource-templates/ on disk, so we lazily
+      // create it.
+      await ensureDir(disk.paths.templatesDir);
+
+      // Build the lossy export. Implementation, runtime artifact, generated
+      // state, and profile usage are intentionally stripped. Only reusable
+      // structure and suggestions survive.
+      const base: Pick<
+        ComputeResourceTemplate,
+        | "template_id"
+        | "template_version"
+        | "display_name"
+        | "source"
+        | "resource_kind"
+        | "category"
+        | "default_description"
+        | "default_tags"
+        | "default_implementation_kind"
+      > = {
+        template_id: templateId,
+        template_version: options.templateVersion || "1.0.0",
+        display_name: options.displayName.trim() || resource.display_name,
+        source: "project",
+        resource_kind: resource.resource_kind,
+        category: resource.resource_category ?? "blank",
+        default_description: resource.description ?? "",
+        default_tags: resource.tags ? [...resource.tags] : [],
+        default_implementation_kind: resource.implementation.kind
+      };
+
+      let template: ComputeResourceTemplate;
+      if (resource.resource_kind === "standard") {
+        const stdRes = resource as StandardComputeResource;
+        const firstVariant = stdRes.model_variants[0];
+        template = {
+          ...base,
+          suggested_standard_node_ids: Array.from(
+            new Set(stdRes.compute_nodes.map((c) => c.node_id))
+          ),
+          suggested_variant: firstVariant
+            ? {
+                variant_name: firstVariant.display_name,
+                model_binding_required:
+                  firstVariant.model_binding_required ?? false
+              }
+            : undefined
+        };
+      } else {
+        const customRes = resource as CustomComputeResource;
+        template = {
+          ...base,
+          suggested_custom_actions: customRes.custom_nodes.map((n) => ({
+            display_name: n.display_name,
+            description: n.description,
+            default_parameters: n.default_parameters
+          }))
+        };
+      }
+
+      const templatePath = await uniqueFilePath(
+        disk.paths.templatesDir,
+        slugify(templateId),
+        ".json"
+      );
+      await window.tinder.writeText(
+        templatePath,
+        JSON.stringify(template, null, 2)
+      );
+      await reload();
+      return { templatePath };
+    },
+    [disk, reload]
+  );
+
+  const planResourceInterface = useCallback(
+    async (
+      resource: ComputeResourceV2,
+      packagePath: string | null
+    ): Promise<GenerationPlan> => {
+      // Note: planning never writes; safe to call regardless of disk state.
+      const resolvedPackageDir =
+        packagePath && !packagePath.endsWith(".json") ? packagePath : null;
+      return planResourceGeneration(resource, resolvedPackageDir);
+    },
+    []
+  );
+
+  const executeResourceInterface = useCallback(
+    async (
+      resource: ComputeResourceV2,
+      plan: GenerationPlan,
+      approval: GenerationApproval
+    ): Promise<GenerationResult> => {
+      return executeGenerationPlan({ resource, plan, approval });
+    },
+    []
+  );
+
+  const promptNewResource = useCallback(
+    async (initialKind: "standard" | "custom") => {
+      if (!disk) return null;
+      const result: NewResourceDialogResult | null =
+        await newResourceDialog.open({
+          templates: disk.templates,
+          initialKind
+        });
+      if (!result) return null;
+      try {
+        const created = await createDraftResource({
+          kind: result.kind,
+          displayName: result.displayName,
+          template: result.template
+        });
+        return created;
+      } catch (err) {
+        await dialog.notify({ title: "创建失败", message: String(err) });
+        return null;
+      }
+    },
+    [createDraftResource, dialog, disk, newResourceDialog]
+  );
+
+  const promptCopyResource = useCallback(
+    async (
+      leaf:
+        | LeafNode<PlatformResourceInstance>
+        | LeafNode<CustomNodeConfig>
+    ) => {
+      if (!disk) return null;
+      if (!leaf.resource) {
+        await dialog.notify({
+          title: "无法复制",
+          message: "该资源缺少 v2 元数据，请先打开编辑器保存为新格式后再试。"
+        });
+        return null;
+      }
+      const newName = await dialog.prompt({
+        title: "复制计算实例",
+        placeholder: "新名称",
+        defaultValue: `${leaf.name} 副本`
+      });
+      if (!newName?.trim()) return null;
+      const copyCode = await dialog.confirm({
+        title: "复制代码实现?",
+        message:
+          "选择「确定」将源文件复制到新资源包；选择「取消」仅复制结构，源文件和产物路径将清空。",
+        okLabel: "复制代码实现"
+      });
+      try {
+        const result = await copyResource(leaf.resource, {
+          newDisplayName: newName.trim(),
+          copyCode,
+          sourcePath: leaf.packagePath ?? leaf.id
+        });
+        return {
+          ...result,
+          displayName: newName.trim(),
+          kind: leaf.resource.resource_kind
+        };
+      } catch (err) {
+        await dialog.notify({ title: "复制失败", message: String(err) });
+        return null;
+      }
+    },
+    [disk, dialog, copyResource]
+  );
+
   const value = useMemo<ChainAssemblyValue>(
     () => ({
       dataRoot,
@@ -1071,8 +1874,7 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
       saveAsNewRoot,
       reload,
       newProfile,
-      newStandardInstance,
-      newCustomNode,
+      promptNewResource,
       promptNewFolder,
       renameProfileById,
       deleteProfileById,
@@ -1092,7 +1894,17 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
       promptMoveCustomUsage,
       shiftCustomUsage,
       setCustomUsageEnabled,
-      removeCustomUsage
+      removeCustomUsage,
+      saveResourceConfig,
+      copyResource,
+      promptCopyResource,
+      createDraftResource,
+      saveResourceAsTemplate,
+      planResourceInterface,
+      executeResourceInterface,
+      dialogPrompt: dialog.prompt,
+      dialogConfirm: dialog.confirm,
+      dialogNotify: dialog.notify
     }),
     [
       dataRoot,
@@ -1106,8 +1918,7 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
       saveAsNewRoot,
       reload,
       newProfile,
-      newStandardInstance,
-      newCustomNode,
+      promptNewResource,
       promptNewFolder,
       renameProfileById,
       deleteProfileById,
@@ -1127,7 +1938,17 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
       promptMoveCustomUsage,
       shiftCustomUsage,
       setCustomUsageEnabled,
-      removeCustomUsage
+      removeCustomUsage,
+      saveResourceConfig,
+      copyResource,
+      promptCopyResource,
+      createDraftResource,
+      saveResourceAsTemplate,
+      planResourceInterface,
+      executeResourceInterface,
+      dialog.prompt,
+      dialog.confirm,
+      dialog.notify
     ]
   );
 
@@ -1135,6 +1956,9 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
     <ChainAssemblyContext.Provider value={value}>
       {children}
       {dialog.state && <DialogModal state={dialog.state} />}
+      {newResourceDialog.state && (
+        <NewResourceDialog state={newResourceDialog.state} />
+      )}
     </ChainAssemblyContext.Provider>
   );
 }

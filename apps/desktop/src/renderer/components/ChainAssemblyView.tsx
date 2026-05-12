@@ -78,7 +78,8 @@ function DropZone({
 export function ChainAssemblyView() {
   const ca = useCa();
   const cm = useContextMenu();
-  const { activeUri, openChainEditor, openProfileLifecycle } = useWorkspace();
+  const { activeUri, openChainEditor, openProfileLifecycle, openResourceEditor } =
+    useWorkspace();
   const { dataRoot, disk, loading, loadError, collapse, setCollapse } = ca;
 
   const flatStandard = useMemo(
@@ -144,6 +145,33 @@ export function ChainAssemblyView() {
     }));
   };
 
+  const copyResourceFromMenu = async (
+    kind: "standard" | "custom",
+    leaf: LeafNode<PlatformResourceInstance> | LeafNode<CustomNodeConfig>
+  ): Promise<void> => {
+    const result = await ca.promptCopyResource(leaf);
+    if (!result) return;
+    openResourceEditor({
+      resourceId: result.resourceInstanceId,
+      resourceKind: kind,
+      displayName: result.displayName,
+      sourcePath: result.packagePath
+    });
+  };
+
+  const handleNewResource = async (
+    kind: "standard" | "custom"
+  ): Promise<void> => {
+    const result = await ca.promptNewResource(kind);
+    if (!result) return;
+    openResourceEditor({
+      resourceId: result.resourceInstanceId,
+      resourceKind: result.kind,
+      displayName: result.displayName,
+      sourcePath: result.packagePath
+    });
+  };
+
   const profileMenu = (e: React.MouseEvent, profile: ProfileEntry): void => {
     cm.open(e, [
       { id: "rename", label: "重命名…", run: () => ca.renameProfileById(profile) },
@@ -182,19 +210,56 @@ export function ChainAssemblyView() {
     e: React.MouseEvent,
     leaf: LeafNode<PlatformResourceInstance>
   ): void => {
+    const resourceId = leaf.data.resource_instance_id;
     cm.open(e, [
+      {
+        id: "edit",
+        label: "编辑计算实例…",
+        run: () =>
+          openResourceEditor({
+            resourceId,
+            resourceKind: "standard",
+            displayName: leaf.name,
+            sourcePath: leaf.packagePath ?? leaf.id
+          })
+      },
+      { separator: true },
       ...joinProfileMenuItems({ kind: "standard", resource: leaf.data }),
       { separator: true },
       { id: "rename", label: "重命名…", run: () => ca.renameLeaf("standard", leaf) },
+      {
+        id: "copy",
+        label: "复制计算实例…",
+        run: () => void copyResourceFromMenu("standard", leaf)
+      },
       { separator: true },
       { id: "delete", label: "删除", run: () => ca.deleteLeaf(leaf.id, leaf.name) }
     ]);
   };
   const customLeafMenu = (e: React.MouseEvent, leaf: LeafNode<CustomNodeConfig>): void => {
+    const resourceId =
+      leaf.data.resource_instance_id ?? leaf.data.custom_node_id;
     cm.open(e, [
+      {
+        id: "edit",
+        label: "编辑计算实例…",
+        run: () =>
+          openResourceEditor({
+            resourceId,
+            resourceKind: "custom",
+            displayName: leaf.name,
+            sourcePath: leaf.packagePath ?? leaf.id
+          })
+      },
+      { separator: true },
       ...joinProfileMenuItems({ kind: "custom", node: leaf.data }),
       { separator: true },
       { id: "rename", label: "重命名…", run: () => ca.renameLeaf("custom", leaf) },
+      {
+        id: "copy",
+        label: "复制计算实例…",
+        run: () => void copyResourceFromMenu("custom", leaf)
+      },
       { separator: true },
       { id: "delete", label: "删除", run: () => ca.deleteLeaf(leaf.id, leaf.name) }
     ]);
@@ -252,12 +317,24 @@ export function ChainAssemblyView() {
   ): ReactNode => {
     return nodes.map((node) => {
       if (node.kind === "leaf") {
+        const resourceId =
+          where === "standard"
+            ? (node.data as unknown as PlatformResourceInstance).resource_instance_id
+            : (node.data as unknown as CustomNodeConfig).resource_instance_id ??
+              (node.data as unknown as CustomNodeConfig).custom_node_id;
         return (
           <Row
             key={node.id}
             depth={depth}
             label={node.name}
-            onClick={() => {}}
+            onClick={() =>
+              openResourceEditor({
+                resourceId,
+                resourceKind: where,
+                displayName: node.name,
+                sourcePath: node.packagePath ?? node.id
+              })
+            }
             draggable
             dragPayload={makeDragPayload(node.data)}
             onContextMenu={(e) => leafMenu(e, node)}
@@ -445,8 +522,8 @@ export function ChainAssemblyView() {
                 {
                   id: "new-standard",
                   icon: "add",
-                  title: "新建标准实例",
-                  onClick: ca.newStandardInstance
+                  title: "新建标准计算实例…",
+                  onClick: () => void handleNewResource("standard")
                 },
                 {
                   id: "new-standard-folder",
@@ -472,7 +549,12 @@ export function ChainAssemblyView() {
               expanded={collapse.customSub}
               onClick={toggleCustomSub}
               actions={[
-                { id: "new-custom", icon: "add", title: "新建自定义节点", onClick: ca.newCustomNode },
+                {
+                  id: "new-custom",
+                  icon: "add",
+                  title: "新建自定义计算实例…",
+                  onClick: () => void handleNewResource("custom")
+                },
                 {
                   id: "new-custom-folder",
                   icon: "new-folder",
