@@ -1258,13 +1258,22 @@ button:focus-visible {
 
 /* Editor Area ----------------------------------------------- */
 .editor-area {
-  display: grid;
-  grid-template-rows: 35px auto 1fr;
+  /* Flex column so the trailing editor-host always claims the remaining */
+  /* height regardless of whether the breadcrumbs row is rendered. The */
+  /* previous `grid-template-rows: 35px auto 1fr` layout collapsed when */
+  /* the breadcrumbs were absent — children fell into auto-sized rows */
+  /* instead of the 1fr row, leaving non-file tabs (chain-editor, */
+  /* help-doc, …) with a 0-height host. */
+  display: flex;
+  flex-direction: column;
   min-height: 0;
+  min-width: 0;
   background: var(--tc-bg-editor);
 }
 
 .editor-tabs {
+  flex: none;
+  height: 35px;
   display: flex;
   background: var(--tc-bg-tabs);
   border-bottom: 1px solid var(--tc-border);
@@ -1410,8 +1419,10 @@ button:focus-visible {
 }
 
 .editor-host {
+  flex: 1;
   position: relative;
   min-height: 0;
+  min-width: 0;
   background: var(--tc-bg-editor);
 }
 
