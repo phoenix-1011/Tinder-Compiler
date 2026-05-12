@@ -227,26 +227,6 @@ export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
     setReportState(null);
   };
 
-  // Summary counters draw from the full projection so they remain stable
-  // across mode switches — they describe the underlying profile, not the
-  // currently rendered list.
-  const counts = fullProjection.reduce(
-    (acc, row) => {
-      if (row.kind === "chain-node") {
-        acc.total += 1;
-        if (row.coverage.status === "covered") acc.covered += 1;
-        else if (row.coverage.status === "multi") acc.multi += 1;
-        else acc.missing += 1;
-      } else if (row.usage.enabled) {
-        acc.customActive += 1;
-      } else {
-        acc.customDisabled += 1;
-      }
-      return acc;
-    },
-    { total: 0, covered: 0, multi: 0, missing: 0, customActive: 0, customDisabled: 0 }
-  );
-
   return (
     <div className="chain-editor">
       <header className="chain-editor-header">
@@ -286,47 +266,31 @@ export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
         </div>
       </header>
 
-      <div className="chain-editor-summary">
-        <span>共 {counts.total} 个标准节点</span>
-        <span className="chain-editor-pill is-covered">已覆盖 {counts.covered}</span>
-        {counts.multi > 0 && (
-          <span className="chain-editor-pill is-multi">多实现 {counts.multi}</span>
-        )}
-        {counts.missing > 0 && (
-          <span className="chain-editor-pill is-missing">缺失 {counts.missing}</span>
-        )}
-        <span className="chain-editor-pill is-custom">
-          自定义 {counts.customActive}
-          {counts.customDisabled > 0 ? ` · 停用 ${counts.customDisabled}` : ""}
-        </span>
-        <div className="chain-editor-toolbar">
-          <select
-            className="chain-editor-mode-select"
-            value={chainMode}
-            onChange={(e) =>
-              setChainMode(e.target.value as "full" | "execution")
-            }
-            title="切换视图"
-            aria-label="视图模式"
-          >
-            <option value="full">完整链路节点</option>
-            <option value="execution">实际执行链路</option>
-          </select>
-          <select
-            className="chain-editor-group-select"
-            value={groupFilter}
-            onChange={(e) => setGroupFilter(e.target.value)}
-            title="按链路文档分类筛选"
-            aria-label="按分类筛选"
-          >
-            <option value="all">全部分类</option>
-            {CHAIN_CATALOG.groups.map((g) => (
-              <option key={g.docSlug} value={g.docSlug}>
-                {g.title}
-              </option>
-            ))}
-          </select>
-        </div>
+      <div className="chain-editor-toolbar">
+        <select
+          className="chain-editor-mode-select"
+          value={chainMode}
+          onChange={(e) => setChainMode(e.target.value as "full" | "execution")}
+          title="切换视图"
+          aria-label="视图模式"
+        >
+          <option value="full">完整链路节点</option>
+          <option value="execution">实际执行链路</option>
+        </select>
+        <select
+          className="chain-editor-group-select"
+          value={groupFilter}
+          onChange={(e) => setGroupFilter(e.target.value)}
+          title="按链路文档分类筛选"
+          aria-label="按分类筛选"
+        >
+          <option value="all">全部分类</option>
+          {CHAIN_CATALOG.groups.map((g) => (
+            <option key={g.docSlug} value={g.docSlug}>
+              {g.title}
+            </option>
+          ))}
+        </select>
       </div>
 
       <div
@@ -389,29 +353,28 @@ function renderFullRow(
         key={`custom-${idx}-${row.arrayIndex}`}
         className={`chain-editor-row is-custom${row.usage.enabled ? "" : " is-disabled"}`}
         onContextMenu={(e) => customMenu(e, row)}
-        title={`${row.usage.resource_instance_id}/${row.usage.node_id}`}
+        title={
+          row.usage.enabled
+            ? `${row.usage.resource_instance_id}/${row.usage.node_id}`
+            : `${row.usage.resource_instance_id}/${row.usage.node_id} · 停用`
+        }
       >
         <span className="chain-editor-row-marker">⌬</span>
         <span className="chain-editor-row-label">{row.displayName}</span>
         <span className="chain-editor-row-type is-custom">自定义</span>
         <span className="chain-editor-row-category is-custom">自定义</span>
-        <span className="chain-editor-row-status">
-          {row.usage.enabled ? "已编排" : "停用"}
-        </span>
       </div>
     );
   }
-  const statusText =
-    row.coverage.status === "missing"
-      ? "缺失"
-      : row.coverage.status === "covered"
-        ? "已覆盖"
-        : `多实现 ×${row.coverage.count}`;
   return (
     <div
       key={`chain-${row.nodeId}`}
       className={`chain-editor-row is-chain is-${row.coverage.status}`}
-      title={row.nodeId}
+      title={
+        row.coverage.status === "multi"
+          ? `${row.nodeId} · 多实现 ×${row.coverage.count}`
+          : row.nodeId
+      }
     >
       <div className="chain-editor-row-order-cell">
         <span className="chain-editor-row-order">{row.order}</span>
@@ -432,7 +395,6 @@ function renderFullRow(
       <span className="chain-editor-row-category" title={row.docSlug}>
         {row.docTitle}
       </span>
-      <span className="chain-editor-row-status">{statusText}</span>
     </div>
   );
 }
