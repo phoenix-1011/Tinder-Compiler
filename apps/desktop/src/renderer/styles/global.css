@@ -682,6 +682,57 @@ button:focus-visible {
   background: #d94a42;
 }
 
+/* Picker dialog --------------------------------------------- */
+.ca-picker-card {
+  width: 480px;
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px 20px;
+}
+.ca-picker-list {
+  flex: 1 1 auto;
+  min-height: 120px;
+  max-height: 50vh;
+  overflow-y: auto;
+  border: 1px solid var(--tc-border-soft);
+  border-radius: 3px;
+  background: var(--tc-bg-sidebar);
+}
+.ca-picker-empty {
+  padding: 14px 12px;
+  color: var(--tc-fg-muted);
+  font-size: 12.5px;
+  text-align: center;
+}
+.ca-picker-row {
+  padding: 5px 10px;
+  cursor: pointer;
+  font-size: 13px;
+  border-bottom: 1px solid transparent;
+}
+.ca-picker-row:hover,
+.ca-picker-row.is-active {
+  background: var(--tc-bg-active-row);
+  color: var(--tc-fg-strong);
+}
+.ca-picker-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ca-picker-hint {
+  font-size: 11.5px;
+  color: var(--tc-fg-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ca-picker-row.is-active .ca-picker-hint {
+  color: rgba(255, 255, 255, 0.7);
+}
+
 /* Editor Area ----------------------------------------------- */
 .editor-area {
   display: grid;

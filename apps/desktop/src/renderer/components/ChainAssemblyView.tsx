@@ -238,16 +238,72 @@ export function ChainAssemblyView() {
           label: "激活",
           run: () => ca.setProfileResourceEnabled(profileId, item, true)
         };
-    cm.open(e, [
-      toggle,
+    const items: ContextMenuItem[] = [toggle];
+    if (item.kind === "custom" && item.enabled) {
+      const customLeaf = flatCustom.find(
+        (c) => (c.resource_instance_id ?? c.custom_node_id) === item.resourceId
+      );
+      const nodeId = customLeaf?.node_id ?? customLeaf?.custom_node_id ?? item.resourceId;
+      items.push({
+        id: "add-to-chain",
+        label: "添加到链路…",
+        run: () => ca.promptAddCustomUsage(profileId, item.resourceId, nodeId)
+      });
+    }
+    items.push({
+      id: "move",
+      label: "移到…",
+      run: () => ca.promptMoveResourceFolder(profileId, item, currentFolder)
+    });
+    items.push({ separator: true });
+    items.push({
+      id: "delete",
+      label: "从档案中移除",
+      run: () => ca.removeFromProfile(profileId, item)
+    });
+    cm.open(e, items);
+  };
+
+  const customUsageMenu = (
+    e: React.MouseEvent,
+    profileId: string,
+    row: ChainProjectionRow & { kind: "custom" }
+  ): void => {
+    const items: ContextMenuItem[] = [
+      {
+        id: "up",
+        label: "上移",
+        run: () => ca.shiftCustomUsage(profileId, row.arrayIndex, -1)
+      },
+      {
+        id: "down",
+        label: "下移",
+        run: () => ca.shiftCustomUsage(profileId, row.arrayIndex, 1)
+      },
       {
         id: "move",
-        label: "移到…",
-        run: () => ca.promptMoveResourceFolder(profileId, item, currentFolder)
+        label: "移到锚点…",
+        run: () => ca.promptMoveCustomUsage(profileId, row.arrayIndex)
       },
       { separator: true },
-      { id: "delete", label: "从档案中移除", run: () => ca.removeFromProfile(profileId, item) }
-    ]);
+      row.usage.enabled
+        ? {
+            id: "disable",
+            label: "停用",
+            run: () => ca.setCustomUsageEnabled(profileId, row.arrayIndex, false)
+          }
+        : {
+            id: "enable",
+            label: "激活",
+            run: () => ca.setCustomUsageEnabled(profileId, row.arrayIndex, true)
+          },
+      {
+        id: "remove",
+        label: "移出链路",
+        run: () => ca.removeCustomUsage(profileId, row.arrayIndex)
+      }
+    ];
+    cm.open(e, items);
   };
 
   const renderResourceTree = <L,>(
@@ -377,7 +433,12 @@ export function ChainAssemblyView() {
                       />
                       {chainOpen &&
                         projection!.map((row, idx) =>
-                          renderChainProjectionRow(row, idx, openChainNodeInHelp)
+                          renderChainProjectionRow(
+                            row,
+                            idx,
+                            openChainNodeInHelp,
+                            (e, r) => customUsageMenu(e, profile.id, r)
+                          )
                         )}
                       <DropZone
                         onDrop={(payload) =>
@@ -717,17 +778,23 @@ function Row({
 function renderChainProjectionRow(
   row: ChainProjectionRow,
   idx: number,
-  openChainNodeInHelp: (nodeId: string) => void
+  openChainNodeInHelp: (nodeId: string) => void,
+  onCustomContextMenu: (
+    e: React.MouseEvent,
+    row: ChainProjectionRow & { kind: "custom" }
+  ) => void
 ): ReactNode {
   if (row.kind === "custom") {
     const hint = `自定义节点 · ${row.usage.resource_instance_id}/${row.usage.node_id}`;
     return (
       <Row
-        key={`custom-${idx}-${row.usage.resource_instance_id}-${row.usage.node_id}`}
+        key={`custom-${idx}-${row.arrayIndex}`}
         depth={2}
         label={`⌬ ${row.displayName}`}
         hint={hint}
+        muted={!row.usage.enabled}
         onClick={() => {}}
+        onContextMenu={(e) => onCustomContextMenu(e, row)}
       />
     );
   }

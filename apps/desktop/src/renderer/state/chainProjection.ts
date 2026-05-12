@@ -29,6 +29,8 @@ export interface ChainNodeRow {
 export interface CustomUsageRow {
   kind: "custom";
   usage: CustomNodeUsage;
+  /** Index in the source `profile.custom_node_usages[]` — used by edit actions. */
+  arrayIndex: number;
   /** Resolved display name for the usage. Falls back to ids when unknown. */
   displayName: string;
   /** Position relative to its anchor: anchor's node id, or `null` for tail. */
@@ -96,26 +98,33 @@ export function buildChainProjection(
     }
   }
 
-  // Group enabled custom usages by `insert_before` anchor. Only
+  // Group all custom usages (enabled or not) by `insert_before` anchor. Only
   // `builtin_core_chain` anchors are honoured here; other anchor kinds and
-  // unanchored usages flow into the tail bucket.
-  const usagesByAnchor = new Map<string, CustomNodeUsage[]>();
-  const tailUsages: CustomNodeUsage[] = [];
-  for (const usage of profile.custom_node_usages ?? []) {
-    if (!usage.enabled) continue;
+  // unanchored usages flow into the tail bucket. We carry the array index
+  // alongside each usage so edit actions can target the source position.
+  // Disabled usages stay in the projection so the user can re-enable them
+  // without leaving 链路; the renderer is responsible for muting them.
+  interface IndexedUsage {
+    usage: CustomNodeUsage;
+    arrayIndex: number;
+  }
+  const usagesByAnchor = new Map<string, IndexedUsage[]>();
+  const tailUsages: IndexedUsage[] = [];
+  (profile.custom_node_usages ?? []).forEach((usage, arrayIndex) => {
+    const indexed: IndexedUsage = { usage, arrayIndex };
     if (usage.insert_before && usage.insert_before.kind === "builtin_core_chain") {
       const key = usage.insert_before.chain_id;
       const list = usagesByAnchor.get(key) ?? [];
-      list.push(usage);
+      list.push(indexed);
       usagesByAnchor.set(key, list);
     } else {
-      tailUsages.push(usage);
+      tailUsages.push(indexed);
     }
-  }
+  });
   for (const list of usagesByAnchor.values()) {
-    list.sort((a, b) => a.order - b.order);
+    list.sort((a, b) => a.usage.order - b.usage.order);
   }
-  tailUsages.sort((a, b) => a.order - b.order);
+  tailUsages.sort((a, b) => a.usage.order - b.usage.order);
 
   // Custom leaf lookup for display names. In the current pre-multi-node
   // codebase one leaf == one node, keyed by `custom_node_id`.
@@ -134,10 +143,11 @@ export function buildChainProjection(
 
   const rows: ChainProjectionRow[] = [];
   for (const node of orderedNodes) {
-    for (const usage of usagesByAnchor.get(node.nodeId) ?? []) {
+    for (const { usage, arrayIndex } of usagesByAnchor.get(node.nodeId) ?? []) {
       rows.push({
         kind: "custom",
         usage,
+        arrayIndex,
         displayName: customDisplayName(usage),
         anchorChainId: node.nodeId
       });
@@ -156,10 +166,11 @@ export function buildChainProjection(
       }
     });
   }
-  for (const usage of tailUsages) {
+  for (const { usage, arrayIndex } of tailUsages) {
     rows.push({
       kind: "custom",
       usage,
+      arrayIndex,
       displayName: customDisplayName(usage),
       anchorChainId: null
     });

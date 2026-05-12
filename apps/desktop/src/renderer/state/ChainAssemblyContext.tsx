@@ -9,7 +9,9 @@ import {
   type ReactNode
 } from "react";
 import type {
+  BuiltinExecutionAnchor,
   CustomNodeConfig,
+  CustomNodeUsage,
   GuiProjectFile,
   PlatformResourceInstance,
   ProfileResourceRef
@@ -20,6 +22,7 @@ import {
   nextCustomActionIndex,
   profileResourceRefKey
 } from "@tinder/nextstep";
+import { CHAIN_CATALOG } from "../help/chain-catalog.generated";
 import {
   EXTRAS_FILE,
   TINDER_DIR,
@@ -111,9 +114,91 @@ export interface ChainAssemblyValue {
     item: ProfileResourceItem,
     currentFolder: string
   ) => Promise<void>;
+
+  // ──────────── Custom node placement (custom_node_usages[]) ─────────────
+
+  /**
+   * Append a new custom_node_usages entry. `order` is auto-allocated to the
+   * end of the same-anchor bucket so the new usage renders last under that
+   * anchor.
+   */
+  addCustomUsage: (
+    profileId: string,
+    customResourceId: string,
+    nodeId: string,
+    anchor: BuiltinExecutionAnchor | null
+  ) => Promise<void>;
+  /** Open the anchor picker and call addCustomUsage with the choice. */
+  promptAddCustomUsage: (
+    profileId: string,
+    customResourceId: string,
+    nodeId: string
+  ) => Promise<void>;
+  /** Re-anchor an existing usage via the picker. */
+  promptMoveCustomUsage: (
+    profileId: string,
+    arrayIndex: number
+  ) => Promise<void>;
+  /** Shift a usage up/down within its anchor by swapping the order field with a neighbour. */
+  shiftCustomUsage: (
+    profileId: string,
+    arrayIndex: number,
+    direction: 1 | -1
+  ) => Promise<void>;
+  /** Toggle usage.enabled. Disabled usages still exist in the profile but do not render in 链路 or runtime exports. */
+  setCustomUsageEnabled: (
+    profileId: string,
+    arrayIndex: number,
+    enabled: boolean
+  ) => Promise<void>;
+  /** Remove a usage entry entirely. */
+  removeCustomUsage: (profileId: string, arrayIndex: number) => Promise<void>;
 }
 
 const ChainAssemblyContext = createContext<ChainAssemblyValue | null>(null);
+
+// ──────────────────────────────────────────────────────────────────────────
+// Anchor helpers (used by custom node placement actions)
+// ──────────────────────────────────────────────────────────────────────────
+
+const ANCHOR_TAIL_ID = "__tail__";
+
+/** Stable string key for an anchor — null becomes the tail sentinel. */
+function serializeAnchor(anchor: BuiltinExecutionAnchor | null): string {
+  if (!anchor) return ANCHOR_TAIL_ID;
+  if (anchor.kind === "builtin_core_chain") return `core:${anchor.chain_id}`;
+  return `domain:${anchor.domain}:${anchor.node_id}`;
+}
+
+/**
+ * Open the dialog's pick-one selector with one option per canonical chain
+ * node plus a `(末尾)` row. Returns the chosen anchor (`null` for tail)
+ * or `undefined` if cancelled.
+ */
+async function promptForAnchor(
+  dialog: ReturnType<typeof useDialog>,
+  current: BuiltinExecutionAnchor | null,
+  title: string
+): Promise<BuiltinExecutionAnchor | null | undefined> {
+  const options = [
+    { id: ANCHOR_TAIL_ID, label: "(末尾) 在最后一个内建节点之后", hint: "无锚点" },
+    ...CHAIN_CATALOG.orderedNodes.map((n) => ({
+      id: n.nodeId,
+      label: `${n.order}. ${n.displayName}`,
+      hint: n.nodeId
+    }))
+  ];
+  const initial = current?.kind === "builtin_core_chain" ? current.chain_id : ANCHOR_TAIL_ID;
+  const picked = await dialog.pickOne({
+    title,
+    placeholder: "输入名称或 canonical id 搜索…",
+    options,
+    initialOptionId: initial
+  });
+  if (picked === null) return undefined;
+  if (picked === ANCHOR_TAIL_ID) return null;
+  return { kind: "builtin_core_chain", chain_id: picked };
+}
 
 export function useCa(): ChainAssemblyValue {
   const ctx = useContext(ChainAssemblyContext);
@@ -780,6 +865,204 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
     [disk, dialog, reload, writeExtras]
   );
 
+  // ─── Custom node placement helpers ──────────────────────────────────────
+
+  /** Shared write path: serialise a profile to disk + reload. */
+  const writeProfile = useCallback(
+    async (
+      target: ProfileEntry,
+      project: GuiProjectFile,
+      errorTitle: string
+    ): Promise<boolean> => {
+      try {
+        await window.tinder.writeText(
+          target.id,
+          JSON.stringify(project, null, 2)
+        );
+        await reload();
+        return true;
+      } catch (err) {
+        await dialog.notify({ title: errorTitle, message: String(err) });
+        return false;
+      }
+    },
+    [dialog, reload]
+  );
+
+  const addCustomUsage = useCallback(
+    async (
+      profileId: string,
+      customResourceId: string,
+      nodeId: string,
+      anchor: BuiltinExecutionAnchor | null
+    ) => {
+      if (!disk) return;
+      const target = disk.profiles.find((p) => p.id === profileId);
+      if (!target) return;
+      const usages = target.project.custom_node_usages ?? [];
+      // Allocate order at the end of the same-anchor bucket so the new
+      // usage appears last under its anchor without disturbing siblings.
+      const anchorKey = serializeAnchor(anchor);
+      const sameAnchorOrders = usages
+        .filter((u) => serializeAnchor(u.insert_before ?? null) === anchorKey)
+        .map((u) => u.order);
+      const nextOrder =
+        sameAnchorOrders.length > 0 ? Math.max(...sameAnchorOrders) + 1 : 0;
+      const newUsage: CustomNodeUsage = {
+        resource_instance_id: customResourceId,
+        node_id: nodeId,
+        enabled: true,
+        insert_before: anchor,
+        order: nextOrder
+      };
+      const updated: GuiProjectFile = {
+        ...target.project,
+        resources: target.project.resources ?? [],
+        custom_node_usages: [...usages, newUsage]
+      };
+      const ok = await writeProfile(target, updated, "添加失败");
+      if (ok) {
+        setCollapse((prev) => ({
+          ...prev,
+          profileChain: { ...prev.profileChain, [profileId]: true }
+        }));
+      }
+    },
+    [disk, setCollapse, writeProfile]
+  );
+
+  const promptAddCustomUsage = useCallback(
+    async (
+      profileId: string,
+      customResourceId: string,
+      nodeId: string
+    ) => {
+      const anchor = await promptForAnchor(dialog, null, "添加到链路");
+      if (anchor === undefined) return; // cancelled
+      await addCustomUsage(profileId, customResourceId, nodeId, anchor);
+    },
+    [addCustomUsage, dialog]
+  );
+
+  const promptMoveCustomUsage = useCallback(
+    async (profileId: string, arrayIndex: number) => {
+      if (!disk) return;
+      const target = disk.profiles.find((p) => p.id === profileId);
+      if (!target) return;
+      const usage = (target.project.custom_node_usages ?? [])[arrayIndex];
+      if (!usage) return;
+      const anchor = await promptForAnchor(
+        dialog,
+        usage.insert_before ?? null,
+        "移动到锚点"
+      );
+      if (anchor === undefined) return;
+      const anchorKey = serializeAnchor(anchor);
+      const usages = target.project.custom_node_usages ?? [];
+      const sameAnchorOrders = usages
+        .filter(
+          (u, i) =>
+            i !== arrayIndex &&
+            serializeAnchor(u.insert_before ?? null) === anchorKey
+        )
+        .map((u) => u.order);
+      const nextOrder =
+        sameAnchorOrders.length > 0 ? Math.max(...sameAnchorOrders) + 1 : 0;
+      const updatedUsages = usages.map((u, i) =>
+        i === arrayIndex
+          ? { ...u, insert_before: anchor, order: nextOrder }
+          : u
+      );
+      const updated: GuiProjectFile = {
+        ...target.project,
+        resources: target.project.resources ?? [],
+        custom_node_usages: updatedUsages
+      };
+      await writeProfile(target, updated, "移动失败");
+    },
+    [dialog, disk, writeProfile]
+  );
+
+  const shiftCustomUsage = useCallback(
+    async (profileId: string, arrayIndex: number, direction: 1 | -1) => {
+      if (!disk) return;
+      const target = disk.profiles.find((p) => p.id === profileId);
+      if (!target) return;
+      const usages = target.project.custom_node_usages ?? [];
+      const usage = usages[arrayIndex];
+      if (!usage) return;
+      const anchorKey = serializeAnchor(usage.insert_before ?? null);
+      // Find same-anchor siblings sorted by order; locate self and target neighbour.
+      const siblings = usages
+        .map((u, i) => ({ u, i }))
+        .filter(({ u }) => serializeAnchor(u.insert_before ?? null) === anchorKey)
+        .sort((a, b) => a.u.order - b.u.order);
+      const selfIdx = siblings.findIndex(({ i }) => i === arrayIndex);
+      const swapIdx = selfIdx + direction;
+      if (swapIdx < 0 || swapIdx >= siblings.length) return;
+      const neighbour = siblings[swapIdx]!;
+      const updatedUsages = usages.map((u, i) => {
+        if (i === arrayIndex) return { ...u, order: neighbour.u.order };
+        if (i === neighbour.i) return { ...u, order: usage.order };
+        return u;
+      });
+      const updated: GuiProjectFile = {
+        ...target.project,
+        resources: target.project.resources ?? [],
+        custom_node_usages: updatedUsages
+      };
+      await writeProfile(target, updated, "调序失败");
+    },
+    [disk, writeProfile]
+  );
+
+  const setCustomUsageEnabled = useCallback(
+    async (profileId: string, arrayIndex: number, enabled: boolean) => {
+      if (!disk) return;
+      const target = disk.profiles.find((p) => p.id === profileId);
+      if (!target) return;
+      const usages = target.project.custom_node_usages ?? [];
+      if (!usages[arrayIndex] || usages[arrayIndex].enabled === enabled) return;
+      const updatedUsages = usages.map((u, i) =>
+        i === arrayIndex ? { ...u, enabled } : u
+      );
+      const updated: GuiProjectFile = {
+        ...target.project,
+        resources: target.project.resources ?? [],
+        custom_node_usages: updatedUsages
+      };
+      await writeProfile(
+        target,
+        updated,
+        enabled ? "激活失败" : "停用失败"
+      );
+    },
+    [disk, writeProfile]
+  );
+
+  const removeCustomUsage = useCallback(
+    async (profileId: string, arrayIndex: number) => {
+      if (!disk) return;
+      const target = disk.profiles.find((p) => p.id === profileId);
+      if (!target) return;
+      const usages = target.project.custom_node_usages ?? [];
+      if (!usages[arrayIndex]) return;
+      const ok = await dialog.confirm({
+        title: "移出链路",
+        message: `确认移除该自定义节点的链路放置？`,
+        destructive: true
+      });
+      if (!ok) return;
+      const updated: GuiProjectFile = {
+        ...target.project,
+        resources: target.project.resources ?? [],
+        custom_node_usages: usages.filter((_, i) => i !== arrayIndex)
+      };
+      await writeProfile(target, updated, "移除失败");
+    },
+    [dialog, disk, writeProfile]
+  );
+
   const value = useMemo<ChainAssemblyValue>(
     () => ({
       dataRoot,
@@ -809,7 +1092,13 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
       removeFromProfile,
       setProfileResourceEnabled,
       setProfileResourceFolder,
-      promptMoveResourceFolder
+      promptMoveResourceFolder,
+      addCustomUsage,
+      promptAddCustomUsage,
+      promptMoveCustomUsage,
+      shiftCustomUsage,
+      setCustomUsageEnabled,
+      removeCustomUsage
     }),
     [
       dataRoot,
@@ -838,7 +1127,13 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
       removeFromProfile,
       setProfileResourceEnabled,
       setProfileResourceFolder,
-      promptMoveResourceFolder
+      promptMoveResourceFolder,
+      addCustomUsage,
+      promptAddCustomUsage,
+      promptMoveCustomUsage,
+      shiftCustomUsage,
+      setCustomUsageEnabled,
+      removeCustomUsage
     ]
   );
 
