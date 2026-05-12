@@ -6,8 +6,12 @@ import type {
   GuiProjectFile,
   PlatformResourceInstance,
   PlatformTemplate,
+  ProfileCustomResourceRef,
+  ProfileResourceRef,
+  ProfileStandardVariantRef,
   ResourceCatalogEntry,
   ResourceCatalogFile,
+  RuntimeCustomNodeConfig,
   RuntimeConfigFile,
   ValidationIssue,
 } from "./types";
@@ -23,6 +27,34 @@ export const DEFAULT_CUSTOM_NODE_INPUT: CustomNodeInputConfig = {
 };
 
 export const DEFAULT_CUSTOM_NODE_INPUT_TEXT = JSON.stringify(DEFAULT_CUSTOM_NODE_INPUT, null, 2);
+
+function legacyInputOrNull(text: string | undefined): CustomNodeInputConfig | null {
+  if (!text) {
+    return null;
+  }
+  const parsed = validateCustomNodeInput(text);
+  return parsed.ok ? parsed.value : null;
+}
+
+export function customNodeActionIndex(node: CustomNodeConfig): number {
+  if (
+    typeof node.action_index === "number" &&
+    Number.isInteger(node.action_index) &&
+    node.action_index >= 0
+  ) {
+    return node.action_index;
+  }
+  return legacyInputOrNull(node.input)?.action_index ?? 0;
+}
+
+export function nextCustomActionIndex(nodes: CustomNodeConfig[]): number {
+  const used = new Set(nodes.map((node) => customNodeActionIndex(node)));
+  let next = 0;
+  while (used.has(next)) {
+    next += 1;
+  }
+  return next;
+}
 
 export const CORE_CHAIN_IDS = [
   "P-01",
@@ -159,11 +191,36 @@ export function validateCustomNodeInput(text: string):
 }
 
 function normalizeCustomNodes(customNodes: CustomNodeConfig[]): CustomNodeConfig[] {
-  return customNodes.map((node) => ({
-    ...node,
+  return customNodes.map((node) => {
+    const legacyInput = legacyInputOrNull(node.input);
+    const actionIndex = customNodeActionIndex(node);
+    return {
+      ...node,
+      resource_instance_id: node.resource_instance_id || node.custom_node_id,
+      node_id: node.node_id || node.custom_node_id,
+      description: node.description ?? "",
+      module_id: node.module_id || node.custom_node_id,
+      action_index: actionIndex,
+      default_parameters: node.default_parameters ?? legacyInput?.parameters ?? {},
+      input: node.input ?? "",
+    };
+  });
+}
+
+function runtimeCustomNode(node: CustomNodeConfig): RuntimeCustomNodeConfig {
+  return {
+    custom_node_id: node.custom_node_id,
+    resource_instance_id: node.resource_instance_id || node.custom_node_id,
+    node_id: node.node_id || node.custom_node_id,
+    display_name: node.display_name,
     description: node.description ?? "",
     module_id: node.module_id || node.custom_node_id,
-  }));
+    impl_kind: node.impl_kind,
+    location: node.location,
+    action_index: customNodeActionIndex(node),
+    input: node.input ?? "",
+    enabled: node.enabled,
+  };
 }
 
 function normalizePlatformResources(
@@ -319,7 +376,7 @@ export function projectToRuntimeConfig(project: GuiProjectFile): RuntimeConfigFi
     version: 1,
     init_values: initValues,
     ordered_execution_list: project.ordered_execution_list,
-    custom_nodes: project.custom_nodes,
+    custom_nodes: project.custom_nodes.map(runtimeCustomNode),
   };
 }
 
@@ -351,6 +408,7 @@ export function validateProject(
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   const seenCustomIds = new Set<string>();
+  const seenActionIndexes = new Map<number, string>();
   const sequencedCustomIds = new Set<string>();
 
   for (const config of project.builtin_node_configs) {
@@ -398,12 +456,37 @@ export function validateProject(
       issues.push({ item_id: itemId, message: "Missing file location." });
     }
 
-    const inputValidation = validateCustomNodeInput(customNode.input);
-    if (!inputValidation.ok) {
+    const hasInvalidTopLevelActionIndex =
+      customNode.action_index !== undefined &&
+      (typeof customNode.action_index !== "number" ||
+        !Number.isInteger(customNode.action_index) ||
+        customNode.action_index < 0);
+    const legacyInput = legacyInputOrNull(customNode.input);
+    const hasNoActionIndex =
+      customNode.action_index === undefined && legacyInput?.action_index === undefined;
+    const actionIndex = customNodeActionIndex(customNode);
+    if (hasInvalidTopLevelActionIndex || hasNoActionIndex) {
       issues.push({
         item_id: itemId,
-        message: `Invalid custom input payload: ${inputValidation.error}`,
+        message: "action_index must be an integer greater than or equal to 0.",
       });
+    }
+    const previousActionOwner = seenActionIndexes.get(actionIndex);
+    if (previousActionOwner) {
+      issues.push({
+        item_id: itemId,
+        message: `action_index is duplicated with ${previousActionOwner}.`,
+      });
+    } else {
+      seenActionIndexes.set(actionIndex, itemId);
+    }
+    for (const [key, value] of Object.entries(customNode.default_parameters ?? {})) {
+      if (!key.trim()) {
+        issues.push({ item_id: itemId, message: "default_parameters cannot contain an empty key." });
+      }
+      if (typeof value !== "string") {
+        issues.push({ item_id: itemId, message: `default_parameters.${key} must be a string.` });
+      }
     }
 
     if (
@@ -462,4 +545,148 @@ export function executionItemLabel(
       (node) => node.domain === item.domain && node.node_id === item.node_id,
     )?.display_name ?? `${item.domain}.${item.node_id}`
   );
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Profile v2: lazy migration and resource view helpers
+// ──────────────────────────────────────────────────────────────────────────
+
+/**
+ * Default variant id assigned during migration. v1 standard resources have no
+ * explicit variants; everything they declared participates under one
+ * synthetic variant whose name is constant so future variant editors can
+ * recognise it.
+ */
+export const DEFAULT_PROFILE_VARIANT_ID = "default";
+
+/**
+ * Pure migration from a v1 profile shape + its `profile-extras.json` entry to
+ * the v2 in-memory shape.
+ *
+ * - v1 profiles already containing `resources[]` are passed through after
+ *   ensuring both new arrays exist.
+ * - v1 standard participation comes from two sources:
+ *   1. `builtin_node_configs[].binding_resource_id`
+ *   2. `profile-extras.json`'s `extraStandardIds`
+ *   Both produce `ProfileStandardVariantRef` entries using the synthetic
+ *   `DEFAULT_PROFILE_VARIANT_ID` variant and `enabled: true` (v1 had no
+ *   disabled state).
+ * - v1 `custom_nodes[]` each become a `ProfileCustomResourceRef` keyed by
+ *   `custom_node_id`. v1 also had no placement, so `custom_node_usages[]`
+ *   stays empty until the renderer authors it.
+ *
+ * The function never touches disk and never mutates its inputs.
+ */
+export function migrateProfileFromV1(
+  profile: GuiProjectFile,
+  extras: { extraStandardIds?: string[] } | null | undefined,
+): GuiProjectFile {
+  if (profile.resources && profile.custom_node_usages) {
+    return profile;
+  }
+  const resources: ProfileResourceRef[] = profile.resources
+    ? [...profile.resources]
+    : [];
+  const seen = new Set(
+    resources.map((ref) => profileResourceRefKey(ref)),
+  );
+
+  const pushStandard = (resourceId: string) => {
+    const ref: ProfileStandardVariantRef = {
+      kind: "standard",
+      resource_instance_id: resourceId,
+      variant_id: DEFAULT_PROFILE_VARIANT_ID,
+      enabled: true,
+    };
+    const key = profileResourceRefKey(ref);
+    if (seen.has(key)) return;
+    seen.add(key);
+    resources.push(ref);
+  };
+
+  for (const cfg of profile.builtin_node_configs) {
+    if (cfg.binding_resource_id) pushStandard(cfg.binding_resource_id);
+  }
+  for (const id of extras?.extraStandardIds ?? []) {
+    pushStandard(id);
+  }
+  for (const custom of profile.custom_nodes) {
+    const ref: ProfileCustomResourceRef = {
+      kind: "custom",
+      resource_instance_id: custom.custom_node_id,
+      enabled: custom.enabled ?? true,
+    };
+    const key = profileResourceRefKey(ref);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    resources.push(ref);
+  }
+
+  return {
+    ...profile,
+    resources,
+    custom_node_usages: profile.custom_node_usages ?? [],
+  };
+}
+
+/** Stable dedupe key for a profile resource ref. */
+export function profileResourceRefKey(ref: ProfileResourceRef): string {
+  return ref.kind === "standard"
+    ? `standard:${ref.resource_instance_id}:${ref.variant_id}`
+    : `custom:${ref.resource_instance_id}`;
+}
+
+/** Resource refs flagged active. Migration always runs on v1 profiles first. */
+export function profileActiveResources(
+  profile: GuiProjectFile,
+): ProfileResourceRef[] {
+  return (profile.resources ?? []).filter((ref) => ref.enabled);
+}
+
+export function profileDisabledResources(
+  profile: GuiProjectFile,
+): ProfileResourceRef[] {
+  return (profile.resources ?? []).filter((ref) => !ref.enabled);
+}
+
+/**
+ * Folder node used by the renderer to render `活跃资源` / `停用资源` as a
+ * virtual folder tree keyed by `ProfileResourceRef.folder`.
+ */
+export interface ProfileResourceFolder {
+  name: string;
+  path: string;
+  children: ProfileResourceFolder[];
+  resources: ProfileResourceRef[];
+}
+
+/** Group refs into a nested folder structure based on `folder` segments. */
+export function profileResourcesByFolder(
+  refs: ProfileResourceRef[],
+): ProfileResourceFolder {
+  const root: ProfileResourceFolder = {
+    name: "",
+    path: "",
+    children: [],
+    resources: [],
+  };
+  for (const ref of refs) {
+    const segments = (ref.folder ?? "")
+      .split("/")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    let cursor = root;
+    let acc = "";
+    for (const seg of segments) {
+      acc = acc ? `${acc}/${seg}` : seg;
+      let child = cursor.children.find((c) => c.name === seg);
+      if (!child) {
+        child = { name: seg, path: acc, children: [], resources: [] };
+        cursor.children.push(child);
+      }
+      cursor = child;
+    }
+    cursor.resources.push(ref);
+  }
+  return root;
 }
