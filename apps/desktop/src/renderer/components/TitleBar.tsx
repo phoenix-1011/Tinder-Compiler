@@ -46,7 +46,8 @@ const HELP_MENU: MenuItem[] = [
 ];
 
 export function TitleBar() {
-  const { folder, openFolderByPath } = useWorkspace();
+  const { folder, openFolderByPath, canGoBack, canGoForward, goBack, goForward } =
+    useWorkspace();
   const [recents, setRecents] = useState<RecentFolder[]>([]);
 
   // Eagerly load recents so the menu is responsive when opened.
@@ -103,6 +104,28 @@ export function TitleBar() {
         <TitleBarMenu label="视图" items={VIEW_MENU} />
         <TitleBarMenu label="运行" items={RUN_MENU} />
         <TitleBarMenu label="帮助" items={HELP_MENU} />
+      </div>
+      <div className="titlebar-nav" role="group" aria-label="历史导航">
+        <button
+          type="button"
+          className="titlebar-nav-btn"
+          disabled={!canGoBack}
+          onClick={() => goBack()}
+          title="后退到上一个视图"
+          aria-label="后退"
+        >
+          <span className="codicon codicon-arrow-left" aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          className="titlebar-nav-btn"
+          disabled={!canGoForward}
+          onClick={() => goForward()}
+          title="前进到下一个视图"
+          aria-label="前进"
+        >
+          <span className="codicon codicon-arrow-right" aria-hidden="true" />
+        </button>
       </div>
       <div className="titlebar-spacer" />
     </div>

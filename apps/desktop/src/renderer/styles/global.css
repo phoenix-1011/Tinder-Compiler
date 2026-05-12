@@ -289,6 +289,40 @@ button:focus-visible {
   flex: 1;
 }
 
+.titlebar-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  /* Visible breathing room after the 帮助 menu so the nav isn't read */
+  /* as another menu entry. */
+  margin-left: 16px;
+}
+
+.titlebar-nav-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: var(--tc-fg-default);
+  border-radius: 3px;
+  cursor: pointer;
+}
+.titlebar-nav-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--tc-fg-strong);
+}
+.titlebar-nav-btn:disabled {
+  color: var(--tc-fg-muted);
+  opacity: 0.5;
+  cursor: default;
+}
+.titlebar-nav-btn .codicon {
+  font-size: 14px;
+}
+
 /* Activity Bar ---------------------------------------------- */
 .activitybar {
   background: var(--tc-bg-activitybar);

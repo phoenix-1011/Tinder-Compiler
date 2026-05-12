@@ -70,6 +70,10 @@ interface WorkspaceState {
   /** uri → last save status. */
   saveStatus: Record<string, SaveStatus>;
   revealRequest: RevealRequest | null;
+  /** Whether a previous activeView is reachable via goBack(). */
+  canGoBack: boolean;
+  /** Whether a popped activeView is reachable via goForward(). */
+  canGoForward: boolean;
 }
 
 export type SaveStatus =
@@ -96,6 +100,10 @@ interface WorkspaceActions {
   openFolder(): Promise<void>;
   openFolderByPath(path: string): Promise<void>;
   setActiveView(view: ActivityView): void;
+  /** Pop the previous activeView from history. No-op when canGoBack is false. */
+  goBack(): void;
+  /** Push back into a previously popped activeView. */
+  goForward(): void;
   openFile(path: string, options?: OpenFileOptions): Promise<void>;
   /**
    * Open a chain catalog node section as a tab. The tab renders Markdown
@@ -153,9 +161,48 @@ function languageFor(name: string): string {
   return LANGUAGE_BY_EXT[ext] ?? "plaintext";
 }
 
+const VIEW_HISTORY_LIMIT = 50;
+
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [folder, setFolder] = useState<OpenedFolder | null>(null);
-  const [activeView, setActiveView] = useState<ActivityView>("explorer");
+  const [activeView, _setActiveView] = useState<ActivityView>("explorer");
+  const [viewBack, setViewBack] = useState<ActivityView[]>([]);
+  const [viewForward, setViewForward] = useState<ActivityView[]>([]);
+  const activeViewRef = useRef<ActivityView>(activeView);
+  activeViewRef.current = activeView;
+
+  const setActiveView = useCallback((view: ActivityView) => {
+    if (view === activeViewRef.current) return;
+    setViewBack((prev) => {
+      const next = [...prev, activeViewRef.current];
+      return next.length > VIEW_HISTORY_LIMIT
+        ? next.slice(next.length - VIEW_HISTORY_LIMIT)
+        : next;
+    });
+    setViewForward([]);
+    _setActiveView(view);
+  }, []);
+
+  const goBack = useCallback(() => {
+    setViewBack((prevBack) => {
+      if (prevBack.length === 0) return prevBack;
+      const target = prevBack[prevBack.length - 1]!;
+      setViewForward((prevFwd) => [activeViewRef.current, ...prevFwd]);
+      _setActiveView(target);
+      return prevBack.slice(0, -1);
+    });
+  }, []);
+
+  const goForward = useCallback(() => {
+    setViewForward((prevFwd) => {
+      if (prevFwd.length === 0) return prevFwd;
+      const target = prevFwd[0]!;
+      setViewBack((prevBack) => [...prevBack, activeViewRef.current]);
+      _setActiveView(target);
+      return prevFwd.slice(1);
+    });
+  }, []);
+
   const [documents, setDocuments] = useState<OpenDocument[]>([]);
   const [activeUri, setActiveUri] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<Record<string, SaveStatus>>({});
@@ -415,6 +462,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     return saveDocument(uri);
   }, [saveDocument]);
 
+  const canGoBack = viewBack.length > 0;
+  const canGoForward = viewForward.length > 0;
+
   const value = useMemo<WorkspaceContextValue>(
     () => ({
       folder,
@@ -423,9 +473,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       activeUri,
       saveStatus,
       revealRequest,
+      canGoBack,
+      canGoForward,
       openFolder,
       openFolderByPath,
       setActiveView,
+      goBack,
+      goForward,
       openFile,
       openHelpDoc,
       closeFile,
@@ -448,8 +502,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       activeUri,
       saveStatus,
       revealRequest,
+      canGoBack,
+      canGoForward,
       openFolder,
       openFolderByPath,
+      setActiveView,
+      goBack,
+      goForward,
       openFile,
       openHelpDoc,
       closeFile,
