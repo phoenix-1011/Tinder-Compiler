@@ -42,6 +42,7 @@ interface UIContextValue {
   togglePanel(): void;
   showSidebar(): void;
   showPanel(): void;
+  hidePanel(): void;
   isQuickOpenOpen: boolean;
   openQuickOpen(): void;
   closeQuickOpen(): void;
@@ -120,6 +121,10 @@ export function UIProvider({ children }: { children: ReactNode }) {
     setState((s) => (s.panelVisible ? s : { ...s, panelVisible: true }));
   }, []);
 
+  const hidePanel = useCallback(() => {
+    setState((s) => (s.panelVisible ? { ...s, panelVisible: false } : s));
+  }, []);
+
   const openQuickOpen = useCallback(() => setQuickOpen(true), []);
   const closeQuickOpen = useCallback(() => setQuickOpen(false), []);
   const openAbout = useCallback(() => setAboutOpen(true), []);
@@ -142,6 +147,7 @@ export function UIProvider({ children }: { children: ReactNode }) {
       togglePanel,
       showSidebar,
       showPanel,
+      hidePanel,
       isQuickOpenOpen,
       openQuickOpen,
       closeQuickOpen,
@@ -165,6 +171,7 @@ export function UIProvider({ children }: { children: ReactNode }) {
       togglePanel,
       showSidebar,
       showPanel,
+      hidePanel,
       isQuickOpenOpen,
       openQuickOpen,
       closeQuickOpen,

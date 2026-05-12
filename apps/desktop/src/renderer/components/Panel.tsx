@@ -4,6 +4,7 @@ import { OutputView } from "./OutputView";
 import { ProblemsView } from "./ProblemsView";
 import { useWorkspace } from "../state/WorkspaceContext";
 import { useRun } from "../state/RunContext";
+import { useUI } from "../state/UIContext";
 
 const TABS = [
   { id: "problems", label: "问题" },
@@ -19,6 +20,7 @@ export function Panel() {
   const [cmdState, setCmdState] = useState<CommandState | null>(null);
   const { folder } = useWorkspace();
   const { runs } = useRun();
+  const { hidePanel } = useUI();
 
   // Switch to "output" automatically when a new run starts.
   const [lastRunId, setLastRunId] = useState<number | null>(null);
@@ -75,31 +77,26 @@ export function Panel() {
             ) : null}
           </div>
         )}
-        {active === "terminal" && terminalMounted && (
-          <>
-            <button
-              className="panel-action"
-              title="重启终端"
-              onClick={() => {
-                setTerminalMounted(false);
-                setCmdState(null);
-                requestAnimationFrame(() => setTerminalMounted(true));
-              }}
-            >
-              <span className="codicon codicon-refresh" />
-            </button>
-            <button
-              className="panel-action"
-              title="关闭终端"
-              onClick={() => {
-                setTerminalMounted(false);
-                setCmdState(null);
-              }}
-            >
-              <span className="codicon codicon-trash" />
-            </button>
-          </>
+        {active === "terminal" && (
+          <button
+            className="panel-action"
+            title="重启终端"
+            onClick={() => {
+              setTerminalMounted(false);
+              setCmdState(null);
+              requestAnimationFrame(() => setTerminalMounted(true));
+            }}
+          >
+            <span className="codicon codicon-refresh" />
+          </button>
         )}
+        <button
+          className="panel-action"
+          title="关闭面板"
+          onClick={hidePanel}
+        >
+          <span className="codicon codicon-close" />
+        </button>
       </div>
       <div className="panel-body">
         <div
@@ -118,19 +115,8 @@ export function Panel() {
           className="panel-terminal-wrap"
           style={{ display: active === "terminal" ? "block" : "none" }}
         >
-          {terminalMounted ? (
+          {terminalMounted && (
             <TerminalPanel cwd={folder?.path} onStateChange={setCmdState} />
-          ) : (
-            <div className="panel-terminal-empty">
-              <p className="sidebar-hint">终端已关闭。</p>
-              <button
-                type="button"
-                className="primary-button"
-                onClick={() => setTerminalMounted(true)}
-              >
-                新建终端
-              </button>
-            </div>
           )}
         </div>
       </div>
