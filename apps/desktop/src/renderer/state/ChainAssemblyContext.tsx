@@ -78,12 +78,15 @@ export interface ChainAssemblyValue {
 
   /**
    * Add or update a profile resource ref from a drag/drop. `enabled` is
-   * driven by which drop zone received the payload: 活跃 → true, 停用 → false.
+   * driven by which drop zone received the payload (活跃 → true,
+   * 停用 → false); `folder` is the profile-local virtual folder path,
+   * `undefined`/empty for the section root.
    */
   dropToProfile: (
     profileId: string,
     payload: DragPayload,
-    enabled: boolean
+    enabled: boolean,
+    folder?: string
   ) => Promise<void>;
   removeFromProfile: (profileId: string, item: ProfileResourceItem) => Promise<void>;
   /** Flip an existing profile resource ref between 活跃 and 停用. */
@@ -91,6 +94,18 @@ export interface ChainAssemblyValue {
     profileId: string,
     item: ProfileResourceItem,
     enabled: boolean
+  ) => Promise<void>;
+  /** Move an existing profile resource ref into a new virtual subfolder. */
+  setProfileResourceFolder: (
+    profileId: string,
+    item: ProfileResourceItem,
+    folder: string
+  ) => Promise<void>;
+  /** Prompt the user for a target folder, then delegate to setProfileResourceFolder. */
+  promptMoveResourceFolder: (
+    profileId: string,
+    item: ProfileResourceItem,
+    currentFolder: string
   ) => Promise<void>;
 }
 
@@ -437,10 +452,16 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
   );
 
   const dropToProfile = useCallback(
-    async (profileId: string, payload: DragPayload, enabled: boolean) => {
+    async (
+      profileId: string,
+      payload: DragPayload,
+      enabled: boolean,
+      folder?: string
+    ) => {
       if (!disk) return;
       const target = disk.profiles.find((p) => p.id === profileId);
       if (!target) return;
+      const folderValue = folder?.trim() || undefined;
       try {
         let updatedProject: GuiProjectFile = target.project;
         let newRef: ProfileResourceRef;
@@ -450,7 +471,8 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
             kind: "standard",
             resource_instance_id: payload.resource.resource_instance_id,
             variant_id: DEFAULT_PROFILE_VARIANT_ID,
-            enabled
+            enabled,
+            ...(folderValue ? { folder: folderValue } : {})
           };
         } else {
           // Custom resources still live as inline `custom_nodes[]` entries in
@@ -477,7 +499,8 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
           newRef = {
             kind: "custom",
             resource_instance_id: customNodeId,
-            enabled
+            enabled,
+            ...(folderValue ? { folder: folderValue } : {})
           };
         }
 
@@ -489,7 +512,15 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
         const nextRefs =
           existingIdx >= 0
             ? currentRefs.map((r, i) =>
-                i === existingIdx ? { ...r, enabled } : r
+                i === existingIdx
+                  ? {
+                      ...r,
+                      enabled,
+                      // Update folder only when an explicit value is supplied.
+                      // Dropping back onto the section root clears it.
+                      folder: folderValue,
+                    }
+                  : r
               )
             : [...currentRefs, newRef];
         updatedProject = {
@@ -562,6 +593,59 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
       }
     },
     [disk, dialog, reload, setCollapse]
+  );
+
+  const setProfileResourceFolder = useCallback(
+    async (profileId: string, item: ProfileResourceItem, folder: string) => {
+      if (!disk) return;
+      const target = disk.profiles.find((p) => p.id === profileId);
+      if (!target) return;
+      const folderValue = folder.trim() || undefined;
+      const refs = target.project.resources ?? [];
+      const matchIdx = refs.findIndex((r) =>
+        item.kind === "standard"
+          ? r.kind === "standard" && r.resource_instance_id === item.resourceId
+          : r.kind === "custom" && r.resource_instance_id === item.resourceId
+      );
+      if (matchIdx < 0) return;
+      const current = refs[matchIdx]!;
+      if ((current.folder ?? undefined) === folderValue) return;
+      const nextRefs = refs.map((r, i) =>
+        i === matchIdx ? { ...r, folder: folderValue } : r
+      );
+      const updatedProject: GuiProjectFile = {
+        ...target.project,
+        resources: nextRefs,
+        custom_node_usages: target.project.custom_node_usages ?? []
+      };
+      try {
+        await window.tinder.writeText(
+          target.id,
+          JSON.stringify(updatedProject, null, 2)
+        );
+        await reload();
+      } catch (err) {
+        await dialog.notify({ title: "移动失败", message: String(err) });
+      }
+    },
+    [disk, dialog, reload]
+  );
+
+  const promptMoveResourceFolder = useCallback(
+    async (
+      profileId: string,
+      item: ProfileResourceItem,
+      currentFolder: string
+    ) => {
+      const next = await dialog.prompt({
+        title: "移动到子目录",
+        placeholder: "目录路径，如 雷达/主雷达；留空表示根",
+        defaultValue: currentFolder
+      });
+      if (next === null || next === undefined) return;
+      await setProfileResourceFolder(profileId, item, next);
+    },
+    [dialog, setProfileResourceFolder]
   );
 
   const removeFromProfile = useCallback(
@@ -672,7 +756,9 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
       deleteFolder,
       dropToProfile,
       removeFromProfile,
-      setProfileResourceEnabled
+      setProfileResourceEnabled,
+      setProfileResourceFolder,
+      promptMoveResourceFolder
     }),
     [
       dataRoot,
@@ -697,7 +783,9 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
       deleteFolder,
       dropToProfile,
       removeFromProfile,
-      setProfileResourceEnabled
+      setProfileResourceEnabled,
+      setProfileResourceFolder,
+      promptMoveResourceFolder
     ]
   );
 

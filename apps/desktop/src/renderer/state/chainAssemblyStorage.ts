@@ -62,6 +62,12 @@ export interface CollapseState {
   profileActive: Record<string, boolean>;
   /** Whether each profile's `停用资源` subsection is expanded. */
   profileDisabled: Record<string, boolean>;
+  /**
+   * Expansion state for profile-local virtual subfolders under
+   * `活跃资源` / `停用资源`. Keys are `${profileId}::${section}::${folderPath}`
+   * where section is `"active"` or `"disabled"`.
+   */
+  profileFolders: Record<string, boolean>;
   folders: Record<string, boolean>;
 }
 
@@ -99,6 +105,7 @@ export const INITIAL_COLLAPSE: CollapseState = {
   profiles: {},
   profileActive: {},
   profileDisabled: {},
+  profileFolders: {},
   folders: {}
 };
 
@@ -114,11 +121,21 @@ export function loadCollapse(): CollapseState {
       profiles: parsed.profiles ?? {},
       profileActive: parsed.profileActive ?? {},
       profileDisabled: parsed.profileDisabled ?? {},
+      profileFolders: parsed.profileFolders ?? {},
       folders: parsed.folders ?? {}
     };
   } catch {
     return INITIAL_COLLAPSE;
   }
+}
+
+/** Build the localStorage key for a profile subfolder's open/closed flag. */
+export function profileFolderKey(
+  profileId: string,
+  section: "active" | "disabled",
+  folderPath: string
+): string {
+  return `${profileId}::${section}::${folderPath}`;
 }
 export function saveCollapse(state: CollapseState): void {
   try {

@@ -1,11 +1,20 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import type { CustomNodeConfig, PlatformResourceInstance } from "@tinder/nextstep";
-import { validateProject } from "@tinder/nextstep";
+import type {
+  CustomNodeConfig,
+  PlatformResourceInstance,
+  ProfileResourceFolder
+} from "@tinder/nextstep";
+import {
+  profileResourceRefKey,
+  profileResourcesByFolder,
+  validateProject
+} from "@tinder/nextstep";
 import { ContextMenu, useContextMenu, type ContextMenuItem } from "./ContextMenu";
 import { useCa } from "../state/ChainAssemblyContext";
 import {
   dragState,
   flattenLeaves,
+  profileFolderKey,
   profileResourceItems,
   type CollapseState,
   type DragPayload,
@@ -28,22 +37,29 @@ function DropZone({
   children: ReactNode;
 }) {
   const [over, setOver] = useState(false);
+  // Each event handler calls stopPropagation so nested drop zones (subfolders
+  // inside section roots) own the most specific drop. Without it, the outer
+  // zone would also fire and override the inner zone's intended folder.
   return (
     <div
       className={`ca-drop-zone${over ? " is-drop-over" : ""}`}
       onDragOver={(e) => {
         if (!dragState.value) return;
         e.preventDefault();
+        e.stopPropagation();
         e.dataTransfer.dropEffect = "copy";
       }}
-      onDragEnter={() => {
-        if (dragState.value) setOver(true);
+      onDragEnter={(e) => {
+        if (!dragState.value) return;
+        e.stopPropagation();
+        setOver(true);
       }}
       onDragLeave={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOver(false);
       }}
       onDrop={(e) => {
         e.preventDefault();
+        e.stopPropagation();
         setOver(false);
         if (dragState.value) onDrop(dragState.value);
         dragState.value = null;
@@ -110,6 +126,17 @@ export function ChainAssemblyView() {
       ...prev,
       profileDisabled: { ...prev.profileDisabled, [id]: !prev.profileDisabled[id] }
     }));
+  const toggleProfileFolder = (
+    profileId: string,
+    section: "active" | "disabled",
+    folderPath: string
+  ) => {
+    const key = profileFolderKey(profileId, section, folderPath);
+    setCollapse((prev) => ({
+      ...prev,
+      profileFolders: { ...prev.profileFolders, [key]: !prev.profileFolders[key] }
+    }));
+  };
 
   const profileMenu = (e: React.MouseEvent, profile: ProfileEntry): void => {
     cm.open(e, [
@@ -169,7 +196,8 @@ export function ChainAssemblyView() {
   const profileResourceMenu = (
     e: React.MouseEvent,
     profileId: string,
-    item: ProfileResourceItem
+    item: ProfileResourceItem,
+    currentFolder: string
   ): ContextMenuItem[] | void => {
     const toggle: ContextMenuItem = item.enabled
       ? {
@@ -184,6 +212,11 @@ export function ChainAssemblyView() {
         };
     cm.open(e, [
       toggle,
+      {
+        id: "move",
+        label: "移到…",
+        run: () => ca.promptMoveResourceFolder(profileId, item, currentFolder)
+      },
       { separator: true },
       { id: "delete", label: "从档案中移除", run: () => ca.removeFromProfile(profileId, item) }
     ]);
@@ -269,14 +302,27 @@ export function ChainAssemblyView() {
               const activeOpen = collapse.profileActive[profile.id] ?? false;
               const disabledOpen = collapse.profileDisabled[profile.id] ?? false;
               const refs = profile.project.resources ?? [];
-              const activeItems = profileResourceItems(
-                refs.filter((r) => r.enabled),
-                flatStandard
-              );
-              const disabledItems = profileResourceItems(
-                refs.filter((r) => !r.enabled),
-                flatStandard
-              );
+              const activeRefs = refs.filter((r) => r.enabled);
+              const disabledRefs = refs.filter((r) => !r.enabled);
+
+              // Build item lookup tables keyed by ref so the recursive folder
+              // walker can resolve label/menu data per ref without re-running
+              // the full mapping for each render branch.
+              const buildItemMap = (subset: typeof refs) => {
+                const items = profileResourceItems(subset, flatStandard);
+                const map = new Map<string, ProfileResourceItem>();
+                subset.forEach((ref, i) => {
+                  const item = items[i];
+                  if (item) map.set(profileResourceRefKey(ref), item);
+                });
+                return map;
+              };
+              const activeItemMap = buildItemMap(activeRefs);
+              const disabledItemMap = buildItemMap(disabledRefs);
+
+              const activeRoot = profileResourcesByFolder(activeRefs);
+              const disabledRoot = profileResourcesByFolder(disabledRefs);
+
               return (
                 <div key={profile.id}>
                   <Row
@@ -303,21 +349,18 @@ export function ChainAssemblyView() {
                           expanded={activeOpen}
                           onClick={() => toggleProfileActive(profile.id)}
                         />
-                        {activeOpen && activeItems.length === 0 && (
-                          <Row depth={2} label="(无)" muted onClick={() => {}} />
+                        {activeOpen && renderProfileFolderContents(
+                          activeRoot,
+                          2,
+                          profile.id,
+                          "active",
+                          true,
+                          activeItemMap,
+                          collapse.profileFolders,
+                          toggleProfileFolder,
+                          profileResourceMenu,
+                          ca.dropToProfile
                         )}
-                        {activeOpen &&
-                          activeItems.map((r) => (
-                            <Row
-                              key={r.id}
-                              depth={2}
-                              label={r.label}
-                              onClick={() => {}}
-                              onContextMenu={(e) =>
-                                profileResourceMenu(e, profile.id, r)
-                              }
-                            />
-                          ))}
                       </DropZone>
                       <DropZone
                         onDrop={(payload) =>
@@ -331,21 +374,18 @@ export function ChainAssemblyView() {
                           expanded={disabledOpen}
                           onClick={() => toggleProfileDisabled(profile.id)}
                         />
-                        {disabledOpen && disabledItems.length === 0 && (
-                          <Row depth={2} label="(无)" muted onClick={() => {}} />
+                        {disabledOpen && renderProfileFolderContents(
+                          disabledRoot,
+                          2,
+                          profile.id,
+                          "disabled",
+                          false,
+                          disabledItemMap,
+                          collapse.profileFolders,
+                          toggleProfileFolder,
+                          profileResourceMenu,
+                          ca.dropToProfile
                         )}
-                        {disabledOpen &&
-                          disabledItems.map((r) => (
-                            <Row
-                              key={r.id}
-                              depth={2}
-                              label={r.label}
-                              onClick={() => {}}
-                              onContextMenu={(e) =>
-                                profileResourceMenu(e, profile.id, r)
-                              }
-                            />
-                          ))}
                       </DropZone>
                       <Row depth={1} label="使用与版本" onClick={() => {}} />
                     </>
@@ -579,5 +619,97 @@ function Row({
         </div>
       )}
     </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Recursive folder render for `活跃资源` / `停用资源`
+// ─────────────────────────────────────────────────────────────────────────────
+
+type DropToProfile = (
+  profileId: string,
+  payload: DragPayload,
+  enabled: boolean,
+  folder?: string
+) => Promise<void>;
+
+type ProfileResourceMenuOpener = (
+  e: React.MouseEvent,
+  profileId: string,
+  item: ProfileResourceItem,
+  currentFolder: string
+) => void;
+
+/**
+ * Render one folder level: direct resources first, then nested subfolders
+ * each wrapped in their own DropZone so drops land at the most specific
+ * folder. Called once per section root and recurses for subfolders.
+ */
+function renderProfileFolderContents(
+  folder: ProfileResourceFolder,
+  depth: number,
+  profileId: string,
+  section: "active" | "disabled",
+  enabled: boolean,
+  itemMap: Map<string, ProfileResourceItem>,
+  profileFolders: Record<string, boolean>,
+  toggleFolder: (id: string, section: "active" | "disabled", path: string) => void,
+  openMenu: ProfileResourceMenuOpener,
+  dropToProfile: DropToProfile
+): ReactNode {
+  const isEmpty =
+    folder.resources.length === 0 && folder.children.length === 0;
+  if (isEmpty && folder.path === "") {
+    return <Row depth={depth} label="(无)" muted onClick={() => {}} />;
+  }
+  return (
+    <>
+      {folder.resources.map((ref) => {
+        const item = itemMap.get(profileResourceRefKey(ref));
+        if (!item) return null;
+        return (
+          <Row
+            key={item.id}
+            depth={depth}
+            label={item.label}
+            onClick={() => {}}
+            onContextMenu={(e) => openMenu(e, profileId, item, ref.folder ?? "")}
+          />
+        );
+      })}
+      {folder.children.map((child) => {
+        const key = profileFolderKey(profileId, section, child.path);
+        const isOpen = profileFolders[key] ?? false;
+        return (
+          <DropZone
+            key={key}
+            onDrop={(payload) =>
+              dropToProfile(profileId, payload, enabled, child.path)
+            }
+          >
+            <Row
+              depth={depth}
+              label={child.name}
+              expandable
+              expanded={isOpen}
+              onClick={() => toggleFolder(profileId, section, child.path)}
+            />
+            {isOpen &&
+              renderProfileFolderContents(
+                child,
+                depth + 1,
+                profileId,
+                section,
+                enabled,
+                itemMap,
+                profileFolders,
+                toggleFolder,
+                openMenu,
+                dropToProfile
+              )}
+          </DropZone>
+        );
+      })}
+    </>
   );
 }
