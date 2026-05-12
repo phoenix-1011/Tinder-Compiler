@@ -4,6 +4,7 @@ import { MonacoEditor } from "./MonacoEditor";
 import { WelcomeView } from "./WelcomeView";
 import { ContextMenu, useContextMenu, type ContextMenuItem } from "./ContextMenu";
 import { Breadcrumbs } from "./Breadcrumbs";
+import { HelpDocTab } from "./HelpDocTab";
 
 export function EditorArea() {
   const {
@@ -11,6 +12,7 @@ export function EditorArea() {
     activeUri,
     setActive,
     closeFile,
+    pinDocument,
     updateContent,
     saveDocument,
     revealRequest,
@@ -88,8 +90,9 @@ export function EditorArea() {
             draggable
             className={`editor-tab${doc.uri === activeUri ? " is-active" : ""}${
               dropTargetUri === doc.uri ? " is-drop-target" : ""
-            }`}
+            }${doc.preview ? " is-preview" : ""}`}
             onClick={() => setActive(doc.uri)}
+            onDoubleClick={() => pinDocument(doc.uri)}
             onAuxClick={(e) => onTabAuxClick(e, doc.uri)}
             onContextMenu={(e) => onTabContextMenu(e, doc.uri)}
             onDragStart={(e) => {
@@ -140,11 +143,15 @@ export function EditorArea() {
           </div>
         ))}
       </div>
-      {active && (
+      {active && active.kind === "file" && (
         <Breadcrumbs workspacePath={folder?.path ?? null} filePath={active.uri} />
       )}
       <div className="editor-host">
-        {active ? (
+        {!active ? (
+          <WelcomeView />
+        ) : active.kind === "help-doc" ? (
+          <HelpDocTab nodeId={active.helpNodeId ?? ""} />
+        ) : (
           <MonacoEditor
             key={active.uri}
             value={active.content}
@@ -153,8 +160,6 @@ export function EditorArea() {
             onSave={() => void saveDocument(active.uri)}
             reveal={reveal}
           />
-        ) : (
-          <WelcomeView />
         )}
       </div>
       {tabMenu.state && (

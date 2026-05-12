@@ -8,12 +8,26 @@ import {
   type ReactNode
 } from "react";
 import type { OpenedFolder } from "../../preload";
+import { CHAIN_CATALOG } from "../help/chain-catalog.generated";
 
 export type EolKind = "lf" | "crlf";
+
+export type DocumentKind = "file" | "help-doc";
 
 export interface OpenDocument {
   uri: string;
   name: string;
+  /**
+   * Classifies what kind of content this tab holds. `file` uses Monaco;
+   * `help-doc` renders a chain catalog node section as Markdown.
+   */
+  kind: DocumentKind;
+  /**
+   * Preview tabs render with an italic name and are replaced by the next
+   * preview-mode open. Pinned tabs (`preview: false`) survive until the
+   * user closes them explicitly.
+   */
+  preview: boolean;
   language: string;
   content: string;
   dirty: boolean;
@@ -21,6 +35,8 @@ export interface OpenDocument {
   baseline: string;
   /** Detected/chosen line ending. */
   eol: EolKind;
+  /** Help-doc tabs carry the canonical chain node id they render. */
+  helpNodeId?: string;
 }
 
 export type ActivityView =
@@ -62,15 +78,37 @@ export type SaveStatus =
   | { kind: "saved"; at: number }
   | { kind: "error"; message: string };
 
+export interface OpenFileOptions {
+  /** Editor position to reveal after the file opens. */
+  position?: EditorPosition;
+  /**
+   * `true` (default) opens a preview tab that replaces any existing preview
+   * tab. `false` pins the tab so subsequent previews don't replace it.
+   */
+  preview?: boolean;
+}
+
+export interface OpenHelpDocOptions {
+  preview?: boolean;
+}
+
 interface WorkspaceActions {
   openFolder(): Promise<void>;
   openFolderByPath(path: string): Promise<void>;
   setActiveView(view: ActivityView): void;
-  openFile(path: string, position?: EditorPosition): Promise<void>;
+  openFile(path: string, options?: OpenFileOptions): Promise<void>;
+  /**
+   * Open a chain catalog node section as a tab. The tab renders Markdown
+   * via the help renderer and is keyed by `help://<nodeId>` so duplicate
+   * opens focus the existing tab.
+   */
+  openHelpDoc(nodeId: string, options?: OpenHelpDocOptions): void;
   closeFile(uri: string): void;
   closeActiveFile(): void;
   cycleTab(direction: 1 | -1): void;
   setActive(uri: string): void;
+  /** Promote a preview tab to a pinned tab. No-op when already pinned. */
+  pinDocument(uri: string): void;
   updateContent(uri: string, content: string): void;
   saveDocument(uri: string): Promise<boolean>;
   saveActive(): Promise<boolean>;
@@ -151,11 +189,21 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const openFile = useCallback(
-    async (path: string, position?: EditorPosition) => {
+    async (path: string, options?: OpenFileOptions) => {
+      const preview = options?.preview ?? true;
+      const position = options?.position;
       const existing = docsRef.current.find((d) => d.uri === path);
       if (existing) {
         setActiveUri(path);
         if (position) revealAt(path, position);
+        // Re-opening an existing tab through a non-preview path (e.g. an
+        // explicit pin) should promote it. Opening through preview leaves
+        // its current state alone.
+        if (!preview && existing.preview) {
+          setDocuments((prev) =>
+            prev.map((d) => (d.uri === path ? { ...d, preview: false } : d))
+          );
+        }
         return;
       }
       const content = await window.tinder.readText(path);
@@ -168,18 +216,77 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       const doc: OpenDocument = {
         uri: path,
         name,
+        kind: "file",
+        preview,
         language: languageFor(name),
         content,
         baseline: content,
         dirty: false,
         eol
       };
-      setDocuments((prev) => [...prev, doc]);
+      // Preview tabs replace any other preview tab in place; pinned tabs
+      // append. Replacement keeps the slot index stable so the tab strip
+      // doesn't jump when the user clicks through files.
+      setDocuments((prev) => {
+        if (!preview) return [...prev, doc];
+        const previewIdx = prev.findIndex((d) => d.preview);
+        if (previewIdx < 0) return [...prev, doc];
+        const next = prev.slice();
+        next[previewIdx] = doc;
+        return next;
+      });
       setActiveUri(path);
       if (position) revealAt(path, position);
     },
     [revealAt]
   );
+
+  const openHelpDoc = useCallback(
+    (nodeId: string, options?: OpenHelpDocOptions) => {
+      const preview = options?.preview ?? true;
+      const uri = `help://${nodeId}`;
+      const existing = docsRef.current.find((d) => d.uri === uri);
+      if (existing) {
+        setActiveUri(uri);
+        if (!preview && existing.preview) {
+          setDocuments((prev) =>
+            prev.map((d) => (d.uri === uri ? { ...d, preview: false } : d))
+          );
+        }
+        return;
+      }
+      const catalogNode = CHAIN_CATALOG.nodes[nodeId];
+      const name = catalogNode?.displayName ?? nodeId;
+      const doc: OpenDocument = {
+        uri,
+        name,
+        kind: "help-doc",
+        preview,
+        language: "markdown",
+        content: "",
+        baseline: "",
+        dirty: false,
+        eol: "lf",
+        helpNodeId: nodeId
+      };
+      setDocuments((prev) => {
+        if (!preview) return [...prev, doc];
+        const previewIdx = prev.findIndex((d) => d.preview);
+        if (previewIdx < 0) return [...prev, doc];
+        const next = prev.slice();
+        next[previewIdx] = doc;
+        return next;
+      });
+      setActiveUri(uri);
+    },
+    []
+  );
+
+  const pinDocument = useCallback((uri: string) => {
+    setDocuments((prev) =>
+      prev.map((d) => (d.uri === uri && d.preview ? { ...d, preview: false } : d))
+    );
+  }, []);
 
   const closeFile = useCallback((uri: string) => {
     setDocuments((prev) => prev.filter((d) => d.uri !== uri));
@@ -215,10 +322,18 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const updateContent = useCallback((uri: string, content: string) => {
+    // Editing a preview tab pins it — matches VS Code's behaviour and keeps
+    // unsaved edits from being clobbered by the next single-click open.
     setDocuments((prev) =>
       prev.map((d) => {
         if (d.uri !== uri) return d;
-        return { ...d, content, dirty: content !== d.baseline };
+        const dirty = content !== d.baseline;
+        return {
+          ...d,
+          content,
+          dirty,
+          preview: d.preview && !dirty ? d.preview : false
+        };
       })
     );
   }, []);
@@ -312,10 +427,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       openFolderByPath,
       setActiveView,
       openFile,
+      openHelpDoc,
       closeFile,
       closeActiveFile,
       cycleTab,
       setActive,
+      pinDocument,
       updateContent,
       saveDocument,
       saveActive,
@@ -334,8 +451,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       openFolder,
       openFolderByPath,
       openFile,
+      openHelpDoc,
       closeFile,
       setActive,
+      pinDocument,
       updateContent,
       saveDocument,
       saveActive,

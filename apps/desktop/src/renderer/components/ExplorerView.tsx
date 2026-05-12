@@ -71,6 +71,7 @@ function FileNode({ entry, depth, onContextMenu, refreshKey }: NodeProps) {
       className={`explorer-row${isActive ? " is-active" : ""}`}
       style={indent}
       onClick={() => openFile(entry.path)}
+      onDoubleClick={() => openFile(entry.path, { preview: false })}
       onContextMenu={(e) => onContextMenu(e, entry)}
     >
       <span className="codicon explorer-chevron" aria-hidden="true" />

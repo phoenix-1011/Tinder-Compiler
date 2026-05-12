@@ -81,7 +81,12 @@ export function ProblemsView() {
       </div>
       <div className="problems-list">
         {grouped.map(([uri, rows]) => (
-          <FileGroup key={uri} uri={uri} rows={rows} onPick={openFile} />
+          <FileGroup
+            key={uri}
+            uri={uri}
+            rows={rows}
+            onPick={(path, position) => void openFile(path, { position })}
+          />
         ))}
       </div>
     </div>

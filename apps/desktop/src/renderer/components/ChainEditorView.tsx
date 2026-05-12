@@ -2,7 +2,6 @@ import { useMemo } from "react";
 import { ContextMenu, useContextMenu, type ContextMenuItem } from "./ContextMenu";
 import { useCa } from "../state/ChainAssemblyContext";
 import { useWorkspace } from "../state/WorkspaceContext";
-import { useChainHelp } from "../help/ChainHelpContext";
 import { flattenLeaves } from "../state/chainAssemblyStorage";
 import {
   buildChainProjection,
@@ -18,8 +17,7 @@ import {
  */
 export function ChainEditorView() {
   const ca = useCa();
-  const { setActiveView } = useWorkspace();
-  const help = useChainHelp();
+  const { openHelpDoc } = useWorkspace();
   const cm = useContextMenu();
 
   const profile = useMemo(() => {
@@ -58,11 +56,6 @@ export function ChainEditorView() {
       </div>
     );
   }
-
-  const openHelp = (nodeId: string) => {
-    help.selectNode(nodeId);
-    setActiveView("help");
-  };
 
   const customMenu = (e: React.MouseEvent, row: ChainProjectionRow): void => {
     if (row.kind !== "custom") return;
@@ -157,7 +150,9 @@ export function ChainEditorView() {
       </div>
 
       <div className="chain-editor-list">
-        {projection.map((row, idx) => renderRow(row, idx, openHelp, customMenu))}
+        {projection.map((row, idx) =>
+          renderRow(row, idx, openHelpDoc, customMenu)
+        )}
       </div>
 
       {cm.state && (
@@ -170,7 +165,7 @@ export function ChainEditorView() {
 function renderRow(
   row: ChainProjectionRow,
   idx: number,
-  openHelp: (nodeId: string) => void,
+  openHelpDoc: (nodeId: string) => void,
   customMenu: (e: React.MouseEvent, row: ChainProjectionRow) => void
 ) {
   if (row.kind === "custom") {
@@ -201,13 +196,23 @@ function renderRow(
     <div
       key={`chain-${row.nodeId}`}
       className={`chain-editor-row is-chain is-${row.coverage.status}`}
-      onClick={() => openHelp(row.nodeId)}
       title={row.nodeId}
     >
       <span className="chain-editor-row-order">{row.order}</span>
       <span className="chain-editor-row-label">{row.displayName}</span>
       <span className="chain-editor-row-id">{row.nodeId}</span>
       <span className="chain-editor-row-status">{statusText}</span>
+      <button
+        type="button"
+        className="chain-editor-row-doc"
+        title="在新建标签页中查看链路文档"
+        onClick={(e) => {
+          e.stopPropagation();
+          openHelpDoc(row.nodeId);
+        }}
+      >
+        查看文档
+      </button>
     </div>
   );
 }

@@ -181,7 +181,9 @@ export function SearchView() {
           <FileGroupRow
             key={g.path}
             group={g}
-            onPick={(m) => openFile(m.path, { line: m.line, column: m.column })}
+            onPick={(m) =>
+              openFile(m.path, { position: { line: m.line, column: m.column } })
+            }
           />
         ))}
       </div>
