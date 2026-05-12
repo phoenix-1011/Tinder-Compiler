@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { ContextMenu, useContextMenu, type ContextMenuItem } from "./ContextMenu";
 import { useCa } from "../state/ChainAssemblyContext";
 import { useWorkspace } from "../state/WorkspaceContext";
@@ -7,6 +7,12 @@ import {
   buildChainProjection,
   type ChainProjectionRow
 } from "../state/chainProjection";
+import {
+  buildRuntimeConfig,
+  buildRuntimeReport,
+  type RuntimeReport
+} from "../state/runtimeReport";
+import { RuntimeReportModal } from "./RuntimeReportModal";
 
 /**
  * Main-pane chain editor for the active profile. Opens when the user clicks
@@ -19,6 +25,11 @@ export function ChainEditorView() {
   const ca = useCa();
   const { openHelpDoc } = useWorkspace();
   const cm = useContextMenu();
+  const [reportState, setReportState] = useState<{
+    report: RuntimeReport;
+    exportPath: string;
+  } | null>(null);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
 
   const profile = useMemo(() => {
     if (!ca.disk || !ca.chainEditorProfileId) return null;
@@ -96,6 +107,54 @@ export function ChainEditorView() {
     cm.open(e, items);
   };
 
+  /**
+   * Default runtime export path: sibling of the profile JSON with a
+   * `.runtime.json` suffix. The engine-effective path detection described
+   * by D31 is deferred — this is the staging default.
+   */
+  const runtimeExportPath = `${profile.id.replace(/\.json$/i, "")}.runtime.json`;
+
+  const onSave = async () => {
+    // The MVP authoring path already writes profile changes through to disk
+    // on every action; this button re-serialises and writes the current
+    // in-memory profile so users have an explicit save affordance and a
+    // visible confirmation that nothing is pending.
+    setSaveStatus("saving");
+    try {
+      await window.tinder.writeText(
+        profile.id,
+        JSON.stringify(profile.project, null, 2)
+      );
+      setSaveStatus("saved");
+      setTimeout(() => setSaveStatus("idle"), 1500);
+    } catch {
+      setSaveStatus("idle");
+    }
+  };
+
+  const onGenerate = () => {
+    const report = buildRuntimeReport(
+      profile.project,
+      flatStandard,
+      flatCustom
+    );
+    setReportState({ report, exportPath: runtimeExportPath });
+  };
+
+  const onExport = async () => {
+    if (!reportState) return;
+    const config = buildRuntimeConfig(
+      profile.project,
+      flatStandard,
+      flatCustom
+    );
+    await window.tinder.writeText(
+      reportState.exportPath,
+      JSON.stringify(config, null, 2)
+    );
+    setReportState(null);
+  };
+
   const counts = projection.reduce(
     (acc, row) => {
       if (row.kind === "chain-node") {
@@ -123,15 +182,34 @@ export function ChainEditorView() {
             {profile.id}
           </code>
         </div>
-        <button
-          type="button"
-          className="chain-editor-close"
-          onClick={ca.closeChainEditor}
-          title="关闭链路编辑"
-          aria-label="关闭链路编辑"
-        >
-          <span className="codicon codicon-close" aria-hidden="true" />
-        </button>
+        <div className="chain-editor-actions">
+          <button
+            type="button"
+            className="chain-editor-action-btn"
+            onClick={() => void onSave()}
+            disabled={saveStatus === "saving"}
+            title="保存当前 profile JSON"
+          >
+            {saveStatus === "saved" ? "已保存" : "保存"}
+          </button>
+          <button
+            type="button"
+            className="chain-editor-action-btn is-primary"
+            onClick={onGenerate}
+            title="预检并导出运行配置"
+          >
+            生成运行配置
+          </button>
+          <button
+            type="button"
+            className="chain-editor-close"
+            onClick={ca.closeChainEditor}
+            title="关闭链路编辑"
+            aria-label="关闭链路编辑"
+          >
+            <span className="codicon codicon-close" aria-hidden="true" />
+          </button>
+        </div>
       </header>
 
       <div className="chain-editor-summary">
@@ -157,6 +235,15 @@ export function ChainEditorView() {
 
       {cm.state && (
         <ContextMenu x={cm.state.x} y={cm.state.y} items={cm.state.items} onClose={cm.close} />
+      )}
+
+      {reportState && (
+        <RuntimeReportModal
+          report={reportState.report}
+          exportPath={reportState.exportPath}
+          onExport={() => void onExport()}
+          onClose={() => setReportState(null)}
+        />
       )}
     </div>
   );

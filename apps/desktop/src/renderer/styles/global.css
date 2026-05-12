@@ -810,6 +810,119 @@ button:focus-visible {
   color: var(--tc-fg-strong);
 }
 
+.chain-editor-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chain-editor-action-btn {
+  background: transparent;
+  border: 1px solid var(--tc-border-popup);
+  color: var(--tc-fg-default);
+  border-radius: 3px;
+  padding: 4px 12px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.chain-editor-action-btn:hover:not(:disabled) {
+  background: var(--tc-bg-hover);
+  color: var(--tc-fg-strong);
+}
+.chain-editor-action-btn.is-primary {
+  background: var(--tc-bg-button);
+  border-color: var(--tc-bg-button);
+  color: var(--tc-fg-strong);
+}
+.chain-editor-action-btn.is-primary:hover:not(:disabled) {
+  background: var(--tc-accent-hover, #1177bb);
+}
+.chain-editor-action-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* Runtime report modal -------------------------------------- */
+.runtime-report-card {
+  width: 600px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px 22px;
+  overflow: hidden;
+}
+.runtime-report-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid var(--tc-border-soft);
+  border-radius: 4px;
+  padding: 10px 12px;
+  background: var(--tc-bg-sidebar);
+}
+.runtime-report-section.is-blocking {
+  border-color: rgba(244, 135, 113, 0.5);
+}
+.runtime-report-section.is-warning {
+  border-color: rgba(204, 167, 0, 0.45);
+}
+.runtime-report-section-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.runtime-report-section-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--tc-fg-strong);
+}
+.runtime-report-section.is-blocking .runtime-report-section-label {
+  color: var(--tc-fg-error);
+}
+.runtime-report-section.is-warning .runtime-report-section-label {
+  color: var(--tc-fg-warn);
+}
+.runtime-report-section-hint {
+  font-size: 11.5px;
+  color: var(--tc-fg-muted);
+}
+.runtime-report-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 30vh;
+  overflow-y: auto;
+}
+.runtime-report-empty {
+  margin: 0;
+  font-size: 12px;
+  color: var(--tc-fg-muted);
+}
+.runtime-report-item {
+  font-size: 12.5px;
+}
+.runtime-report-item-title {
+  color: var(--tc-fg-default);
+}
+.runtime-report-item-detail,
+.runtime-report-item-locator {
+  font-size: 11.5px;
+  color: var(--tc-fg-muted);
+  font-family: var(--tc-font-mono, ui-monospace, "Cascadia Code", Consolas, monospace);
+}
+.runtime-report-target {
+  font-size: 12px;
+  color: var(--tc-fg-muted);
+}
+.runtime-report-target code {
+  word-break: break-all;
+}
+
 .chain-editor-summary {
   display: flex;
   align-items: center;
