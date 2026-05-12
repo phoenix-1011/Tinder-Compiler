@@ -228,32 +228,7 @@ export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
   };
 
   return (
-    <div className="chain-editor">
-      <header className="chain-editor-header">
-        <div className="chain-editor-title">
-          <h1 title={profile.id}>{profile.name}</h1>
-        </div>
-        <div className="chain-editor-actions">
-          <button
-            type="button"
-            className="chain-editor-action-btn"
-            onClick={() => void onSave()}
-            disabled={saveStatus === "saving"}
-            title="保存当前 profile JSON"
-          >
-            {saveStatus === "saved" ? "已保存" : "保存编辑"}
-          </button>
-          <button
-            type="button"
-            className="chain-editor-action-btn is-primary"
-            onClick={onGenerate}
-            title="预检并导出运行配置"
-          >
-            生成运行配置
-          </button>
-        </div>
-      </header>
-
+    <div className="chain-editor" title={profile.id}>
       <div className="chain-editor-toolbar">
         <select
           className="chain-editor-mode-select"
@@ -279,6 +254,25 @@ export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
             </option>
           ))}
         </select>
+        <div className="chain-editor-toolbar-actions">
+          <button
+            type="button"
+            className="chain-editor-action-btn"
+            onClick={() => void onSave()}
+            disabled={saveStatus === "saving"}
+            title="保存当前 profile JSON"
+          >
+            {saveStatus === "saved" ? "已保存" : "保存编辑"}
+          </button>
+          <button
+            type="button"
+            className="chain-editor-action-btn is-primary"
+            onClick={onGenerate}
+            title="预检并导出运行配置"
+          >
+            生成运行配置
+          </button>
+        </div>
       </div>
 
       <div

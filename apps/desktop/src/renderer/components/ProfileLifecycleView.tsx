@@ -49,13 +49,7 @@ export function ProfileLifecycleView({
   const customUsages = profile.project.custom_node_usages ?? [];
 
   return (
-    <div className="chain-editor">
-      <header className="chain-editor-header">
-        <div className="chain-editor-title">
-          <h1 title={profile.id}>{profile.name}</h1>
-        </div>
-      </header>
-
+    <div className="chain-editor" title={profile.id}>
       <div className="profile-lifecycle">
         <section className="profile-lifecycle-section">
           <h2>基本信息</h2>
