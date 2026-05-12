@@ -244,7 +244,7 @@ export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
             disabled={saveStatus === "saving"}
             title="保存当前 profile JSON"
           >
-            {saveStatus === "saved" ? "已保存" : "保存"}
+            {saveStatus === "saved" ? "已保存" : "保存编辑"}
           </button>
           <button
             type="button"
@@ -253,15 +253,6 @@ export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
             title="预检并导出运行配置"
           >
             生成运行配置
-          </button>
-          <button
-            type="button"
-            className="chain-editor-close"
-            onClick={() => closeFile(tabUri)}
-            title="关闭链路编辑"
-            aria-label="关闭链路编辑"
-          >
-            <span className="codicon codicon-close" aria-hidden="true" />
           </button>
         </div>
       </header>

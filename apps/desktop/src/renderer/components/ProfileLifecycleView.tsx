@@ -57,17 +57,6 @@ export function ProfileLifecycleView({
             {profile.id}
           </code>
         </div>
-        <div className="chain-editor-actions">
-          <button
-            type="button"
-            className="chain-editor-close"
-            onClick={() => closeFile(tabUri)}
-            title="关闭"
-            aria-label="关闭"
-          >
-            <span className="codicon codicon-close" aria-hidden="true" />
-          </button>
-        </div>
       </header>
 
       <div className="profile-lifecycle">

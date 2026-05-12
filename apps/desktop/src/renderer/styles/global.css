@@ -796,20 +796,6 @@ button:focus-visible {
   white-space: nowrap;
 }
 
-.chain-editor-close {
-  background: transparent;
-  border: none;
-  color: var(--tc-fg-muted);
-  cursor: pointer;
-  padding: 6px;
-  border-radius: 3px;
-  font-size: 16px;
-}
-.chain-editor-close:hover {
-  background: var(--tc-bg-hover);
-  color: var(--tc-fg-strong);
-}
-
 .chain-editor-actions {
   display: flex;
   align-items: center;
