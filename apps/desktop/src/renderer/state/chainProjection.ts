@@ -23,6 +23,10 @@ export interface ChainNodeRow {
   displayName: string;
   /** 1-based canonical execution order from `02-ordered-execution.md`. */
   order: number;
+  /** Owning chain doc slug, e.g. `10-platform-chain`. Stable filter key. */
+  docSlug: string;
+  /** Owning chain doc title, e.g. `平台基础链路`. Display only. */
+  docTitle: string;
   coverage: ChainCoverage;
 }
 
@@ -141,6 +145,13 @@ export function buildChainProjection(
     return `${usage.resource_instance_id}/${usage.node_id}`;
   };
 
+  // Index groups by docSlug so we can label each node with its owning chain
+  // doc (e.g. "平台基础链路"). Falls back to the slug if the catalog hasn't
+  // registered a friendly title (shouldn't happen at runtime).
+  const groupBySlug = new Map(
+    CHAIN_CATALOG.groups.map((g) => [g.docSlug, g] as const)
+  );
+
   const rows: ChainProjectionRow[] = [];
   for (const node of orderedNodes) {
     for (const { usage, arrayIndex } of usagesByAnchor.get(node.nodeId) ?? []) {
@@ -153,11 +164,14 @@ export function buildChainProjection(
       });
     }
     const cov = coverageByNodeId.get(node.nodeId) ?? [];
+    const group = groupBySlug.get(node.docSlug);
     rows.push({
       kind: "chain-node",
       nodeId: node.nodeId,
       displayName: node.displayName,
       order: node.order,
+      docSlug: node.docSlug,
+      docTitle: group?.title ?? node.docSlug,
       coverage: {
         count: cov.length,
         status:

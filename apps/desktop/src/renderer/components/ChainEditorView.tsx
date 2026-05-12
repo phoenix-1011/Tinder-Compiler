@@ -13,6 +13,7 @@ import {
   type RuntimeReport
 } from "../state/runtimeReport";
 import { RuntimeReportModal } from "./RuntimeReportModal";
+import { CHAIN_CATALOG } from "../help/chain-catalog.generated";
 
 /**
  * Main-pane chain editor for the active profile. Opens when the user clicks
@@ -42,6 +43,14 @@ export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
    * so the user can audit only what will actually run.
    */
   const [chainFilter, setChainFilter] = useState<"all" | "effective">("all");
+  /**
+   * Optional chain-doc group filter. `all` shows everything; otherwise
+   * the value is a chain doc slug (e.g. `10-platform-chain`) and only
+   * nodes owned by that doc render. Custom rows whose anchor falls
+   * outside the selected group are hidden too so the projection stays
+   * coherent.
+   */
+  const [groupFilter, setGroupFilter] = useState<string>("all");
 
   const profile = useMemo(() => {
     if (!ca.disk || !profileId) return null;
@@ -64,11 +73,31 @@ export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
   );
 
   const visibleProjection = useMemo(() => {
-    if (chainFilter === "all") return projection;
-    return projection.filter((row) =>
-      row.kind === "chain-node" ? row.coverage.status !== "missing" : true
-    );
-  }, [projection, chainFilter]);
+    // Pre-compute the set of chain-node ids that pass the group filter so a
+    // custom usage anchored at a hidden chain node hides too.
+    const visibleChainIds = new Set<string>();
+    for (const row of projection) {
+      if (row.kind !== "chain-node") continue;
+      if (groupFilter !== "all" && row.docSlug !== groupFilter) continue;
+      visibleChainIds.add(row.nodeId);
+    }
+    return projection.filter((row) => {
+      if (row.kind === "chain-node") {
+        if (groupFilter !== "all" && row.docSlug !== groupFilter) return false;
+        if (chainFilter === "effective" && row.coverage.status === "missing") {
+          return false;
+        }
+        return true;
+      }
+      // Custom row: drop when its anchor's chain row is hidden, unless we're
+      // on the "all" group filter and the anchor is null (tail).
+      if (groupFilter !== "all") {
+        if (!row.anchorChainId) return false;
+        return visibleChainIds.has(row.anchorChainId);
+      }
+      return true;
+    });
+  }, [projection, chainFilter, groupFilter]);
 
   if (!profile) {
     return (
@@ -189,7 +218,6 @@ export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
     <div className="chain-editor">
       <header className="chain-editor-header">
         <div className="chain-editor-title">
-          <span className="chain-editor-eyebrow">链路</span>
           <h1>{profile.name}</h1>
           <code className="chain-editor-path" title={profile.id}>
             {profile.id}
@@ -238,27 +266,43 @@ export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
           自定义 {counts.customActive}
           {counts.customDisabled > 0 ? ` · 停用 ${counts.customDisabled}` : ""}
         </span>
-        <div className="chain-editor-filter" role="tablist" aria-label="链路过滤">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={chainFilter === "all"}
-            className={`chain-editor-filter-btn${chainFilter === "all" ? " is-active" : ""}`}
-            onClick={() => setChainFilter("all")}
-            title="显示所有 81 个 canonical 节点"
+        <div className="chain-editor-toolbar">
+          <select
+            className="chain-editor-group-select"
+            value={groupFilter}
+            onChange={(e) => setGroupFilter(e.target.value)}
+            title="按链路文档分类筛选"
+            aria-label="按分类筛选"
           >
-            所有链路
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={chainFilter === "effective"}
-            className={`chain-editor-filter-btn${chainFilter === "effective" ? " is-active" : ""}`}
-            onClick={() => setChainFilter("effective")}
-            title="只显示有覆盖的标准节点 + 全部自定义节点"
-          >
-            有效链路
-          </button>
+            <option value="all">全部分类</option>
+            {CHAIN_CATALOG.groups.map((g) => (
+              <option key={g.docSlug} value={g.docSlug}>
+                {g.title}
+              </option>
+            ))}
+          </select>
+          <div className="chain-editor-filter" role="tablist" aria-label="链路过滤">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={chainFilter === "all"}
+              className={`chain-editor-filter-btn${chainFilter === "all" ? " is-active" : ""}`}
+              onClick={() => setChainFilter("all")}
+              title="显示所有 canonical 节点"
+            >
+              所有链路
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={chainFilter === "effective"}
+              className={`chain-editor-filter-btn${chainFilter === "effective" ? " is-active" : ""}`}
+              onClick={() => setChainFilter("effective")}
+              title="只显示有覆盖的标准节点 + 全部自定义节点"
+            >
+              有效链路
+            </button>
+          </div>
         </div>
       </div>
 
@@ -308,6 +352,7 @@ function renderRow(
         <span className="chain-editor-row-id">
           {row.usage.resource_instance_id}/{row.usage.node_id}
         </span>
+        <span className="chain-editor-row-category">自定义</span>
         <span className="chain-editor-row-status">
           {row.usage.enabled ? "已编排" : "停用"}
         </span>
@@ -342,6 +387,12 @@ function renderRow(
       </div>
       <span className="chain-editor-row-label">{row.displayName}</span>
       <span className="chain-editor-row-id">{row.nodeId}</span>
+      <span
+        className="chain-editor-row-category"
+        title={row.docSlug}
+      >
+        {row.docTitle}
+      </span>
       <span className="chain-editor-row-status">{statusText}</span>
     </div>
   );

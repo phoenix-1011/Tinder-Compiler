@@ -52,7 +52,6 @@ export function ProfileLifecycleView({
     <div className="chain-editor">
       <header className="chain-editor-header">
         <div className="chain-editor-title">
-          <span className="chain-editor-eyebrow">使用与版本</span>
           <h1>{profile.name}</h1>
           <code className="chain-editor-path" title={profile.id}>
             {profile.id}

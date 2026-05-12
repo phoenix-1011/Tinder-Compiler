@@ -741,6 +741,11 @@ button:focus-visible {
 
 /* Chain Editor (main pane) ---------------------------------- */
 .chain-editor {
+  /* The editor-host grid cell has a defined height; absolutely positioning */
+  /* the root lets the inner flex column compute against that height so the */
+  /* list section can scroll instead of overflowing the tab. */
+  position: absolute;
+  inset: 0;
   background: var(--tc-bg-editor);
   color: var(--tc-fg-default);
   display: flex;
@@ -768,29 +773,24 @@ button:focus-visible {
 
 .chain-editor-title {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  align-items: baseline;
+  gap: 12px;
   min-width: 0;
-}
-
-.chain-editor-eyebrow {
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--tc-fg-muted);
+  flex: 1;
 }
 
 .chain-editor-title h1 {
   margin: 0;
-  font-size: 18px;
+  font-size: 16px;
   color: var(--tc-fg-strong);
   font-weight: 600;
+  white-space: nowrap;
 }
 
 .chain-editor-path {
   font-size: 11.5px;
   color: var(--tc-fg-muted);
-  max-width: 100%;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -997,8 +997,28 @@ button:focus-visible {
   color: var(--tc-fg-muted);
 }
 
-.chain-editor-filter {
+.chain-editor-toolbar {
   margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chain-editor-group-select {
+  background: var(--tc-bg-input);
+  color: var(--tc-fg-default);
+  border: 1px solid var(--tc-border-popup);
+  border-radius: 3px;
+  font-size: 12px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+.chain-editor-group-select:focus {
+  outline: none;
+  border-color: var(--tc-accent);
+}
+
+.chain-editor-filter {
   display: inline-flex;
   border: 1px solid var(--tc-border-popup);
   border-radius: 12px;
@@ -1065,13 +1085,25 @@ button:focus-visible {
   display: grid;
   /* Leading column doubles as the order indicator and the hover-revealed */
   /* `查看文档` button — they share one cell, so the row stays compact. */
-  grid-template-columns: 80px 1fr minmax(120px, 280px) 110px;
+  /* Columns: order/doc · label · canonical id · category · status */
+  grid-template-columns: 80px 1fr minmax(120px, 240px) 140px 110px;
   align-items: center;
   gap: 12px;
   padding: 6px 24px;
   font-size: 13px;
   border-left: 3px solid transparent;
   position: relative;
+}
+
+.chain-editor-row-category {
+  font-size: 11.5px;
+  color: var(--tc-fg-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chain-editor-row.is-custom .chain-editor-row-category {
+  color: var(--tc-fg-link);
 }
 
 .chain-editor-row.is-chain:hover {
