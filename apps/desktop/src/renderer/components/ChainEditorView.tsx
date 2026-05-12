@@ -5,7 +5,9 @@ import { useWorkspace } from "../state/WorkspaceContext";
 import { flattenLeaves } from "../state/chainAssemblyStorage";
 import {
   buildChainProjection,
-  type ChainProjectionRow
+  buildExecutionProjection,
+  type ChainProjectionRow,
+  type ExecutionRow
 } from "../state/chainProjection";
 import {
   buildRuntimeConfig,
@@ -38,11 +40,17 @@ export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
   } | null>(null);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
   /**
-   * `all` shows every canonical chain node + custom usage. `effective`
-   * keeps custom rows but hides standard rows with no active coverage,
-   * so the user can audit only what will actually run.
+   * Two distinct views:
+   *
+   * - `full`: the 81 canonical chain nodes in canonical order, one row
+   *   each, regardless of whether a resource covers them. This is the
+   *   reference view for understanding chain shape.
+   * - `execution`: one row per active compute node — driven by what's
+   *   wired up. A canonical chain node with two covering resources gets
+   *   two rows; one with no coverage gets none. There's no `缺失`
+   *   concept by construction.
    */
-  const [chainFilter, setChainFilter] = useState<"all" | "effective">("all");
+  const [chainMode, setChainMode] = useState<"full" | "execution">("full");
   /**
    * Optional chain-doc group filter. `all` shows everything; otherwise
    * the value is a chain doc slug (e.g. `10-platform-chain`) and only
@@ -66,38 +74,60 @@ export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
     [ca.disk]
   );
 
-  const projection = useMemo(
+  const fullProjection = useMemo(
     () =>
-      profile ? buildChainProjection(profile.project, flatStandard, flatCustom) : [],
+      profile
+        ? buildChainProjection(profile.project, flatStandard, flatCustom)
+        : [],
+    [profile, flatStandard, flatCustom]
+  );
+  const executionProjection = useMemo(
+    () =>
+      profile
+        ? buildExecutionProjection(profile.project, flatStandard, flatCustom)
+        : [],
     [profile, flatStandard, flatCustom]
   );
 
-  const visibleProjection = useMemo(() => {
-    // Pre-compute the set of chain-node ids that pass the group filter so a
-    // custom usage anchored at a hidden chain node hides too.
+  const visibleFull = useMemo(() => {
+    // Pre-compute chain-node ids that pass the group filter so a custom
+    // usage anchored at a hidden chain row hides too.
     const visibleChainIds = new Set<string>();
-    for (const row of projection) {
+    for (const row of fullProjection) {
       if (row.kind !== "chain-node") continue;
       if (groupFilter !== "all" && row.docSlug !== groupFilter) continue;
       visibleChainIds.add(row.nodeId);
     }
-    return projection.filter((row) => {
+    return fullProjection.filter((row) => {
       if (row.kind === "chain-node") {
-        if (groupFilter !== "all" && row.docSlug !== groupFilter) return false;
-        if (chainFilter === "effective" && row.coverage.status === "missing") {
-          return false;
-        }
-        return true;
+        return groupFilter === "all" || row.docSlug === groupFilter;
       }
-      // Custom row: drop when its anchor's chain row is hidden, unless we're
-      // on the "all" group filter and the anchor is null (tail).
       if (groupFilter !== "all") {
         if (!row.anchorChainId) return false;
         return visibleChainIds.has(row.anchorChainId);
       }
       return true;
     });
-  }, [projection, chainFilter, groupFilter]);
+  }, [fullProjection, groupFilter]);
+
+  const visibleExecution = useMemo(() => {
+    const visibleChainIds = new Set<string>();
+    for (const row of executionProjection) {
+      if (row.kind !== "exec-standard") continue;
+      if (groupFilter !== "all" && row.docSlug !== groupFilter) continue;
+      visibleChainIds.add(row.chainNodeId);
+    }
+    return executionProjection.filter((row) => {
+      if (row.kind === "exec-standard") {
+        return groupFilter === "all" || row.docSlug === groupFilter;
+      }
+      if (groupFilter !== "all") {
+        if (!row.anchorChainId) return false;
+        return visibleChainIds.has(row.anchorChainId);
+      }
+      return true;
+    });
+  }, [executionProjection, groupFilter]);
 
   if (!profile) {
     return (
@@ -197,7 +227,10 @@ export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
     setReportState(null);
   };
 
-  const counts = projection.reduce(
+  // Summary counters draw from the full projection so they remain stable
+  // across mode switches — they describe the underlying profile, not the
+  // currently rendered list.
+  const counts = fullProjection.reduce(
     (acc, row) => {
       if (row.kind === "chain-node") {
         acc.total += 1;
@@ -268,6 +301,18 @@ export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
         </span>
         <div className="chain-editor-toolbar">
           <select
+            className="chain-editor-mode-select"
+            value={chainMode}
+            onChange={(e) =>
+              setChainMode(e.target.value as "full" | "execution")
+            }
+            title="切换视图"
+            aria-label="视图模式"
+          >
+            <option value="full">完整链路节点</option>
+            <option value="execution">实际执行链路</option>
+          </select>
+          <select
             className="chain-editor-group-select"
             value={groupFilter}
             onChange={(e) => setGroupFilter(e.target.value)}
@@ -281,39 +326,29 @@ export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
               </option>
             ))}
           </select>
-          <div className="chain-editor-filter" role="tablist" aria-label="链路过滤">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={chainFilter === "all"}
-              className={`chain-editor-filter-btn${chainFilter === "all" ? " is-active" : ""}`}
-              onClick={() => setChainFilter("all")}
-              title="显示所有 canonical 节点"
-            >
-              所有链路
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={chainFilter === "effective"}
-              className={`chain-editor-filter-btn${chainFilter === "effective" ? " is-active" : ""}`}
-              onClick={() => setChainFilter("effective")}
-              title="只显示有覆盖的标准节点 + 全部自定义节点"
-            >
-              有效链路
-            </button>
-          </div>
         </div>
       </div>
 
-      <div className="chain-editor-list">
-        {visibleProjection.length === 0 ? (
+      <div
+        className={`chain-editor-list is-mode-${chainMode}`}
+      >
+        {chainMode === "full" ? (
+          visibleFull.length === 0 ? (
+            <div className="chain-editor-empty-list">
+              当前分类下没有节点。
+            </div>
+          ) : (
+            visibleFull.map((row, idx) =>
+              renderFullRow(row, idx, openHelpDoc, customMenu)
+            )
+          )
+        ) : visibleExecution.length === 0 ? (
           <div className="chain-editor-empty-list">
-            当前档案没有有效链路。先把标准资源加入档案，或切换回「所有链路」。
+            当前档案没有有效计算实例。先把标准资源加入档案，或切换回「完整链路节点」。
           </div>
         ) : (
-          visibleProjection.map((row, idx) =>
-            renderRow(row, idx, openHelpDoc, customMenu)
+          visibleExecution.map((row, idx) =>
+            renderExecutionRow(row, idx, openHelpDoc, customMenu)
           )
         )}
       </div>
@@ -334,11 +369,19 @@ export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
   );
 }
 
-function renderRow(
+type CustomMenuOpener = (
+  e: React.MouseEvent,
+  row: ChainProjectionRow & { kind: "custom" }
+) => void;
+
+/**
+ * `完整链路节点` row layout. Columns: order/doc · 名称 · 类型 · 分类 · 状态.
+ */
+function renderFullRow(
   row: ChainProjectionRow,
   idx: number,
   openHelpDoc: (nodeId: string) => void,
-  customMenu: (e: React.MouseEvent, row: ChainProjectionRow) => void
+  customMenu: CustomMenuOpener
 ) {
   if (row.kind === "custom") {
     return (
@@ -346,13 +389,12 @@ function renderRow(
         key={`custom-${idx}-${row.arrayIndex}`}
         className={`chain-editor-row is-custom${row.usage.enabled ? "" : " is-disabled"}`}
         onContextMenu={(e) => customMenu(e, row)}
+        title={`${row.usage.resource_instance_id}/${row.usage.node_id}`}
       >
         <span className="chain-editor-row-marker">⌬</span>
         <span className="chain-editor-row-label">{row.displayName}</span>
-        <span className="chain-editor-row-id">
-          {row.usage.resource_instance_id}/{row.usage.node_id}
-        </span>
-        <span className="chain-editor-row-category">自定义</span>
+        <span className="chain-editor-row-type is-custom">自定义</span>
+        <span className="chain-editor-row-category is-custom">自定义</span>
         <span className="chain-editor-row-status">
           {row.usage.enabled ? "已编排" : "停用"}
         </span>
@@ -386,14 +428,76 @@ function renderRow(
         </button>
       </div>
       <span className="chain-editor-row-label">{row.displayName}</span>
-      <span className="chain-editor-row-id">{row.nodeId}</span>
-      <span
-        className="chain-editor-row-category"
-        title={row.docSlug}
-      >
+      <span className="chain-editor-row-type">标准</span>
+      <span className="chain-editor-row-category" title={row.docSlug}>
         {row.docTitle}
       </span>
       <span className="chain-editor-row-status">{statusText}</span>
+    </div>
+  );
+}
+
+/**
+ * `实际执行链路` row layout. Columns: order/doc · 链路节点 · 计算实例 · 类型 · 分类.
+ * Standard rows render once per covering resource; custom rows interleave
+ * with the same layout shape (resource column doubles as the custom usage's
+ * resource_instance_id for visual continuity).
+ */
+function renderExecutionRow(
+  row: ExecutionRow,
+  idx: number,
+  openHelpDoc: (nodeId: string) => void,
+  customMenu: CustomMenuOpener
+) {
+  if (row.kind === "custom") {
+    return (
+      <div
+        key={`exec-custom-${idx}-${row.arrayIndex}`}
+        className={`chain-editor-row is-custom${row.usage.enabled ? "" : " is-disabled"}`}
+        onContextMenu={(e) => customMenu(e, row)}
+        title={`${row.usage.resource_instance_id}/${row.usage.node_id}`}
+      >
+        <span className="chain-editor-row-marker">⌬</span>
+        <span className="chain-editor-row-label">{row.displayName}</span>
+        <span className="chain-editor-row-resource">
+          {row.usage.resource_instance_id}
+        </span>
+        <span className="chain-editor-row-type is-custom">自定义</span>
+        <span className="chain-editor-row-category is-custom">自定义</span>
+      </div>
+    );
+  }
+  return (
+    <div
+      key={`exec-${idx}-${row.chainNodeId}-${row.resourceId}-${row.variantId}`}
+      className="chain-editor-row is-chain is-covered"
+      title={row.chainNodeId}
+    >
+      <div className="chain-editor-row-order-cell">
+        <span className="chain-editor-row-order">{row.order}</span>
+        <button
+          type="button"
+          className="chain-editor-row-doc"
+          title="在新建标签页中查看链路文档"
+          onClick={(e) => {
+            e.stopPropagation();
+            openHelpDoc(row.chainNodeId);
+          }}
+        >
+          查看文档
+        </button>
+      </div>
+      <span className="chain-editor-row-label">{row.chainDisplayName}</span>
+      <span
+        className="chain-editor-row-resource"
+        title={`${row.resourceId} · ${row.variantId}`}
+      >
+        {row.resourceDisplayName}
+      </span>
+      <span className="chain-editor-row-type">标准</span>
+      <span className="chain-editor-row-category" title={row.docSlug}>
+        {row.docTitle}
+      </span>
     </div>
   );
 }

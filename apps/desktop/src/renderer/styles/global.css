@@ -1018,27 +1018,18 @@ button:focus-visible {
   border-color: var(--tc-accent);
 }
 
-.chain-editor-filter {
-  display: inline-flex;
+.chain-editor-mode-select {
+  background: var(--tc-bg-input);
+  color: var(--tc-fg-default);
   border: 1px solid var(--tc-border-popup);
-  border-radius: 12px;
-  overflow: hidden;
-}
-.chain-editor-filter-btn {
-  background: transparent;
-  border: none;
-  color: var(--tc-fg-muted);
-  padding: 3px 12px;
+  border-radius: 3px;
   font-size: 12px;
+  padding: 3px 8px;
   cursor: pointer;
 }
-.chain-editor-filter-btn:hover {
-  background: var(--tc-bg-hover);
-  color: var(--tc-fg-default);
-}
-.chain-editor-filter-btn.is-active {
-  background: var(--tc-bg-button);
-  color: var(--tc-fg-strong);
+.chain-editor-mode-select:focus {
+  outline: none;
+  border-color: var(--tc-accent);
 }
 
 .chain-editor-empty-list {
@@ -1083,16 +1074,32 @@ button:focus-visible {
 
 .chain-editor-row {
   display: grid;
-  /* Leading column doubles as the order indicator and the hover-revealed */
-  /* `查看文档` button — they share one cell, so the row stays compact. */
-  /* Columns: order/doc · label · canonical id · category · status */
-  grid-template-columns: 80px 1fr minmax(120px, 240px) 140px 110px;
+  /* Grid template is set per-mode by the parent's `is-mode-*` class. */
   align-items: center;
   gap: 12px;
   padding: 6px 24px;
   font-size: 13px;
   border-left: 3px solid transparent;
   position: relative;
+}
+
+/* Mode 1: 完整链路节点 — order · 名称 · 类型 · 分类 · 状态. */
+.chain-editor-list.is-mode-full .chain-editor-row {
+  grid-template-columns: 80px 1fr 60px 140px 100px;
+}
+
+/* Mode 2: 实际执行链路 — order · 链路节点 · 计算实例 · 类型 · 分类. */
+.chain-editor-list.is-mode-execution .chain-editor-row {
+  grid-template-columns: 80px 1fr 1fr 60px 140px;
+}
+
+.chain-editor-row-type {
+  font-size: 11.5px;
+  color: var(--tc-fg-muted);
+  white-space: nowrap;
+}
+.chain-editor-row-type.is-custom {
+  color: var(--tc-fg-link);
 }
 
 .chain-editor-row-category {
@@ -1102,7 +1109,19 @@ button:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.chain-editor-row-category.is-custom,
 .chain-editor-row.is-custom .chain-editor-row-category {
+  color: var(--tc-fg-link);
+}
+
+.chain-editor-row-resource {
+  font-size: 12.5px;
+  color: var(--tc-fg-default);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chain-editor-row.is-custom .chain-editor-row-resource {
   color: var(--tc-fg-link);
 }
 

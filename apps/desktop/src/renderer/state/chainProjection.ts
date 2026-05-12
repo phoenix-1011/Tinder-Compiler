@@ -54,6 +54,35 @@ export interface ChainCoverage {
   }>;
 }
 
+// ──────────────────────────────────────────────────────────────────────────
+// Execution projection — one row per active compute node
+// ──────────────────────────────────────────────────────────────────────────
+
+/**
+ * Row produced by `buildExecutionProjection` for an active standard
+ * resource. Unlike the full-chain projection, multiple rows can share a
+ * canonical chain node when several resources cover it, and canonical
+ * nodes with no coverage produce zero rows.
+ */
+export interface ExecutionStandardRow {
+  kind: "exec-standard";
+  /** Canonical chain node id this resource runs for. */
+  chainNodeId: string;
+  /** Canonical chain node display name. */
+  chainDisplayName: string;
+  /** Canonical execution order from `02-ordered-execution.md`. */
+  order: number;
+  /** Owning chain doc slug + title (for filtering / category display). */
+  docSlug: string;
+  docTitle: string;
+  /** The resource running this node. */
+  resourceId: string;
+  resourceDisplayName: string;
+  variantId: string;
+}
+
+export type ExecutionRow = ExecutionStandardRow | CustomUsageRow;
+
 /**
  * Build the ordered row list shown under `链路`.
  *
@@ -179,6 +208,134 @@ export function buildChainProjection(
         resources: cov
       }
     });
+  }
+  for (const { usage, arrayIndex } of tailUsages) {
+    rows.push({
+      kind: "custom",
+      usage,
+      arrayIndex,
+      displayName: customDisplayName(usage),
+      anchorChainId: null
+    });
+  }
+  return rows;
+}
+
+/**
+ * Build the row list shown under `实际执行链路`. Driven by compute resources:
+ *
+ * - For each canonical chain node in order, emit one `exec-standard` row
+ *   per active standard ref whose resource covers that node id (via
+ *   `compute_nodes[].node_id`). If no resource covers it, no row.
+ * - Enabled custom usages interleave at their anchor (same algorithm as the
+ *   full projection). Disabled usages are dropped since they wouldn't run.
+ * - Tail (unanchored) custom usages append last.
+ *
+ * Result: zero standard rows when nothing's wired up, multiple rows per
+ * canonical node when several resources cover it. There's no `缺失` state
+ * in this view by construction.
+ */
+export function buildExecutionProjection(
+  profile: GuiProjectFile,
+  standardCatalog: PlatformResourceInstance[],
+  customLeaves: CustomNodeConfig[]
+): ExecutionRow[] {
+  const orderedNodes = CHAIN_CATALOG.orderedNodes;
+
+  const activeStandardRefs = (profile.resources ?? []).filter(
+    (r): r is ProfileStandardVariantRef => r.kind === "standard" && r.enabled
+  );
+  const standardById = new Map<string, PlatformResourceInstance>();
+  for (const r of standardCatalog) {
+    standardById.set(r.resource_instance_id, r);
+  }
+  // For each canonical node id, the list of (ref, resource) pairs whose
+  // compute_nodes touch it. Order within the list follows the order refs
+  // were added to the profile so re-orderings stay deterministic.
+  const coverageByNodeId = new Map<
+    string,
+    Array<{ ref: ProfileStandardVariantRef; resource: PlatformResourceInstance }>
+  >();
+  for (const ref of activeStandardRefs) {
+    const resource = standardById.get(ref.resource_instance_id);
+    if (!resource) continue;
+    for (const cn of resource.compute_nodes) {
+      const list = coverageByNodeId.get(cn.node_id) ?? [];
+      list.push({ ref, resource });
+      coverageByNodeId.set(cn.node_id, list);
+    }
+  }
+
+  const groupBySlug = new Map(
+    CHAIN_CATALOG.groups.map((g) => [g.docSlug, g] as const)
+  );
+
+  // Custom usage grouping mirrors the full projection but excludes disabled.
+  interface IndexedUsage {
+    usage: CustomNodeUsage;
+    arrayIndex: number;
+  }
+  const usagesByAnchor = new Map<string, IndexedUsage[]>();
+  const tailUsages: IndexedUsage[] = [];
+  (profile.custom_node_usages ?? []).forEach((usage, arrayIndex) => {
+    if (!usage.enabled) return;
+    const indexed: IndexedUsage = { usage, arrayIndex };
+    if (
+      usage.insert_before &&
+      usage.insert_before.kind === "builtin_core_chain"
+    ) {
+      const key = usage.insert_before.chain_id;
+      const list = usagesByAnchor.get(key) ?? [];
+      list.push(indexed);
+      usagesByAnchor.set(key, list);
+    } else {
+      tailUsages.push(indexed);
+    }
+  });
+  for (const list of usagesByAnchor.values()) {
+    list.sort((a, b) => a.usage.order - b.usage.order);
+  }
+  tailUsages.sort((a, b) => a.usage.order - b.usage.order);
+
+  const customByResourceId = new Map<string, CustomNodeConfig>();
+  for (const leaf of customLeaves) {
+    customByResourceId.set(
+      leaf.resource_instance_id ?? leaf.custom_node_id,
+      leaf
+    );
+  }
+  const customDisplayName = (usage: CustomNodeUsage): string =>
+    customByResourceId.get(usage.resource_instance_id)?.display_name ??
+    `${usage.resource_instance_id}/${usage.node_id}`;
+
+  const rows: ExecutionRow[] = [];
+  for (const node of orderedNodes) {
+    // Custom usages anchored at this chain node render before its standard rows.
+    for (const { usage, arrayIndex } of usagesByAnchor.get(node.nodeId) ?? []) {
+      rows.push({
+        kind: "custom",
+        usage,
+        arrayIndex,
+        displayName: customDisplayName(usage),
+        anchorChainId: node.nodeId
+      });
+    }
+    const covers = coverageByNodeId.get(node.nodeId);
+    if (!covers || covers.length === 0) continue;
+    const group = groupBySlug.get(node.docSlug);
+    for (const { ref, resource } of covers) {
+      rows.push({
+        kind: "exec-standard",
+        chainNodeId: node.nodeId,
+        chainDisplayName: node.displayName,
+        order: node.order,
+        docSlug: node.docSlug,
+        docTitle: group?.title ?? node.docSlug,
+        resourceId: ref.resource_instance_id,
+        resourceDisplayName: resource.display_name,
+        variantId: ref.variant_id
+      });
+    }
   }
   for (const { usage, arrayIndex } of tailUsages) {
     rows.push({
