@@ -338,6 +338,8 @@ export interface StandardComputeCandidate extends PlatformComputeNode {
   base_function_name?: string;
   inactive_suffix?: string;
   status?: ComputeResourceStatus;
+  /** Free-form note edited via the candidate row's note button. */
+  notes?: string;
 }
 
 /**
@@ -367,6 +369,8 @@ export interface CustomComputeNodeDef {
   handler_function?: string;
   default_parameters?: Record<string, string>;
   status?: ComputeResourceStatus;
+  /** Free-form authoring notes shown alongside the node row. */
+  notes?: string;
 }
 
 interface ComputeResourceCommonV2 {

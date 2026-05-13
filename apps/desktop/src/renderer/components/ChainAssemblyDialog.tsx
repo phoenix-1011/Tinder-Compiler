@@ -5,6 +5,13 @@ export interface DialogPickerOption {
   label: string;
   /** Optional secondary line — rendered muted under the label. */
   hint?: string;
+  /** Optional category for the in-dialog category filter. */
+  categoryId?: string;
+}
+
+export interface DialogPickerCategory {
+  id: string;
+  label: string;
 }
 
 export interface DialogState {
@@ -13,6 +20,8 @@ export interface DialogState {
   /** undefined = confirm/notify (no input). Defined (even "") = render input. */
   inputDefault?: string;
   inputPlaceholder?: string;
+  /** When true, render a multi-line `<textarea>` instead of a single-line input. */
+  multiline?: boolean;
   okLabel?: string;
   /** Empty string hides the cancel button (notify-style dialogs). */
   cancelLabel?: string;
@@ -21,6 +30,13 @@ export interface DialogState {
   options?: DialogPickerOption[];
   /** Initial id to highlight in the picker; first match wins. */
   initialOptionId?: string;
+  /**
+   * Optional secondary filter shown above the picker list. When set,
+   * the picker renders a category selector; rows whose `categoryId`
+   * doesn't match the current selection are hidden.
+   */
+  categories?: DialogPickerCategory[];
+  categoryLabel?: string;
   resolve: (value: string | null) => void;
 }
 
@@ -31,6 +47,8 @@ export interface DialogApi {
     defaultValue?: string;
     placeholder?: string;
     okLabel?: string;
+    /** When true, render a multi-line textarea for the input. */
+    multiline?: boolean;
   }): Promise<string | null>;
   confirm(opts: {
     title: string;
@@ -48,6 +66,8 @@ export interface DialogApi {
     placeholder?: string;
     options: DialogPickerOption[];
     initialOptionId?: string;
+    categories?: DialogPickerCategory[];
+    categoryLabel?: string;
   }): Promise<string | null>;
 }
 
@@ -60,6 +80,7 @@ export function useDialog(): DialogApi {
           title: opts.title,
           inputDefault: opts.defaultValue ?? "",
           inputPlaceholder: opts.placeholder,
+          multiline: opts.multiline,
           okLabel: opts.okLabel,
           resolve: (v) => {
             setState(null);
@@ -109,6 +130,8 @@ export function useDialog(): DialogApi {
           inputPlaceholder: opts.placeholder,
           options: opts.options,
           initialOptionId: opts.initialOptionId,
+          categories: opts.categories,
+          categoryLabel: opts.categoryLabel,
           resolve: (v) => {
             setState(null);
             resolve(v);
@@ -129,15 +152,24 @@ export function DialogModal({ state }: { state: DialogState }) {
 
 function PromptOrConfirmModal({ state }: { state: DialogState }) {
   const isPrompt = state.inputDefault !== undefined;
+  const isMultiline = isPrompt && state.multiline === true;
   const [value, setValue] = useState(state.inputDefault ?? "");
   const inputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
-    if (isPrompt) {
+    if (!isPrompt) return;
+    if (isMultiline) {
+      textareaRef.current?.focus();
+      // Place caret at end so users can continue typing rather than
+      // immediately overwriting prefilled text.
+      const len = textareaRef.current?.value.length ?? 0;
+      textareaRef.current?.setSelectionRange(len, len);
+    } else {
       inputRef.current?.focus();
       inputRef.current?.select();
     }
-  }, [isPrompt]);
+  }, [isPrompt, isMultiline]);
 
   const ok = () => state.resolve(isPrompt ? value : "ok");
   const cancel = () => state.resolve(null);
@@ -145,10 +177,15 @@ function PromptOrConfirmModal({ state }: { state: DialogState }) {
 
   return (
     <div className="modal-backdrop" onMouseDown={cancel}>
-      <div className="modal-card ca-dialog-card" onMouseDown={(e) => e.stopPropagation()}>
+      <div
+        className={`modal-card ca-dialog-card${
+          isMultiline ? " ca-dialog-card-wide" : ""
+        }`}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
         <div className="ca-dialog-title">{state.title}</div>
         {state.message && <div className="ca-dialog-message">{state.message}</div>}
-        {isPrompt && (
+        {isPrompt && !isMultiline && (
           <input
             ref={inputRef}
             className="ca-dialog-input"
@@ -157,6 +194,24 @@ function PromptOrConfirmModal({ state }: { state: DialogState }) {
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
+                e.preventDefault();
+                ok();
+              } else if (e.key === "Escape") {
+                e.preventDefault();
+                cancel();
+              }
+            }}
+          />
+        )}
+        {isPrompt && isMultiline && (
+          <textarea
+            ref={textareaRef}
+            className="ca-dialog-input ca-dialog-textarea"
+            value={value}
+            placeholder={state.inputPlaceholder}
+            onChange={(e) => setValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
                 e.preventDefault();
                 ok();
               } else if (e.key === "Escape") {
@@ -188,6 +243,7 @@ function PromptOrConfirmModal({ state }: { state: DialogState }) {
 function PickerModal({ state }: { state: DialogState }) {
   const options = state.options!;
   const [query, setQuery] = useState("");
+  const [category, setCategory] = useState<string>("all");
   const [selectedIdx, setSelectedIdx] = useState(() => {
     if (state.initialOptionId) {
       const i = options.findIndex((o) => o.id === state.initialOptionId);
@@ -204,8 +260,12 @@ function PickerModal({ state }: { state: DialogState }) {
 
   const filtered = (() => {
     const q = query.trim().toLowerCase();
-    if (!q) return options;
-    return options.filter(
+    let pool = options;
+    if (state.categories && category !== "all") {
+      pool = pool.filter((o) => o.categoryId === category);
+    }
+    if (!q) return pool;
+    return pool.filter(
       (o) =>
         o.label.toLowerCase().includes(q) ||
         o.id.toLowerCase().includes(q) ||
@@ -231,32 +291,52 @@ function PickerModal({ state }: { state: DialogState }) {
     <div className="modal-backdrop" onMouseDown={cancel}>
       <div className="modal-card ca-picker-card" onMouseDown={(e) => e.stopPropagation()}>
         <div className="ca-dialog-title">{state.title}</div>
-        <input
-          ref={inputRef}
-          className="ca-dialog-input"
-          value={query}
-          placeholder={state.inputPlaceholder ?? "搜索…"}
-          onChange={(e) => {
-            setQuery(e.target.value);
-            setSelectedIdx(0);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "ArrowDown") {
-              e.preventDefault();
-              setSelectedIdx((i) => Math.min(filtered.length - 1, i + 1));
-            } else if (e.key === "ArrowUp") {
-              e.preventDefault();
-              setSelectedIdx((i) => Math.max(0, i - 1));
-            } else if (e.key === "Enter") {
-              e.preventDefault();
-              const pick = filtered[safeIdx];
-              if (pick) confirm(pick.id);
-            } else if (e.key === "Escape") {
-              e.preventDefault();
-              cancel();
-            }
-          }}
-        />
+        <div className="ca-picker-toolbar">
+          {state.categories && state.categories.length > 0 && (
+            <select
+              className="ca-dialog-input ca-picker-toolbar-select"
+              value={category}
+              onChange={(e) => {
+                setCategory(e.target.value);
+                setSelectedIdx(0);
+              }}
+              title={state.categoryLabel ?? "类型"}
+            >
+              <option value="all">全部</option>
+              {state.categories.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.label}
+                </option>
+              ))}
+            </select>
+          )}
+          <input
+            ref={inputRef}
+            className="ca-dialog-input ca-picker-toolbar-search"
+            value={query}
+            placeholder={state.inputPlaceholder ?? "搜索…"}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setSelectedIdx(0);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "ArrowDown") {
+                e.preventDefault();
+                setSelectedIdx((i) => Math.min(filtered.length - 1, i + 1));
+              } else if (e.key === "ArrowUp") {
+                e.preventDefault();
+                setSelectedIdx((i) => Math.max(0, i - 1));
+              } else if (e.key === "Enter") {
+                e.preventDefault();
+                const pick = filtered[safeIdx];
+                if (pick) confirm(pick.id);
+              } else if (e.key === "Escape") {
+                e.preventDefault();
+                cancel();
+              }
+            }}
+          />
+        </div>
         <div className="ca-picker-list" ref={listRef}>
           {filtered.length === 0 && (
             <div className="ca-picker-empty">无匹配项</div>

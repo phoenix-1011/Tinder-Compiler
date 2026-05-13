@@ -53,34 +53,39 @@ export function ProfileLifecycleView({
       <div className="profile-lifecycle">
         <section className="profile-lifecycle-section">
           <h2>基本信息</h2>
-          <dl className="profile-lifecycle-grid">
-            <dt>档案名</dt>
-            <dd>{profile.name}</dd>
-            <dt>文件名</dt>
-            <dd>{basenameNoExt(profile.id) || "(无)"}</dd>
-            <dt>路径</dt>
-            <dd>
-              <code>{profile.id}</code>
-            </dd>
-            <dt>Schema</dt>
-            <dd>v{profile.project.version ?? 1}</dd>
-          </dl>
+          <div className="profile-lifecycle-section-body">
+            <dl className="profile-lifecycle-grid">
+              <dt>档案名</dt>
+              <dd>{profile.name}</dd>
+              <dt>文件名</dt>
+              <dd>{basenameNoExt(profile.id) || "(无)"}</dd>
+              <dt>路径</dt>
+              <dd>
+                <code>{profile.id}</code>
+              </dd>
+              <dt>Schema</dt>
+              <dd>v{profile.project.version ?? 1}</dd>
+            </dl>
+          </div>
         </section>
 
         <section className="profile-lifecycle-section">
           <h2>组成统计</h2>
-          <dl className="profile-lifecycle-grid">
-            <dt>活跃资源</dt>
-            <dd>{activeRefs.length}</dd>
-            <dt>停用资源</dt>
-            <dd>{disabledRefs.length}</dd>
-            <dt>自定义节点用法</dt>
-            <dd>{customUsages.length}</dd>
-          </dl>
+          <div className="profile-lifecycle-section-body">
+            <dl className="profile-lifecycle-grid">
+              <dt>活跃资源</dt>
+              <dd>{activeRefs.length}</dd>
+              <dt>停用资源</dt>
+              <dd>{disabledRefs.length}</dd>
+              <dt>自定义节点用法</dt>
+              <dd>{customUsages.length}</dd>
+            </dl>
+          </div>
         </section>
 
         <section className="profile-lifecycle-section">
           <h2>操作</h2>
+          <div className="profile-lifecycle-section-body">
           <div className="profile-lifecycle-buttons">
             <button
               type="button"
@@ -110,6 +115,7 @@ export function ProfileLifecycleView({
             >
               删除档案
             </button>
+          </div>
           </div>
         </section>
       </div>

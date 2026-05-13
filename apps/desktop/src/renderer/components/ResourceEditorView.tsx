@@ -2,22 +2,18 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   ComputeResourceV2,
   CustomComputeResource,
-  ImplementationFileLanguage,
-  ImplementationFileRef,
-  ImplementationFileRole,
   ImplementationKind,
   ResourceCategory,
   StandardComputeResource
 } from "@tinder/nextstep";
 import {
   allocateCustomActionIndexes,
+  allocateInactiveSuffixes,
   parseComputeResource
 } from "@tinder/nextstep";
 import { useCa } from "../state/ChainAssemblyContext";
 import { useWorkspace } from "../state/WorkspaceContext";
 import {
-  RESOURCE_INCLUDE_DIR,
-  RESOURCE_SRC_DIR,
   collectAllCustomActionIndexes,
   readLegacyResourceFile,
   readResourcePackage
@@ -44,8 +40,21 @@ interface ResourceEditorViewProps {
   tabUri: string;
 }
 
-type EditorTab = "summary" | "capability" | "files" | "interface";
-type AssistantContext = "docs" | "interface" | "issues" | "ai";
+type EditorTab = "summary" | "capability" | "issues";
+
+/**
+ * Session-only memory of which inner tab / variant the user was on for
+ * each resource-editor synthetic tab. Keyed by the tab uri so a remount
+ * (e.g. after switching away in the workspace tab strip and switching
+ * back) restores the user's position instead of snapping to defaults.
+ *
+ * Module-level so the cache survives component unmount but resets on a
+ * full page reload — the right granularity for "operation position".
+ */
+const editorSessionMemory = new Map<
+  string,
+  { activeTab?: EditorTab; selectedVariantId?: string | null }
+>();
 
 type LoadState =
   | { kind: "idle" }
@@ -68,21 +77,6 @@ const CATEGORY_OPTIONS: Array<{ value: ResourceCategory; label: string }> = [
   { value: "signal", label: "信号服务" },
   { value: "service", label: "通用服务" }
 ];
-
-const ROLE_OPTIONS: Array<{ value: ImplementationFileRole; label: string }> = [
-  { value: "primary", label: "primary（主入口）" },
-  { value: "header", label: "header（头文件）" },
-  { value: "source", label: "source（源文件）" },
-  { value: "support", label: "support（辅助）" }
-];
-
-function inferLang(path: string): ImplementationFileLanguage {
-  const p = path.toLowerCase();
-  if (p.endsWith(".py")) return "python";
-  if (/\.(cpp|cc|cxx|hpp)$/.test(p)) return "cpp";
-  if (/\.(c|h)$/.test(p)) return "c";
-  return "unknown";
-}
 
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
@@ -139,10 +133,22 @@ export function ResourceEditorView({
     setSyntheticDirty,
     openFile,
     openHelpDoc,
-    openChainEditor
+    openChainEditor,
+    registerSyntheticSave
   } = useWorkspace();
 
-  const [activeTab, setActiveTab] = useState<EditorTab>("summary");
+  const [activeTab, setActiveTabRaw] = useState<EditorTab>(
+    () => editorSessionMemory.get(tabUri)?.activeTab ?? "summary"
+  );
+  const setActiveTab = useCallback(
+    (next: EditorTab) => {
+      setActiveTabRaw(next);
+      const slot = editorSessionMemory.get(tabUri) ?? {};
+      slot.activeTab = next;
+      editorSessionMemory.set(tabUri, slot);
+    },
+    [tabUri]
+  );
   const [load, setLoad] = useState<LoadState>({ kind: "idle" });
   const [save, setSave] = useState<SaveState>({ kind: "idle" });
   const [draft, setDraft] = useState<ComputeResourceV2 | null>(null);
@@ -151,14 +157,17 @@ export function ResourceEditorView({
     sourcePath
   );
   /** Selected variant for the standard-resource capability tab. */
-  const [selectedVariantId, setSelectedVariantId] = useState<string | null>(
-    null
+  const [selectedVariantId, setSelectedVariantIdRaw] = useState<string | null>(
+    () => editorSessionMemory.get(tabUri)?.selectedVariantId ?? null
   );
-  /** Right assistant panel context — kept independent of the main tab. */
-  const [assistantCtx, setAssistantCtx] = useState<AssistantContext>("docs");
-  /** file_id of the source file targeted by the toolbar's "打开源文件" button. */
-  const [activeSourceFileId, setActiveSourceFileId] = useState<string | null>(
-    null
+  const setSelectedVariantId = useCallback(
+    (next: string | null) => {
+      setSelectedVariantIdRaw(next);
+      const slot = editorSessionMemory.get(tabUri) ?? {};
+      slot.selectedVariantId = next;
+      editorSessionMemory.set(tabUri, slot);
+    },
+    [tabUri]
   );
   /** Whether the generation preview modal is open. */
   const [generationPreviewOpen, setGenerationPreviewOpen] = useState(false);
@@ -218,6 +227,24 @@ export function ResourceEditorView({
         if (myToken !== loadTokenRef.current) return;
         const resource = parseComputeResource(rawText, resourceKind);
 
+        // Standard resources must always have at least one branch
+        // (model_variant). Synthesize a "默认" branch when the on-disk
+        // value is empty so the UI never renders an empty-state. The
+        // injection happens *before* baseline so it doesn't flag the
+        // editor as dirty on first open.
+        if (resource.resource_kind === "standard") {
+          const std = resource as StandardComputeResource;
+          if (std.model_variants.length === 0) {
+            std.model_variants = [
+              {
+                variant_id: "default",
+                display_name: "默认",
+                effective_candidates: {}
+              }
+            ];
+          }
+        }
+
         // Refresh marker health for each source file by actually probing
         // disk content. Mutates a clone so the in-memory representation
         // reflects current reality.
@@ -228,10 +255,16 @@ export function ResourceEditorView({
         setBaseline(clone(resource));
         setDiskHash(hashText(rawText));
         if (resource.resource_kind === "standard") {
-          const first =
-            (resource as StandardComputeResource).model_variants[0]
-              ?.variant_id ?? null;
-          setSelectedVariantId(first);
+          // Restore the user's previously-picked variant from session
+          // memory when it still exists on the resource; otherwise fall
+          // back to the first variant.
+          const variants = (resource as StandardComputeResource).model_variants;
+          const memorized = editorSessionMemory.get(tabUri)?.selectedVariantId;
+          const valid =
+            memorized && variants.some((v) => v.variant_id === memorized);
+          setSelectedVariantId(
+            valid ? memorized ?? null : variants[0]?.variant_id ?? null
+          );
         } else {
           setSelectedVariantId(null);
         }
@@ -259,60 +292,16 @@ export function ResourceEditorView({
     })();
   }, [currentSourcePath, resourceKind]);
 
-  // Whenever the resource changes (re-loads or save-induced reset), keep the
-  // toolbar's selected source file pointing at something that still exists.
-  //
-  // Reads `activeSourceFileId` through a ref so the effect doesn't re-fire
-  // every time the user picks a different source file in the toolbar; we
-  // only care about *draft* identity changes here.
-  const activeSourceFileIdRef = useRef<string | null>(null);
-  activeSourceFileIdRef.current = activeSourceFileId;
+  // Auto-clear the "已保存" badge after a short delay so it doesn't linger
+  // forever next to the save icon. The save icon's own dirty dot is the
+  // persistent indicator; the text badge is meant as a transient ack.
   useEffect(() => {
-    if (!draft) {
-      setActiveSourceFileId(null);
-      return;
-    }
-    const refs = draft.implementation.source_files;
-    if (refs.length === 0) {
-      setActiveSourceFileId(null);
-      return;
-    }
-    const current = activeSourceFileIdRef.current;
-    if (current && refs.some((r) => r.file_id === current)) {
-      return; // current selection is still valid
-    }
-    setActiveSourceFileId(refs[0]!.file_id);
-  }, [draft]);
-
-  const resolveSourceAbsolutePath = useCallback(
-    async (ref: ImplementationFileRef): Promise<string | null> => {
-      if (ref.storage === "external") return ref.path;
-      const packageDir =
-        currentSourcePath && !currentSourcePath.endsWith(".json")
-          ? currentSourcePath
-          : null;
-      if (!packageDir) return null;
-      return await window.tinder.joinPath(packageDir, ref.path);
-    },
-    [currentSourcePath]
-  );
-
-  const handleOpenActiveSource = useCallback(async () => {
-    if (!draft || !activeSourceFileId) return;
-    const ref = draft.implementation.source_files.find(
-      (r) => r.file_id === activeSourceFileId
-    );
-    if (!ref) return;
-    const abs = await resolveSourceAbsolutePath(ref);
-    if (!abs) {
-      await ca.dialogNotify({
-        title: "无法打开",
-        message: "请先保存资源配置以建立包目录，托管文件依赖该目录定位。"
-      });
-      return;
-    }
-    void openFile(abs);
-  }, [activeSourceFileId, ca, draft, openFile, resolveSourceAbsolutePath]);
+    if (save.kind !== "saved") return;
+    const t = setTimeout(() => {
+      setSave((cur) => (cur.kind === "saved" ? { kind: "idle" } : cur));
+    }, 1500);
+    return () => clearTimeout(t);
+  }, [save]);
 
   // Dirty: compare draft to baseline structurally.
   const dirty = useMemo(() => {
@@ -375,6 +364,18 @@ export function ResourceEditorView({
             setDraft(clone(allocated));
           }
         }
+        if (toWrite.resource_kind === "standard") {
+          // Auto-allocate `inactive_suffix` for any candidates that
+          // don't have one yet so codegen-time names don't collide
+          // across candidates sharing the same chain node.
+          const normalized = allocateInactiveSuffixes(
+            toWrite as StandardComputeResource
+          );
+          if (normalized !== toWrite) {
+            toWrite = normalized;
+            setDraft(clone(normalized));
+          }
+        }
         const { packagePath: newPackagePath, diskHash: newHash } =
           await ca.saveResourceConfig(toWrite, {
             previousSourcePath: currentSourcePath,
@@ -421,6 +422,18 @@ export function ResourceEditorView({
     setDraft(clone(baseline));
     setSave({ kind: "idle" });
   }, [baseline]);
+
+  // Hook the global Ctrl+S into the resource editor's save flow so the
+  // workspace-level save dispatcher doesn't try to write the synthetic
+  // URI as a file path. The handler delegates to `handleSave`, whose
+  // own state surfaces success / failure in the editor toolbar; the
+  // workspace-level status bar is reserved for Monaco file saves.
+  useEffect(() => {
+    return registerSyntheticSave(tabUri, async () => {
+      await handleSave();
+      return true;
+    });
+  }, [registerSyntheticSave, tabUri, handleSave]);
 
   const openGenerationPreview = useCallback(async () => {
     if (!draft) return;
@@ -512,7 +525,7 @@ export function ResourceEditorView({
   const handleSaveAsTemplate = useCallback(async () => {
     if (!draft) return;
     const templateId = await ca.dialogPrompt({
-      title: "另存为项目模板",
+      title: "另存为模板",
       placeholder: "template_id（英文小写，唯一）",
       defaultValue: `project.${draft.resource_kind}.${draft.resource_instance_id}`
     });
@@ -621,91 +634,38 @@ export function ResourceEditorView({
 
   return (
     <div className="chain-editor">
-      <header className="chain-editor-header">
-        <div className="chain-editor-title">
-          <h1 title={currentSourcePath ?? "(未保存)"}>
-            {draft.display_name || "(未命名计算实例)"}
-          </h1>
-          <span className="resource-editor-subtitle">
-            {resourceKind === "standard" ? "标准计算实例" : "自定义计算实例"} ·{" "}
-            状态 {statusLabel(draft.status)}
-            {dirty && <span className="resource-editor-dirty"> · 未保存</span>}
-          </span>
-        </div>
-        <div className="chain-editor-toolbar-actions">
-          <button
-            type="button"
-            className="chain-editor-action-btn"
-            onClick={handleRevert}
-            disabled={!dirty || save.kind === "saving"}
-          >
-            还原
-          </button>
-          <button
-            type="button"
-            className="chain-editor-action-btn"
-            onClick={() => void handleCopy()}
-          >
-            复制计算实例…
-          </button>
-          <button
-            type="button"
-            className="chain-editor-action-btn is-primary"
-            onClick={() => void handleSave()}
-            disabled={!dirty || save.kind === "saving"}
-          >
-            {save.kind === "saving" ? "保存中…" : "保存资源配置"}
-          </button>
-        </div>
-      </header>
-
       <nav className="resource-editor-tabs">
         <TabButton active={activeTab === "summary"} onClick={() => setActiveTab("summary")}>
-          概要
+          实例设置
         </TabButton>
         <TabButton
           active={activeTab === "capability"}
           onClick={() => setActiveTab("capability")}
         >
-          能力节点
+          计算节点
         </TabButton>
-        <TabButton active={activeTab === "files"} onClick={() => setActiveTab("files")}>
-          实现文件
-        </TabButton>
-        <TabButton
-          active={activeTab === "interface"}
-          onClick={() => setActiveTab("interface")}
-        >
-          文档与接口
+        <TabButton active={activeTab === "issues"} onClick={() => setActiveTab("issues")}>
+          错误项{issues.length > 0 ? ` (${issues.length})` : ""}
         </TabButton>
         <div className="resource-editor-tabs-spacer" />
-        {issues.length > 0 && (
-          <span
-            className="resource-editor-issue-badge"
-            title={issues.map((i) => i.message).join("\n")}
-          >
-            {issues.length} 项问题
-          </span>
-        )}
         <SaveStatusBadge status={save} />
-      </nav>
-
-      <div className="resource-editor-toolbar">
-        <SourceFileSwitcher
-          draft={draft}
-          activeId={activeSourceFileId}
-          onChange={setActiveSourceFileId}
-          onOpen={() => void handleOpenActiveSource()}
-        />
-        <div className="resource-editor-toolbar-spacer" />
         <button
           type="button"
-          className="chain-editor-action-btn"
-          onClick={() => void openGenerationPreview()}
+          className={`resource-editor-tabs-save-btn${dirty ? " is-dirty" : ""}`}
+          onClick={() => void handleSave()}
+          disabled={!dirty || save.kind === "saving"}
+          title={
+            save.kind === "saving"
+              ? "保存中…"
+              : dirty
+                ? "保存资源配置 (Ctrl+S)"
+                : "已无未保存更改"
+          }
+          aria-label="保存资源配置"
         >
-          生成/更新接口…
+          <span className="codicon codicon-save" aria-hidden="true" />
         </button>
-      </div>
+      </nav>
 
       <div className="resource-editor-body-split">
         <div className="resource-editor-body">
@@ -720,6 +680,10 @@ export function ResourceEditorView({
               onOpenProfile={(profileId, profileName) =>
                 openChainEditor(profileId, profileName)
               }
+              onRevert={handleRevert}
+              onCopy={() => void handleCopy()}
+              dirty={dirty}
+              saveKind={save.kind}
             />
           )}
           {activeTab === "capability" &&
@@ -729,38 +693,24 @@ export function ResourceEditorView({
                 selectedVariantId={selectedVariantId}
                 onSelectVariant={setSelectedVariantId}
                 patch={(next) => setDraft(next)}
+                sourcePath={currentSourcePath}
+                onOpenFile={(absolutePath, position) =>
+                  void openFile(absolutePath, position ? { position } : undefined)
+                }
+                onOpenDocsForNode={(nodeId) => openHelpDoc(nodeId)}
               />
             ) : (
               <CustomCapabilityTab
                 draft={draft as CustomComputeResource}
                 patch={(next) => setDraft(next)}
+                sourcePath={currentSourcePath}
+                onOpenFile={(absolutePath, position) =>
+                  void openFile(absolutePath, position ? { position } : undefined)
+                }
               />
             ))}
-          {activeTab === "files" && (
-            <FilesTab
-              draft={draft}
-              sourcePath={currentSourcePath}
-              patchImpl={patchImpl}
-              onOpenFile={(absolutePath) => void openFile(absolutePath)}
-            />
-          )}
-          {activeTab === "interface" && (
-            <InterfaceTab
-              draft={draft}
-              onOpenDocsForNode={(nodeId) => openHelpDoc(nodeId)}
-              onOpenGenerationPreview={() => void openGenerationPreview()}
-            />
-          )}
+          {activeTab === "issues" && <IssuesTab issues={issues} />}
         </div>
-        <aside className="resource-editor-assistant">
-          <AssistantPanel
-            context={assistantCtx}
-            onChangeContext={setAssistantCtx}
-            draft={draft}
-            issues={issues}
-            onOpenDocsForNode={(nodeId) => openHelpDoc(nodeId)}
-          />
-        </aside>
       </div>
 
       {generationPreviewOpen && (
@@ -793,9 +743,9 @@ function statusLabel(status: ComputeResourceV2["status"]): string {
     case "draft":
       return "草稿";
     case "active":
-      return "活跃";
+      return "可用";
     case "disabled":
-      return "停用";
+      return "已废弃";
     default:
       return status;
   }
@@ -850,7 +800,11 @@ function SummaryTab({
   patchDraft,
   patchImpl,
   onSaveAsTemplate,
-  onOpenProfile
+  onOpenProfile,
+  onRevert,
+  onCopy,
+  dirty,
+  saveKind
 }: {
   draft: ComputeResourceV2;
   sourcePath: string | null;
@@ -864,19 +818,49 @@ function SummaryTab({
   patchImpl: (patch: Partial<ComputeResourceV2["implementation"]>) => void;
   onSaveAsTemplate: () => void;
   onOpenProfile: (profileId: string, profileName: string) => void;
+  onRevert: () => void;
+  onCopy: () => void;
+  dirty: boolean;
+  saveKind: SaveState["kind"];
 }) {
   const tagsText = (draft.tags ?? []).join(", ");
   return (
     <div className="profile-lifecycle">
       <section className="profile-lifecycle-section">
-        <h2>身份</h2>
-        <div className="resource-editor-form">
-          <Field label="资源实例 ID">
-            <code>{draft.resource_instance_id}</code>
-          </Field>
-          <Field label="资源类型">
-            {draft.resource_kind === "standard" ? "标准" : "自定义"}
-          </Field>
+        <div className="profile-lifecycle-section-body">
+          <div className="resource-editor-summary-actions">
+            <button
+              type="button"
+              className="chain-editor-action-btn"
+              onClick={onRevert}
+              disabled={!dirty || saveKind === "saving"}
+              title="把草稿回滚到最近一次加载/保存的版本"
+            >
+              重置
+            </button>
+            <button
+              type="button"
+              className="chain-editor-action-btn"
+              onClick={onCopy}
+            >
+              复制计算实例…
+            </button>
+            <button
+              type="button"
+              className="chain-editor-action-btn"
+              onClick={onSaveAsTemplate}
+              title="把当前资源结构导出为项目模板（剥离源文件 / 产物 / 用量）"
+            >
+              另存为模板…
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section className="profile-lifecycle-section">
+        <h2>基本</h2>
+        <div className="profile-lifecycle-section-body">
+          <div className="resource-editor-form">
           <Field label="显示名">
             <input
               className="resource-editor-input"
@@ -884,7 +868,7 @@ function SummaryTab({
               onChange={(e) => patchDraft({ display_name: e.target.value })}
             />
           </Field>
-          <Field label="状态">
+          <Field label="就绪状态">
             <select
               className="resource-editor-input"
               value={draft.status}
@@ -895,8 +879,8 @@ function SummaryTab({
               }
             >
               <option value="draft">草稿</option>
-              <option value="active">活跃</option>
-              <option value="disabled">停用</option>
+              <option value="active">可用</option>
+              <option value="disabled">已废弃</option>
             </select>
           </Field>
           <Field label="类别">
@@ -946,30 +930,22 @@ function SummaryTab({
               onChange={(e) => patchDraft({ notes: e.target.value })}
             />
           </Field>
+          </div>
         </div>
       </section>
 
       <section className="profile-lifecycle-section">
-        <h2>实现摘要</h2>
-        <div className="resource-editor-form">
+        <h2>运行时</h2>
+        <div className="profile-lifecycle-section-body">
+          <div className="resource-editor-form">
           <Field label="实现类型">
-            <select
-              className="resource-editor-input"
-              value={draft.implementation.kind}
-              onChange={(e) => {
-                const next = e.target.value as ImplementationKind;
-                patchImpl({
-                  kind: next,
-                  runtime_artifact: {
-                    ...draft.implementation.runtime_artifact,
-                    kind: next === "cpp_library" ? "cpp_dylib" : "python_script"
-                  }
-                });
-              }}
-            >
-              <option value="python_script">Python 脚本</option>
-              <option value="cpp_library">C++ 动态库</option>
-            </select>
+            {/* Locked once chosen at creation — switching languages would
+                orphan the code files the resource was created with. */}
+            <span>
+              {draft.implementation.kind === "cpp_library"
+                ? "C++ 动态库"
+                : "Python 脚本"}
+            </span>
           </Field>
           <Field label="运行时产物路径">
             <input
@@ -1006,82 +982,91 @@ function SummaryTab({
           <Field label="源文件数量">
             {draft.implementation.source_files.length}
           </Field>
+          </div>
         </div>
       </section>
 
-      <section className="profile-lifecycle-section">
-        <h2>磁盘位置</h2>
-        <dl className="profile-lifecycle-grid">
-          <dt>来源</dt>
-          <dd>
+      <details className="profile-lifecycle-section resource-editor-meta-block">
+        <summary>元数据</summary>
+        <div className="resource-editor-meta-list">
+          <div className="resource-editor-meta-row">
+            <span className="resource-editor-meta-key">资源实例 ID</span>
+            <code>{draft.resource_instance_id}</code>
+          </div>
+          <div className="resource-editor-meta-row">
+            <span className="resource-editor-meta-key">资源类型</span>
+            <span>{draft.resource_kind === "standard" ? "标准" : "自定义"}</span>
+          </div>
+          <div className="resource-editor-meta-row">
+            <span className="resource-editor-meta-key">磁盘位置</span>
             {sourcePath ? (
               <code>{sourcePath}</code>
             ) : (
-              <span className="sidebar-hint">未保存（保存后将创建包目录）</span>
+              <span className="sidebar-hint">未保存</span>
             )}
-          </dd>
-        </dl>
-      </section>
-
-      <section className="profile-lifecycle-section">
-        <h2>模板</h2>
-        <dl className="profile-lifecycle-grid">
-          <dt>创建模板</dt>
-          <dd>
+          </div>
+          <div className="resource-editor-meta-row">
+            <span className="resource-editor-meta-key">来源模板</span>
             {draft.template_origin ? (
               <code>
                 {draft.template_origin.template_id} ·{" "}
                 {draft.template_origin.template_version}
               </code>
             ) : (
-              <span className="sidebar-hint">无（手动创建或复制而来）</span>
+              <span className="sidebar-hint">无</span>
             )}
-          </dd>
-        </dl>
-        <div className="profile-lifecycle-buttons">
-          <button
-            type="button"
-            className="chain-editor-action-btn"
-            onClick={onSaveAsTemplate}
-          >
-            另存为项目模板…
-          </button>
+          </div>
         </div>
-        <p className="sidebar-hint" style={{ fontSize: 12 }}>
-          模板仅保留资源结构与建议字段（类别、描述、标签、建议节点）。
-          源文件、运行时产物、生成状态与档案使用都不会写入模板。
-        </p>
-      </section>
+      </details>
 
-      <section className="profile-lifecycle-section">
-        <h2>被档案使用 ({usage.length})</h2>
-        {usage.length === 0 ? (
-          <p className="sidebar-hint">尚未被任何配置档案引用。</p>
-        ) : (
-          <ul className="resource-editor-usage-list">
-            {usage.map((u) => (
-              <li key={`${u.profileId}#${u.variantId ?? "-"}`}>
-                <button
-                  type="button"
-                  className="assistant-panel-link"
-                  onClick={() => onOpenProfile(u.profileId, u.profileName)}
-                  title="在链路编辑器中打开该档案"
-                >
-                  <strong>{u.profileName}</strong>
-                </button>
-                <span className="sidebar-hint">
-                  {" "}
-                  · {u.enabled ? "活跃" : "停用"}
-                  {u.variantId ? ` · 变体 ${u.variantId}` : ""}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-        <p className="sidebar-hint" style={{ fontSize: 12 }}>
-          此处只读：点档案名跳转到链路编辑器；配置档案的激活、停用、变体选择仍由链路编辑器管理。
-        </p>
-      </section>
+      <details
+        className="profile-lifecycle-section resource-editor-meta-block"
+        open
+      >
+        <summary>使用统计 · {usage.length}</summary>
+        <div className="profile-lifecycle-section-body">
+          {usage.length === 0 ? (
+            <p className="sidebar-hint">尚未被任何配置档案引用。</p>
+          ) : (
+            <table className="resource-editor-files-table">
+              <thead>
+                <tr>
+                  <th>档案</th>
+                  <th>状态</th>
+                  <th>变体</th>
+                </tr>
+              </thead>
+              <tbody>
+                {usage.map((u) => (
+                  <tr key={`${u.profileId}#${u.variantId ?? "-"}`}>
+                    <td>
+                      <button
+                        type="button"
+                        className="assistant-panel-link"
+                        onClick={() =>
+                          onOpenProfile(u.profileId, u.profileName)
+                        }
+                        title="在链路编辑器中打开该档案"
+                      >
+                        {u.profileName}
+                      </button>
+                    </td>
+                    <td>{u.enabled ? "活跃" : "停用"}</td>
+                    <td>
+                      {u.variantId ? (
+                        <code>{u.variantId}</code>
+                      ) : (
+                        <span className="sidebar-hint">—</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </details>
+
     </div>
   );
 }
@@ -1092,319 +1077,6 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <span className="resource-editor-label">{label}</span>
       <div className="resource-editor-control">{children}</div>
     </label>
-  );
-}
-
-// ─── Files tab ─────────────────────────────────────────────────────────────
-
-function FilesTab({
-  draft,
-  sourcePath,
-  patchImpl,
-  onOpenFile
-}: {
-  draft: ComputeResourceV2;
-  sourcePath: string | null;
-  patchImpl: (patch: Partial<ComputeResourceV2["implementation"]>) => void;
-  onOpenFile: (absolutePath: string) => void;
-}) {
-  const ca = useCa();
-  const refs = draft.implementation.source_files;
-  const packageDir =
-    sourcePath && !sourcePath.endsWith(".json") ? sourcePath : null;
-
-  const resolveAbsolutePath = useCallback(
-    async (ref: ImplementationFileRef): Promise<string | null> => {
-      if (ref.storage === "external") return ref.path;
-      if (!packageDir) return null;
-      return await window.tinder.joinPath(packageDir, ref.path);
-    },
-    [packageDir]
-  );
-
-  const handleAddExternal = useCallback(async () => {
-    const path = await ca.dialogPrompt({
-      title: "关联外部源文件",
-      placeholder: "绝对路径或工程相对路径"
-    });
-    if (!path?.trim()) return;
-    const trimmed = path.trim();
-    const newRef: ImplementationFileRef = {
-      file_id: `${draft.resource_instance_id}:${refs.length + 1}`,
-      path: trimmed,
-      storage: "external",
-      role: "source",
-      language: inferLang(trimmed)
-    };
-    patchImpl({ source_files: [...refs, newRef] });
-  }, [ca, draft.resource_instance_id, patchImpl, refs]);
-
-  const handleCreateManaged = useCallback(async () => {
-    if (!packageDir) {
-      await ca.dialogNotify({
-        title: "需要先保存资源",
-        message: "请先保存资源配置以创建包目录后再添加托管文件。"
-      });
-      return;
-    }
-    const name = await ca.dialogPrompt({
-      title: "新建托管源文件",
-      placeholder: "文件名（含扩展名），例如 main.py 或 radar.cpp"
-    });
-    if (!name?.trim()) return;
-    const trimmed = name.trim();
-    const isHeader = /\.(h|hpp|hxx)$/i.test(trimmed);
-    const subdir = isHeader ? RESOURCE_INCLUDE_DIR : RESOURCE_SRC_DIR;
-    const subdirAbs = await window.tinder.joinPath(packageDir, subdir);
-    try {
-      await window.tinder.createDir(subdirAbs);
-    } catch {
-      /* exists */
-    }
-    const targetAbs = await window.tinder.joinPath(subdirAbs, trimmed);
-    try {
-      await window.tinder.readText(targetAbs);
-      await ca.dialogNotify({
-        title: "文件已存在",
-        message: "请改用不同的文件名，或在「实现文件」中直接打开它。"
-      });
-      return;
-    } catch {
-      /* ok — target does not exist */
-    }
-    try {
-      await window.tinder.writeText(targetAbs, "");
-    } catch (err) {
-      await ca.dialogNotify({ title: "创建失败", message: String(err) });
-      return;
-    }
-    const relPath = `${subdir}/${trimmed}`;
-    const newRef: ImplementationFileRef = {
-      file_id: `${draft.resource_instance_id}:${refs.length + 1}`,
-      path: relPath,
-      storage: "managed",
-      role: isHeader ? "header" : "source",
-      language: inferLang(trimmed),
-      generated_region_status: "unknown"
-    };
-    patchImpl({ source_files: [...refs, newRef] });
-  }, [ca, draft.resource_instance_id, packageDir, patchImpl, refs]);
-
-  const handleRemove = useCallback(
-    async (ref: ImplementationFileRef) => {
-      const ok = await ca.dialogConfirm({
-        title: "解除关联",
-        message:
-          ref.storage === "managed"
-            ? `仅从资源中移除「${ref.path}」的引用，磁盘文件保留。`
-            : `移除对外部文件「${ref.path}」的引用，磁盘文件不受影响。`
-      });
-      if (!ok) return;
-      patchImpl({ source_files: refs.filter((r) => r.file_id !== ref.file_id) });
-    },
-    [ca, patchImpl, refs]
-  );
-
-  const handleOpen = useCallback(
-    async (ref: ImplementationFileRef) => {
-      const abs = await resolveAbsolutePath(ref);
-      if (!abs) {
-        await ca.dialogNotify({
-          title: "无法打开",
-          message: "请先保存资源配置以建立包目录，托管文件依赖该目录定位。"
-        });
-        return;
-      }
-      onOpenFile(abs);
-    },
-    [ca, onOpenFile, resolveAbsolutePath]
-  );
-
-  const handleChangeRole = useCallback(
-    (ref: ImplementationFileRef, role: ImplementationFileRole) => {
-      patchImpl({
-        source_files: refs.map((r) =>
-          r.file_id === ref.file_id ? { ...r, role } : r
-        )
-      });
-    },
-    [patchImpl, refs]
-  );
-
-  return (
-    <div className="profile-lifecycle">
-      <section className="profile-lifecycle-section">
-        <h2>实现文件</h2>
-        <div className="resource-editor-files-toolbar">
-          <button
-            type="button"
-            className="chain-editor-action-btn"
-            onClick={() => void handleCreateManaged()}
-          >
-            新建托管文件…
-          </button>
-          <button
-            type="button"
-            className="chain-editor-action-btn"
-            onClick={() => void handleAddExternal()}
-          >
-            关联外部文件…
-          </button>
-        </div>
-        {refs.length === 0 ? (
-          <p className="sidebar-hint">尚未关联任何源文件。</p>
-        ) : (
-          <table className="resource-editor-files-table">
-            <thead>
-              <tr>
-                <th>路径</th>
-                <th>存储</th>
-                <th>角色</th>
-                <th>语言</th>
-                <th>标记</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {refs.map((ref) => (
-                <tr key={ref.file_id}>
-                  <td>
-                    <code>{ref.path}</code>
-                  </td>
-                  <td>{ref.storage === "managed" ? "项目托管" : "外部关联"}</td>
-                  <td>
-                    <select
-                      className="resource-editor-input"
-                      value={ref.role}
-                      onChange={(e) =>
-                        handleChangeRole(
-                          ref,
-                          e.target.value as ImplementationFileRole
-                        )
-                      }
-                    >
-                      {ROLE_OPTIONS.map((opt) => (
-                        <option key={opt.value} value={opt.value}>
-                          {opt.label}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
-                  <td>{ref.language}</td>
-                  <td>{ref.generated_region_status ?? "unknown"}</td>
-                  <td>
-                    <div className="resource-editor-files-actions">
-                      <button
-                        type="button"
-                        className="chain-editor-action-btn"
-                        onClick={() => void handleOpen(ref)}
-                      >
-                        打开
-                      </button>
-                      <button
-                        type="button"
-                        className="chain-editor-action-btn is-danger"
-                        onClick={() => void handleRemove(ref)}
-                      >
-                        移除
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-        <p className="sidebar-hint" style={{ fontSize: 12 }}>
-          托管文件保存于资源包目录下的{" "}
-          <code>src/</code> 或 <code>include/</code>。外部文件以引用形式关联，
-          接口生成在写入前会再次确认。
-        </p>
-      </section>
-
-      <section className="profile-lifecycle-section">
-        <h2>占位说明</h2>
-        <p className="sidebar-hint">
-          能力节点、文档与接口将在后续切片中提供。当前切片专注于资源元数据、源文件关联和运行时产物记录。
-        </p>
-      </section>
-
-      {/* CustomComputeResource hint — let user know custom_nodes editing comes in 3c. */}
-      {draft.resource_kind === "custom" && (
-        <CustomNodesPreview resource={draft as CustomComputeResource} />
-      )}
-    </div>
-  );
-}
-
-function CustomNodesPreview({ resource }: { resource: CustomComputeResource }) {
-  return (
-    <section className="profile-lifecycle-section">
-      <h2>自定义节点（预览，编辑功能 3c）</h2>
-      {resource.custom_nodes.length === 0 ? (
-        <p className="sidebar-hint">资源未包含任何自定义节点。</p>
-      ) : (
-        <ul className="resource-editor-usage-list">
-          {resource.custom_nodes.map((n) => (
-            <li key={n.node_id}>
-              <strong>{n.display_name || n.node_id}</strong>
-              <span className="sidebar-hint">
-                {" "}
-                · action_index {n.action_index}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
-  );
-}
-
-// ─── Source file switcher (toolbar) ────────────────────────────────────────
-
-function SourceFileSwitcher({
-  draft,
-  activeId,
-  onChange,
-  onOpen
-}: {
-  draft: ComputeResourceV2;
-  activeId: string | null;
-  onChange: (id: string | null) => void;
-  onOpen: () => void;
-}) {
-  const refs = draft.implementation.source_files;
-  if (refs.length === 0) {
-    return (
-      <span className="resource-editor-toolbar-hint">
-        未关联源文件 · 在「实现文件」中添加
-      </span>
-    );
-  }
-  return (
-    <div className="resource-editor-toolbar-source">
-      <label className="resource-editor-label">活动源文件</label>
-      <select
-        className="resource-editor-input"
-        style={{ maxWidth: 320 }}
-        value={activeId ?? ""}
-        onChange={(e) => onChange(e.target.value || null)}
-      >
-        {refs.map((r) => (
-          <option key={r.file_id} value={r.file_id}>
-            {r.path} · {r.role}
-          </option>
-        ))}
-      </select>
-      <button
-        type="button"
-        className="chain-editor-action-btn"
-        onClick={onOpen}
-        disabled={!activeId}
-      >
-        在编辑器中打开
-      </button>
-    </div>
   );
 }
 
@@ -1433,7 +1105,7 @@ function computeEditorIssues(draft: ComputeResourceV2): EditorIssue[] {
     if (!artifactPath) {
       issues.push({
         severity: "error",
-        message: "资源已置为「活跃」但运行时产物路径为空"
+        message: "资源已置为「可用」但运行时产物路径为空"
       });
     }
   }
@@ -1528,352 +1200,52 @@ function computeEditorIssues(draft: ComputeResourceV2): EditorIssue[] {
   return issues;
 }
 
-// ─── Assistant panel ───────────────────────────────────────────────────────
+// ─── 错误项 tab ────────────────────────────────────────────────────────────
 
-function AssistantPanel({
-  context,
-  onChangeContext,
-  draft,
-  issues,
-  onOpenDocsForNode
-}: {
-  context: AssistantContext;
-  onChangeContext: (ctx: AssistantContext) => void;
-  draft: ComputeResourceV2;
-  issues: EditorIssue[];
-  onOpenDocsForNode: (nodeId: string) => void;
-}) {
+function IssuesTab({ issues }: { issues: EditorIssue[] }) {
+  const errors = issues.filter((i) => i.severity === "error");
+  const warnings = issues.filter((i) => i.severity === "warning");
+  // Plain (no card chrome) — issue rows have their own coloured
+  // backgrounds, so wrapping them in a gray card adds noise.
   return (
-    <div className="assistant-panel">
-      <div className="assistant-panel-tabs" role="tablist">
-        <AssistantTabButton
-          active={context === "docs"}
-          onClick={() => onChangeContext("docs")}
-        >
-          文档
-        </AssistantTabButton>
-        <AssistantTabButton
-          active={context === "interface"}
-          onClick={() => onChangeContext("interface")}
-        >
-          接口
-        </AssistantTabButton>
-        <AssistantTabButton
-          active={context === "issues"}
-          onClick={() => onChangeContext("issues")}
-        >
-          问题{issues.length > 0 ? ` (${issues.length})` : ""}
-        </AssistantTabButton>
-        <AssistantTabButton
-          active={context === "ai"}
-          onClick={() => onChangeContext("ai")}
-        >
-          AI
-        </AssistantTabButton>
-      </div>
-      <div className="assistant-panel-body">
-        {context === "docs" && (
-          <AssistantDocsContext
-            draft={draft}
-            onOpenDocsForNode={onOpenDocsForNode}
-          />
-        )}
-        {context === "interface" && <AssistantInterfaceContext draft={draft} />}
-        {context === "issues" && <AssistantIssuesContext issues={issues} />}
-        {context === "ai" && <AssistantAiContext />}
-      </div>
-    </div>
-  );
-}
-
-function AssistantTabButton({
-  active,
-  onClick,
-  children
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      className={`assistant-panel-tab${active ? " is-active" : ""}`}
-      onClick={onClick}
-      role="tab"
-      aria-selected={active}
-    >
-      {children}
-    </button>
-  );
-}
-
-function AssistantDocsContext({
-  draft,
-  onOpenDocsForNode
-}: {
-  draft: ComputeResourceV2;
-  onOpenDocsForNode: (nodeId: string) => void;
-}) {
-  const linkedNodeIds: string[] = [];
-  if (draft.resource_kind === "standard") {
-    for (const c of (draft as StandardComputeResource).compute_nodes) {
-      if (!linkedNodeIds.includes(c.node_id)) linkedNodeIds.push(c.node_id);
-    }
-  }
-  return (
-    <div className="assistant-panel-section">
-      <h3>关联标准节点文档</h3>
-      {linkedNodeIds.length === 0 ? (
-        <p className="sidebar-hint">
-          {draft.resource_kind === "custom"
-            ? "自定义资源不直接关联标准节点。链路插入位置由档案管理。"
-            : "尚未关联任何标准节点。在「能力节点」中添加候选后即可在此打开文档。"}
-        </p>
-      ) : (
-        <ul className="assistant-panel-list">
-          {linkedNodeIds.map((nodeId) => (
-            <li key={nodeId}>
-              <button
-                type="button"
-                className="assistant-panel-link"
-                onClick={() => onOpenDocsForNode(nodeId)}
+    <div className="profile-lifecycle resource-editor-issues-tab">
+      <div className="resource-editor-issues-block">
+        <h2>错误项 · {errors.length}</h2>
+        {errors.length === 0 ? (
+          <p className="sidebar-hint">无错误项。</p>
+        ) : (
+          <ul className="resource-editor-issues">
+            {errors.map((issue, i) => (
+              <li
+                key={`err-${i}`}
+                className="resource-editor-issue is-error"
               >
-                <code>{nodeId}</code>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-      <p className="sidebar-hint" style={{ fontSize: 11, marginTop: 8 }}>
-        文档来自标准链 catalog（chain-contract docs）。
-      </p>
-    </div>
-  );
-}
-
-function AssistantInterfaceContext({ draft }: { draft: ComputeResourceV2 }) {
-  return (
-    <div className="assistant-panel-section">
-      <h3>生成区健康</h3>
-      {draft.implementation.source_files.length === 0 ? (
-        <p className="sidebar-hint">未关联源文件。</p>
-      ) : (
-        <ul className="assistant-panel-list">
-          {draft.implementation.source_files.map((ref) => (
-            <li key={ref.file_id}>
-              <code>{ref.path}</code>
-              <span className="sidebar-hint">
-                {" "}
-                · {ref.generated_region_status ?? "unknown"}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-      {draft.resource_kind === "custom" && (
-        <>
-          <h3 style={{ marginTop: 12 }}>action_index 分配</h3>
-          <ul className="assistant-panel-list">
-            {(draft as CustomComputeResource).custom_nodes.map((n) => (
-              <li key={n.node_id}>
-                <code>{n.node_id}</code>
-                <span className="sidebar-hint">
-                  {" "}
-                  ·{" "}
-                  {typeof n.action_index === "number"
-                    ? `action_index ${n.action_index}`
-                    : "待分配"}
-                </span>
+                <span className="resource-editor-issue-badge">错误</span>
+                <span>{issue.message}</span>
               </li>
             ))}
           </ul>
-        </>
-      )}
-      <p className="sidebar-hint" style={{ fontSize: 11, marginTop: 8 }}>
-        预览，实际写入将在下个切片提供。
-      </p>
-    </div>
-  );
-}
-
-function AssistantIssuesContext({ issues }: { issues: EditorIssue[] }) {
-  if (issues.length === 0) {
-    return (
-      <div className="assistant-panel-section">
-        <p className="sidebar-hint">没有发现问题。</p>
+        )}
       </div>
-    );
-  }
-  return (
-    <div className="assistant-panel-section">
-      <ul className="assistant-panel-issues">
-        {issues.map((issue, i) => (
-          <li
-            key={i}
-            className={`assistant-panel-issue is-${issue.severity}`}
-          >
-            <span className="assistant-panel-issue-badge">
-              {issue.severity === "error" ? "错误" : "警告"}
-            </span>
-            <span>{issue.message}</span>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
 
-function AssistantAiContext() {
-  return (
-    <div className="assistant-panel-section">
-      <p className="sidebar-hint">
-        AI 助手尚未接入。后续版本将支持：
-      </p>
-      <ul className="assistant-panel-list">
-        <li>解释当前文件</li>
-        <li>生成实现建议</li>
-        <li>检查接口问题</li>
-        <li>回答链路装配问题</li>
-      </ul>
-      <p className="sidebar-hint" style={{ fontSize: 11, marginTop: 8 }}>
-        任何未来的 AI 写入仍会走 preview / diff / 确认的安全写规则。
-      </p>
-    </div>
-  );
-}
-
-// ─── 文档与接口 main tab ───────────────────────────────────────────────────
-
-function InterfaceTab({
-  draft,
-  onOpenDocsForNode,
-  onOpenGenerationPreview
-}: {
-  draft: ComputeResourceV2;
-  onOpenDocsForNode: (nodeId: string) => void;
-  onOpenGenerationPreview: () => void;
-}) {
-  const linkedNodeIds: string[] = [];
-  if (draft.resource_kind === "standard") {
-    for (const c of (draft as StandardComputeResource).compute_nodes) {
-      if (!linkedNodeIds.includes(c.node_id)) linkedNodeIds.push(c.node_id);
-    }
-  }
-  return (
-    <div className="profile-lifecycle">
-      <section className="profile-lifecycle-section">
-        <h2>源链路文档</h2>
-        {linkedNodeIds.length === 0 ? (
-          <p className="sidebar-hint">
-            {draft.resource_kind === "custom"
-              ? "自定义资源没有直接关联的标准链节点。"
-              : "在「能力节点」中添加候选后，对应的标准节点文档会出现在此处。"}
-          </p>
+      <div className="resource-editor-issues-block">
+        <h2>警告 · {warnings.length}</h2>
+        {warnings.length === 0 ? (
+          <p className="sidebar-hint">无警告。</p>
         ) : (
-          <ul className="resource-editor-usage-list">
-            {linkedNodeIds.map((nodeId) => (
-              <li key={nodeId}>
-                <button
-                  type="button"
-                  className="assistant-panel-link"
-                  onClick={() => onOpenDocsForNode(nodeId)}
-                >
-                  <code>{nodeId}</code>
-                </button>
+          <ul className="resource-editor-issues">
+            {warnings.map((issue, i) => (
+              <li
+                key={`warn-${i}`}
+                className="resource-editor-issue is-warning"
+              >
+                <span className="resource-editor-issue-badge">警告</span>
+                <span>{issue.message}</span>
               </li>
             ))}
           </ul>
         )}
-      </section>
-
-      <section className="profile-lifecycle-section">
-        <h2>生成区健康</h2>
-        {draft.implementation.source_files.length === 0 ? (
-          <p className="sidebar-hint">未关联源文件。</p>
-        ) : (
-          <table className="resource-editor-files-table">
-            <thead>
-              <tr>
-                <th>路径</th>
-                <th>角色</th>
-                <th>生成区标记</th>
-              </tr>
-            </thead>
-            <tbody>
-              {draft.implementation.source_files.map((ref) => (
-                <tr key={ref.file_id}>
-                  <td>
-                    <code>{ref.path}</code>
-                  </td>
-                  <td>{ref.role}</td>
-                  <td>{ref.generated_region_status ?? "unknown"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
-
-      <section className="profile-lifecycle-section">
-        <h2>接口生成</h2>
-        <p className="sidebar-hint">
-          预览此次「生成/更新接口」将影响的文件与字段。
-          {" "}
-          <strong>本切片仅展示预览</strong>，实际写入安全规则将在下个切片接入。
-        </p>
-        <div className="profile-lifecycle-buttons">
-          <button
-            type="button"
-            className="chain-editor-action-btn is-primary"
-            onClick={onOpenGenerationPreview}
-          >
-            打开生成预览
-          </button>
-        </div>
-      </section>
-
-      {draft.resource_kind === "custom" && (
-        <section className="profile-lifecycle-section">
-          <h2>动作注册 / 处理函数</h2>
-          {(draft as CustomComputeResource).custom_nodes.length === 0 ? (
-            <p className="sidebar-hint">未定义自定义节点。</p>
-          ) : (
-            <table className="resource-editor-files-table">
-              <thead>
-                <tr>
-                  <th>node_id</th>
-                  <th>action_index</th>
-                  <th>handler_function</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(draft as CustomComputeResource).custom_nodes.map((n) => (
-                  <tr key={n.node_id}>
-                    <td>
-                      <code>{n.node_id}</code>
-                    </td>
-                    <td>
-                      {typeof n.action_index === "number" ? (
-                        n.action_index
-                      ) : (
-                        <span className="sidebar-hint">待分配</span>
-                      )}
-                    </td>
-                    <td>
-                      {n.handler_function ? (
-                        <code>{n.handler_function}</code>
-                      ) : (
-                        <span className="sidebar-hint">—</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </section>
-      )}
+      </div>
     </div>
   );
 }

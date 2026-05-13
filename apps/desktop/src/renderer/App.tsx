@@ -3,6 +3,7 @@ import { ActivityBar } from "./components/ActivityBar";
 import { SideBar } from "./components/SideBar";
 import { EditorArea } from "./components/EditorArea";
 import { Panel } from "./components/Panel";
+import { AIPanel } from "./components/AIPanel";
 import { StatusBar } from "./components/StatusBar";
 import { CommandPalette } from "./components/CommandPalette";
 import { QuickOpen } from "./components/QuickOpen";
@@ -35,6 +36,9 @@ function Workbench() {
     setPanelHeight,
     sidebarVisible,
     panelVisible,
+    aiPanelVisible,
+    aiPanelWidth,
+    setAiPanelWidth,
     isAboutOpen,
     closeAbout,
     isThemePickerOpen,
@@ -43,12 +47,19 @@ function Workbench() {
   } = useUI();
   const { activeView } = useWorkspace();
 
-  const bodyTemplate = sidebarVisible
-    ? `var(--tc-activitybar-w) ${sidebarWidth}px 4px 1fr`
-    : `var(--tc-activitybar-w) 1fr`;
+  // Body grid: activity bar | [optional sidebar + 0-width splitter overlay] |
+  // main | [optional 0-width AI splitter overlay + AI panel]. Splitters
+  // are absolute-positioned overlays (`.splitter-hit` extends ±3px from
+  // the cell origin) so the panels themselves stay flush — no parent-
+  // colored seam shows between them.
+  const cols: string[] = ["var(--tc-activitybar-w)"];
+  if (sidebarVisible) cols.push(`${sidebarWidth}px`, "0");
+  cols.push("1fr");
+  if (aiPanelVisible) cols.push("0", `${aiPanelWidth}px`);
+  const bodyTemplate = cols.join(" ");
 
   const mainTemplate = panelVisible
-    ? `1fr 4px ${panelHeight}px`
+    ? `1fr 0 ${panelHeight}px`
     : `1fr`;
 
   return (
@@ -82,6 +93,15 @@ function Workbench() {
           )}
           {panelVisible && <Panel />}
         </div>
+        {aiPanelVisible && (
+          <Splitter
+            orientation="vertical"
+            value={aiPanelWidth}
+            onChange={setAiPanelWidth}
+            invert
+          />
+        )}
+        {aiPanelVisible && <AIPanel />}
       </div>
       <StatusBar />
       <CommandPalette />

@@ -153,8 +153,22 @@ export interface TinderApi {
   openFolder(): Promise<OpenedFolder | null>;
   openFolderByPath(path: string): Promise<OpenedFolder>;
   listDir(path: string): Promise<DirEntry[]>;
+  /**
+   * Like `listDir` but returns `null` instead of throwing when the
+   * directory does not exist. Other errors (permission denied, etc.)
+   * still throw. Use for optional reads (lazily-created template
+   * directories etc.) so the main process doesn't log expected ENOENTs.
+   */
+  tryListDir(path: string): Promise<DirEntry[] | null>;
   walkDir(root: string, opts?: { limit?: number }): Promise<WalkEntry[]>;
   readText(path: string): Promise<string>;
+  /** Like `readText` but returns `null` instead of throwing on ENOENT. */
+  tryReadText(path: string): Promise<string | null>;
+  /**
+   * Boolean existence probe. Silent on ENOENT — other errors still throw.
+   * Cheaper than tryReadText for callers that don't need the contents.
+   */
+  exists(path: string): Promise<boolean>;
   writeText(path: string, contents: string): Promise<void>;
   createFile(path: string): Promise<void>;
   createDir(path: string): Promise<void>;
@@ -257,8 +271,11 @@ const api: TinderApi = {
   openFolder: () => ipcRenderer.invoke("dialog:openDirectory"),
   openFolderByPath: (path) => ipcRenderer.invoke("fs:openFolder", path),
   listDir: (path) => ipcRenderer.invoke("fs:list", path),
+  tryListDir: (path) => ipcRenderer.invoke("fs:tryList", path),
   walkDir: (root, opts) => ipcRenderer.invoke("fs:walk", root, opts ?? {}),
   readText: (path) => ipcRenderer.invoke("fs:readText", path),
+  tryReadText: (path) => ipcRenderer.invoke("fs:tryReadText", path),
+  exists: (path) => ipcRenderer.invoke("fs:exists", path),
   writeText: (path, contents) => ipcRenderer.invoke("fs:writeText", path, contents),
   createFile: (path) => ipcRenderer.invoke("fs:createFile", path),
   createDir: (path) => ipcRenderer.invoke("fs:createDir", path),

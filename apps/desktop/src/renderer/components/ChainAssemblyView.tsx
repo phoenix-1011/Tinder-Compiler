@@ -94,6 +94,19 @@ export function ChainAssemblyView() {
     () => disk?.profiles.find((p) => p.id === ca.activeProfileId) ?? null,
     [disk, ca.activeProfileId]
   );
+  // The profile that should read as "selected" in the sidebar. We prefer
+  // the profile owning the current editor tab (chain-editor / profile-
+  // lifecycle) over `activeProfileId` so the sidebar highlight cannot
+  // drift away from the focused tab — clicking a sub-tab in one profile
+  // while another profile is technically still `activeProfileId` used to
+  // leave two highlights visible at once.
+  const highlightedProfileId = useMemo<string | null>(() => {
+    if (activeUri) {
+      const m = activeUri.match(/^(?:chain-editor|profile-lifecycle):\/\/(.+)$/);
+      if (m) return m[1] ?? null;
+    }
+    return ca.activeProfileId;
+  }, [activeUri, ca.activeProfileId]);
 
   useEffect(() => {
     if (!activeProfile) return;
@@ -186,46 +199,11 @@ export function ChainAssemblyView() {
       { id: "delete", label: "删除", run: () => ca.deleteFolder(folder) }
     ]);
   };
-  const joinProfileMenuItems = (
-    payload: DragPayload
-  ): ContextMenuItem[] => {
-    const profileId = ca.activeProfileId;
-    if (!profileId) {
-      return [{ id: "join-disabled", label: "加入档案（需先选中档案）", disabled: true }];
-    }
-    return [
-      {
-        id: "join-active",
-        label: "加入档案 / 活跃资源",
-        run: () => ca.dropToProfile(profileId, payload, true)
-      },
-      {
-        id: "join-disabled",
-        label: "加入档案 / 停用资源",
-        run: () => ca.dropToProfile(profileId, payload, false)
-      }
-    ];
-  };
   const standardLeafMenu = (
     e: React.MouseEvent,
     leaf: LeafNode<PlatformResourceInstance>
   ): void => {
-    const resourceId = leaf.data.resource_instance_id;
     cm.open(e, [
-      {
-        id: "edit",
-        label: "编辑计算实例…",
-        run: () =>
-          openResourceEditor({
-            resourceId,
-            resourceKind: "standard",
-            displayName: leaf.name,
-            sourcePath: leaf.packagePath ?? leaf.id
-          })
-      },
-      { separator: true },
-      ...joinProfileMenuItems({ kind: "standard", resource: leaf.data }),
-      { separator: true },
       { id: "rename", label: "重命名…", run: () => ca.renameLeaf("standard", leaf) },
       {
         id: "copy",
@@ -237,23 +215,7 @@ export function ChainAssemblyView() {
     ]);
   };
   const customLeafMenu = (e: React.MouseEvent, leaf: LeafNode<CustomNodeConfig>): void => {
-    const resourceId =
-      leaf.data.resource_instance_id ?? leaf.data.custom_node_id;
     cm.open(e, [
-      {
-        id: "edit",
-        label: "编辑计算实例…",
-        run: () =>
-          openResourceEditor({
-            resourceId,
-            resourceKind: "custom",
-            displayName: leaf.name,
-            sourcePath: leaf.packagePath ?? leaf.id
-          })
-      },
-      { separator: true },
-      ...joinProfileMenuItems({ kind: "custom", node: leaf.data }),
-      { separator: true },
       { id: "rename", label: "重命名…", run: () => ca.renameLeaf("custom", leaf) },
       {
         id: "copy",
@@ -312,7 +274,7 @@ export function ChainAssemblyView() {
     nodes: TreeNode<L>[],
     depth: number,
     where: "standard" | "custom",
-    makeDragPayload: (data: L) => DragPayload,
+    makeDragPayload: (data: L, sourcePath: string | null) => DragPayload,
     leafMenu: (e: React.MouseEvent, leaf: LeafNode<L>) => void
   ): ReactNode => {
     return nodes.map((node) => {
@@ -322,6 +284,10 @@ export function ChainAssemblyView() {
             ? (node.data as unknown as PlatformResourceInstance).resource_instance_id
             : (node.data as unknown as CustomNodeConfig).resource_instance_id ??
               (node.data as unknown as CustomNodeConfig).custom_node_id;
+        // For v2 packages the package directory is the on-disk location; for
+        // legacy v1 the leaf id (the JSON file path) is. Either is what
+        // moveResourceToFolder needs to relocate the entry.
+        const sourcePath = node.packagePath ?? node.id;
         return (
           <Row
             key={node.id}
@@ -332,18 +298,21 @@ export function ChainAssemblyView() {
                 resourceId,
                 resourceKind: where,
                 displayName: node.name,
-                sourcePath: node.packagePath ?? node.id
+                sourcePath
               })
             }
             draggable
-            dragPayload={makeDragPayload(node.data)}
+            dragPayload={makeDragPayload(node.data, sourcePath)}
             onContextMenu={(e) => leafMenu(e, node)}
           />
         );
       }
       const open = collapse.folders?.[node.id] ?? false;
       return (
-        <div key={node.id}>
+        <DropZone
+          key={node.id}
+          onDrop={(payload) => void ca.moveResourceToFolder(payload, node.id)}
+        >
           <Row
             depth={depth}
             label={node.name}
@@ -362,7 +331,7 @@ export function ChainAssemblyView() {
           />
           {open &&
             renderResourceTree(node.children, depth + 1, where, makeDragPayload, leafMenu)}
-        </div>
+        </DropZone>
       );
     });
   };
@@ -370,9 +339,9 @@ export function ChainAssemblyView() {
   if (!dataRoot) {
     return (
       <div className="ca-empty">
-        <p className="sidebar-hint">尚未选择数据根目录。</p>
+        <p className="sidebar-hint">尚未选择引擎 bin 目录。</p>
         <button className="primary-button" onClick={ca.pickDataRoot}>
-          选择数据根目录
+          选择引擎 bin 目录
         </button>
       </div>
     );
@@ -396,7 +365,6 @@ export function ChainAssemblyView() {
           >
             {disk.profiles.map((profile) => {
               const expanded = collapse.profiles?.[profile.id] ?? false;
-              const isActive = profile.id === ca.activeProfileId;
               const activeOpen = collapse.profileActive[profile.id] ?? false;
               const disabledOpen = collapse.profileDisabled[profile.id] ?? false;
               const refs = profile.project.resources ?? [];
@@ -424,6 +392,7 @@ export function ChainAssemblyView() {
                 activeUri === `chain-editor://${profile.id}`;
               const lifecycleOpen =
                 activeUri === `profile-lifecycle://${profile.id}`;
+              const isActive = profile.id === highlightedProfileId;
 
               return (
                 <div key={profile.id}>
@@ -538,7 +507,7 @@ export function ChainAssemblyView() {
                 disk.standardTree,
                 1,
                 "standard",
-                (r) => ({ kind: "standard", resource: r }),
+                (r, sourcePath) => ({ kind: "standard", resource: r, sourcePath }),
                 standardLeafMenu
               )}
 
@@ -568,7 +537,7 @@ export function ChainAssemblyView() {
                 disk.customTree,
                 1,
                 "custom",
-                (n) => ({ kind: "custom", node: n }),
+                (n, sourcePath) => ({ kind: "custom", node: n, sourcePath }),
                 customLeafMenu
               )}
           </Section>

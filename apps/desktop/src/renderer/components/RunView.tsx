@@ -37,8 +37,9 @@ export function RunView() {
       name: folder.name,
       buildSystem: "custom",
       tasks: [
-        { id: "build", label: "构建", command: "echo", args: ["replace me with your build command"] },
-        { id: "test", label: "测试", command: "echo", args: ["replace me with your test command"] }
+        { id: "dev", label: "dev 模式", command: "pnpm", args: ["dev"], pinned: true },
+        { id: "build", label: "构建", command: "pnpm", args: ["build"] },
+        { id: "typecheck", label: "类型检查", command: "pnpm", args: ["typecheck"] }
       ]
     });
   };

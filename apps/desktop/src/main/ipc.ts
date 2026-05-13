@@ -36,7 +36,7 @@ export function registerIpcHandlers(): void {
     }
   );
 
-  ipcMain.handle("fs:list", async (_event, dirPath: string): Promise<DirEntry[]> => {
+  const listDirEntries = async (dirPath: string): Promise<DirEntry[]> => {
     const entries = await fs.readdir(dirPath, { withFileTypes: true });
     return entries
       .map((entry) => ({
@@ -48,7 +48,26 @@ export function registerIpcHandlers(): void {
         if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
         return a.name.localeCompare(b.name);
       });
+  };
+
+  ipcMain.handle("fs:list", async (_event, dirPath: string): Promise<DirEntry[]> => {
+    return listDirEntries(dirPath);
   });
+
+  // Silent variant — returns null on ENOENT instead of throwing. Used by
+  // optional reads (e.g. lazily-created `.tinder/resource-templates/`) so
+  // expected absences don't show up as handler errors in the main log.
+  ipcMain.handle(
+    "fs:tryList",
+    async (_event, dirPath: string): Promise<DirEntry[] | null> => {
+      try {
+        return await listDirEntries(dirPath);
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException)?.code === "ENOENT") return null;
+        throw err;
+      }
+    }
+  );
 
   ipcMain.handle("fs:readText", async (_event, filePath: string): Promise<string> => {
     const stat = await fs.stat(filePath);
@@ -56,6 +75,40 @@ export function registerIpcHandlers(): void {
       throw new Error(`File too large: ${stat.size} bytes (limit ${TEXT_FILE_LIMIT_BYTES})`);
     }
     return fs.readFile(filePath, "utf8");
+  });
+
+  // Silent variant — returns null on ENOENT. Permission errors etc. still throw.
+  ipcMain.handle(
+    "fs:tryReadText",
+    async (_event, filePath: string): Promise<string | null> => {
+      try {
+        const stat = await fs.stat(filePath);
+        if (stat.size > TEXT_FILE_LIMIT_BYTES) {
+          throw new Error(
+            `File too large: ${stat.size} bytes (limit ${TEXT_FILE_LIMIT_BYTES})`
+          );
+        }
+        return await fs.readFile(filePath, "utf8");
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException)?.code === "ENOENT") return null;
+        throw err;
+      }
+    }
+  );
+
+  /**
+   * Boolean existence probe via `fs.stat`. Silent on ENOENT; other errors
+   * (permission, IO) still throw. Use when you don't care whether the
+   * target is a file or directory — just whether it exists.
+   */
+  ipcMain.handle("fs:exists", async (_event, p: string): Promise<boolean> => {
+    try {
+      await fs.stat(p);
+      return true;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException)?.code === "ENOENT") return false;
+      throw err;
+    }
   });
 
   ipcMain.handle("fs:writeText", async (_event, filePath: string, contents: string): Promise<void> => {

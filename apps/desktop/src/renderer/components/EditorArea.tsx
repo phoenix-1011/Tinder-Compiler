@@ -1,5 +1,5 @@
-import { useCallback, useState } from "react";
-import { useWorkspace } from "../state/WorkspaceContext";
+import { useCallback, useMemo, useState } from "react";
+import { useWorkspace, type OpenDocument } from "../state/WorkspaceContext";
 import { MonacoEditor } from "./MonacoEditor";
 import { WelcomeView } from "./WelcomeView";
 import { ContextMenu, useContextMenu, type ContextMenuItem } from "./ContextMenu";
@@ -8,6 +8,28 @@ import { HelpDocTab } from "./HelpDocTab";
 import { ChainEditorView } from "./ChainEditorView";
 import { ProfileLifecycleView } from "./ProfileLifecycleView";
 import { ResourceEditorView } from "./ResourceEditorView";
+
+/**
+ * Items rendered along the tab strip. A "standalone" item is a single
+ * tab; a "group" item bundles all profile-related tabs (chain-editor +
+ * profile-lifecycle) for one profile under a leading pill label so they
+ * read as a single workspace context.
+ */
+type TabStripItem =
+  | { kind: "standalone"; doc: OpenDocument }
+  | {
+      kind: "group";
+      profileId: string;
+      profileDisplayName: string;
+      docs: OpenDocument[];
+    };
+
+function isProfileChild(doc: OpenDocument): boolean {
+  return (
+    (doc.kind === "chain-editor" || doc.kind === "profile-lifecycle") &&
+    !!doc.profileId
+  );
+}
 
 export function EditorArea() {
   const {
@@ -82,69 +104,135 @@ export function EditorArea() {
     [closeFile]
   );
 
+  // Cluster profile-related tabs together. We walk the documents list in
+  // order; the first time we see a profileId, we collect every doc that
+  // shares it into a single group and emit it at that position. Standalone
+  // tabs (files, help docs, resource-editor, …) flow through unchanged.
+  const stripItems = useMemo<TabStripItem[]>(() => {
+    const consumed = new Set<string>();
+    const items: TabStripItem[] = [];
+    for (const doc of documents) {
+      if (consumed.has(doc.uri)) continue;
+      if (isProfileChild(doc)) {
+        const profileId = doc.profileId!;
+        const siblings = documents.filter(
+          (d) => isProfileChild(d) && d.profileId === profileId
+        );
+        siblings.forEach((s) => consumed.add(s.uri));
+        items.push({
+          kind: "group",
+          profileId,
+          profileDisplayName:
+            doc.profileDisplayName ?? profileId,
+          docs: siblings
+        });
+      } else {
+        items.push({ kind: "standalone", doc });
+      }
+    }
+    return items;
+  }, [documents]);
+
+  const renderTab = (doc: OpenDocument, isInGroup: boolean) => (
+    <div
+      key={doc.uri}
+      role="tab"
+      aria-selected={doc.uri === activeUri}
+      title={doc.tooltip ?? doc.uri}
+      draggable
+      className={`editor-tab${doc.uri === activeUri ? " is-active" : ""}${
+        dropTargetUri === doc.uri ? " is-drop-target" : ""
+      }${doc.preview ? " is-preview" : ""}${
+        isInGroup ? " is-group-child" : ""
+      }`}
+      onClick={() => setActive(doc.uri)}
+      onDoubleClick={() => pinDocument(doc.uri)}
+      onAuxClick={(e) => onTabAuxClick(e, doc.uri)}
+      onContextMenu={(e) => onTabContextMenu(e, doc.uri)}
+      onDragStart={(e) => {
+        setDraggedUri(doc.uri);
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", doc.uri);
+      }}
+      onDragEnd={() => {
+        setDraggedUri(null);
+        setDropTargetUri(null);
+      }}
+      onDragOver={(e) => {
+        if (!draggedUri || draggedUri === doc.uri) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        setDropTargetUri(doc.uri);
+      }}
+      onDragLeave={(e) => {
+        if ((e.relatedTarget as HTMLElement)?.closest?.(".editor-tab") === null) {
+          setDropTargetUri((cur) => (cur === doc.uri ? null : cur));
+        }
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        if (draggedUri && draggedUri !== doc.uri) {
+          reorderTabs(draggedUri, doc.uri);
+        }
+        setDraggedUri(null);
+        setDropTargetUri(null);
+      }}
+    >
+      <span className="editor-tab-name">{doc.name}</span>
+      <button
+        className="editor-tab-close"
+        aria-label={doc.dirty ? `${doc.name}（未保存）— 关闭` : `关闭 ${doc.name}`}
+        onClick={(e) => {
+          e.stopPropagation();
+          closeFile(doc.uri);
+        }}
+      >
+        {doc.dirty ? (
+          <span className="editor-tab-dirty" aria-hidden="true" />
+        ) : (
+          <span className="codicon codicon-close" aria-hidden="true" />
+        )}
+      </button>
+    </div>
+  );
+
   return (
     <section className="editor-area" aria-label="编辑器">
       <div className="editor-tabs" role="tablist">
-        {documents.map((doc) => (
-          <div
-            key={doc.uri}
-            role="tab"
-            aria-selected={doc.uri === activeUri}
-            draggable
-            className={`editor-tab${doc.uri === activeUri ? " is-active" : ""}${
-              dropTargetUri === doc.uri ? " is-drop-target" : ""
-            }${doc.preview ? " is-preview" : ""}`}
-            onClick={() => setActive(doc.uri)}
-            onDoubleClick={() => pinDocument(doc.uri)}
-            onAuxClick={(e) => onTabAuxClick(e, doc.uri)}
-            onContextMenu={(e) => onTabContextMenu(e, doc.uri)}
-            onDragStart={(e) => {
-              setDraggedUri(doc.uri);
-              e.dataTransfer.effectAllowed = "move";
-              e.dataTransfer.setData("text/plain", doc.uri);
-            }}
-            onDragEnd={() => {
-              setDraggedUri(null);
-              setDropTargetUri(null);
-            }}
-            onDragOver={(e) => {
-              if (!draggedUri || draggedUri === doc.uri) return;
-              e.preventDefault();
-              e.dataTransfer.dropEffect = "move";
-              setDropTargetUri(doc.uri);
-            }}
-            onDragLeave={(e) => {
-              // Only clear if leaving to a non-tab target.
-              if ((e.relatedTarget as HTMLElement)?.closest?.(".editor-tab") === null) {
-                setDropTargetUri((cur) => (cur === doc.uri ? null : cur));
-              }
-            }}
-            onDrop={(e) => {
-              e.preventDefault();
-              if (draggedUri && draggedUri !== doc.uri) {
-                reorderTabs(draggedUri, doc.uri);
-              }
-              setDraggedUri(null);
-              setDropTargetUri(null);
-            }}
-          >
-            <span className="editor-tab-name">{doc.name}</span>
-            <button
-              className="editor-tab-close"
-              aria-label={doc.dirty ? `${doc.name}（未保存）— 关闭` : `关闭 ${doc.name}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                closeFile(doc.uri);
-              }}
+        {stripItems.map((item) =>
+          item.kind === "standalone" ? (
+            renderTab(item.doc, false)
+          ) : (
+            <div
+              key={`group:${item.profileId}`}
+              className="editor-tab-group"
+              role="group"
+              aria-label={`配置档案 ${item.profileDisplayName}`}
             >
-              {doc.dirty ? (
-                <span className="editor-tab-dirty" aria-hidden="true" />
-              ) : (
-                <span className="codicon codicon-close" aria-hidden="true" />
-              )}
-            </button>
-          </div>
-        ))}
+              <div
+                className="editor-tab-group-label"
+                title={`配置档案 ${item.profileDisplayName}`}
+              >
+                <span className="editor-tab-group-name">
+                  {item.profileDisplayName}
+                </span>
+                <button
+                  type="button"
+                  className="editor-tab-close editor-tab-group-close"
+                  aria-label={`关闭 ${item.profileDisplayName} 分组的所有 tab`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    for (const d of item.docs) closeFile(d.uri);
+                  }}
+                  title="关闭整个分组"
+                >
+                  <span className="codicon codicon-close" aria-hidden="true" />
+                </button>
+              </div>
+              {item.docs.map((d) => renderTab(d, true))}
+            </div>
+          )
+        )}
       </div>
       {active && active.kind === "file" && (
         <Breadcrumbs workspacePath={folder?.path ?? null} filePath={active.uri} />
@@ -153,16 +241,25 @@ export function EditorArea() {
         {!active ? (
           <WelcomeView />
         ) : active.kind === "help-doc" ? (
-          <HelpDocTab nodeId={active.helpNodeId ?? ""} />
+          <HelpDocTab key={active.uri} nodeId={active.helpNodeId ?? ""} />
         ) : active.kind === "chain-editor" ? (
-          <ChainEditorView profileId={active.profileId ?? ""} tabUri={active.uri} />
+          <ChainEditorView
+            key={active.uri}
+            profileId={active.profileId ?? ""}
+            tabUri={active.uri}
+          />
         ) : active.kind === "profile-lifecycle" ? (
           <ProfileLifecycleView
+            key={active.uri}
             profileId={active.profileId ?? ""}
             tabUri={active.uri}
           />
         ) : active.kind === "resource-editor" ? (
+          // `key={active.uri}` forces a fresh component instance per tab
+          // so internal state (currentSourcePath, draft, baseline, …)
+          // doesn't bleed across resources when the user switches tabs.
           <ResourceEditorView
+            key={active.uri}
             resourceId={active.resourceId ?? ""}
             resourceKind={active.resourceKind ?? "standard"}
             sourcePath={active.resourceSourcePath ?? null}

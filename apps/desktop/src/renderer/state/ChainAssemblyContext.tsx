@@ -41,6 +41,7 @@ import {
   type GenerationPlan,
   type GenerationResult
 } from "./interfaceGeneration";
+import { installTestData, TEST_DATA_FILE_COUNT } from "./testData";
 import { CHAIN_CATALOG } from "../help/chain-catalog.generated";
 import {
   EXTRAS_FILE,
@@ -64,6 +65,7 @@ import {
   join,
   RESOURCE_SRC_DIR,
   RESOURCE_INCLUDE_DIR,
+  RESOURCE_ARTIFACT_DIR,
   RESOURCE_TEMPLATES_DIR,
   type CollapseState,
   type DiskState,
@@ -114,6 +116,16 @@ export interface ChainAssemblyValue {
     | null
   >;
   promptNewFolder: (where: "standard" | "custom", parentPath: string | null) => Promise<void>;
+  /**
+   * Move a resource (v2 package dir or legacy single JSON) from its current
+   * on-disk location into `targetFolderDir`. The dragged payload carries
+   * `sourcePath`; if absent the call is a no-op. Reloads disk state on
+   * success so the sidebar re-renders.
+   */
+  moveResourceToFolder: (
+    payload: DragPayload,
+    targetFolderDir: string
+  ) => Promise<void>;
 
   renameProfileById: (entry: ProfileEntry) => Promise<void>;
   deleteProfileById: (entry: ProfileEntry) => Promise<void>;
@@ -273,6 +285,7 @@ export interface ChainAssemblyValue {
     defaultValue?: string;
     placeholder?: string;
     okLabel?: string;
+    multiline?: boolean;
   }) => Promise<string | null>;
   dialogConfirm: (opts: {
     title: string;
@@ -284,6 +297,49 @@ export interface ChainAssemblyValue {
     title: string;
     message?: string;
   }) => Promise<void>;
+  /**
+   * Searchable single-pick dialog. Same `pickOne` from
+   * `ChainAssemblyDialog` re-exposed for inner editors (e.g. resource
+   * capability tab's "add candidate" picker) so they can reuse the
+   * shared modal instance instead of instantiating their own.
+   */
+  dialogPickOne: (opts: {
+    title: string;
+    placeholder?: string;
+    options: Array<{
+      id: string;
+      label: string;
+      hint?: string;
+      categoryId?: string;
+    }>;
+    initialOptionId?: string;
+    categories?: Array<{ id: string; label: string }>;
+    categoryLabel?: string;
+  }) => Promise<string | null>;
+
+  /**
+   * Rename a managed source file on disk and return the new
+   * package-relative path. Caller is responsible for updating the
+   * `implementation.source_files[].path` ref in their draft and saving
+   * the resource JSON. Throws when the resource has not been saved (no
+   * package dir) or when the target name collides.
+   */
+  renameManagedSourceFile: (params: {
+    packageDir: string;
+    currentRelPath: string;
+    newBaseName: string;
+  }) => Promise<{ newRelPath: string }>;
+
+  // ─────────────── Dev test data ────────────────────────────────────
+
+  /**
+   * Install the canned dev test data (`installTestData`) into the
+   * current data root and reload disk state. Returns `true` on success,
+   * `false` when the user cancels the confirm prompt or the install
+   * throws. Intended for dev mode only; UI entry points should gate on
+   * `import.meta.env.DEV`.
+   */
+  loadTestData: () => Promise<boolean>;
 
   // ─────────────── Compute resource templates (slice 3d) ─────────────
 
@@ -299,6 +355,8 @@ export interface ChainAssemblyValue {
   createDraftResource: (params: {
     kind: "standard" | "custom";
     displayName: string;
+    /** Required: defines the auto-generated initial code file set. */
+    implementationKind: ImplementationKind;
     template?: ComputeResourceTemplate | null;
   }) => Promise<{
     resourceInstanceId: string;
@@ -524,17 +582,7 @@ async function copyImplementationFiles(
 }
 
 async function pathExistsLocal(p: string): Promise<boolean> {
-  try {
-    await window.tinder.readText(p);
-    return true;
-  } catch {
-    try {
-      await window.tinder.listDir(p);
-      return true;
-    } catch {
-      return false;
-    }
-  }
+  return window.tinder.exists(p);
 }
 
 export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
@@ -863,6 +911,56 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
       }
     },
     [dialog, reload]
+  );
+
+  const moveResourceToFolder = useCallback(
+    async (payload: DragPayload, targetFolderDir: string) => {
+      const sourcePath = payload.sourcePath;
+      if (!sourcePath) {
+        await dialog.notify({
+          title: "无法移动",
+          message: "该资源没有可用的磁盘路径，可能是尚未保存的草稿。"
+        });
+        return;
+      }
+      try {
+        const parentDir = await window.tinder.joinPath(sourcePath, "..");
+        // No-op when dropping back onto the same folder.
+        if (parentDir === targetFolderDir) return;
+        // Preserve the original basename when moving into the target.
+        const segments = sourcePath.split(/[\\/]/).filter(Boolean);
+        const basename = segments[segments.length - 1] ?? "";
+        if (!basename) {
+          await dialog.notify({
+            title: "无法移动",
+            message: "无法从资源路径中解析出文件名。"
+          });
+          return;
+        }
+        const targetPath = await window.tinder.joinPath(
+          targetFolderDir,
+          basename
+        );
+        // Refuse to overwrite an existing entry at the destination.
+        if (await window.tinder.exists(targetPath)) {
+          await dialog.notify({
+            title: "目标已存在",
+            message: `目标目录下已存在「${basename}」，请先重命名后再移动。`
+          });
+          return;
+        }
+        await window.tinder.rename(sourcePath, targetPath);
+        // Keep the target folder expanded so the user sees the moved entry.
+        setCollapse((prev) => ({
+          ...prev,
+          folders: { ...(prev.folders ?? {}), [targetFolderDir]: true }
+        }));
+        await reload();
+      } catch (err) {
+        await dialog.notify({ title: "移动失败", message: String(err) });
+      }
+    },
+    [dialog, reload, setCollapse]
   );
 
   const dropToProfile = useCallback(
@@ -1427,6 +1525,35 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
     [disk, reload]
   );
 
+  const renameManagedSourceFile = useCallback(
+    async (params: {
+      packageDir: string;
+      currentRelPath: string;
+      newBaseName: string;
+    }): Promise<{ newRelPath: string }> => {
+      const baseTrim = params.newBaseName.trim();
+      if (!baseTrim) throw new Error("文件名不能为空");
+      // Keep the file in its current subdirectory (src/ or include/); we
+      // only rename the basename. Cross-dir moves should go through a
+      // dedicated UI when that becomes a feature.
+      const segments = params.currentRelPath.split(/[\\/]/);
+      if (segments.length < 2) {
+        throw new Error("源文件路径异常，无法重命名");
+      }
+      const dir = segments.slice(0, -1).join("/");
+      const newRelPath = `${dir}/${baseTrim}`;
+      if (newRelPath === params.currentRelPath) return { newRelPath };
+      const oldAbs = await join(params.packageDir, params.currentRelPath);
+      const newAbs = await join(params.packageDir, newRelPath);
+      if (await pathExists(newAbs)) {
+        throw new Error(`同目录下已存在文件「${baseTrim}」`);
+      }
+      await window.tinder.rename(oldAbs, newAbs);
+      return { newRelPath };
+    },
+    []
+  );
+
   const copyResource = useCallback(
     async (
       resource: ComputeResourceV2,
@@ -1541,6 +1668,7 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
     async (params: {
       kind: "standard" | "custom";
       displayName: string;
+      implementationKind: ImplementationKind;
       template?: ComputeResourceTemplate | null;
     }) => {
       if (!disk) throw new Error("数据根目录未选择");
@@ -1557,13 +1685,77 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
       const newId = newPackageDir.split(/[\\/]/).pop() ?? slugify(name);
       const now = new Date().toISOString();
 
-      const implementationKind: ImplementationKind =
-        template?.default_implementation_kind ?? "python_script";
+      const implementationKind = params.implementationKind;
+
+      // Auto-generate the resource's code file set: 1 .py for python,
+      // or .cpp + .h pair for C++. Sticks to the resource's slug as the
+      // base name so a fresh resource immediately has something to edit.
+      const ensureDirInPackage = async (sub: string): Promise<string> => {
+        const abs = await join(newPackageDir, sub);
+        await ensureDir(abs);
+        return abs;
+      };
+      const generatedFiles: ImplementationFileRef[] = [];
+      let artifactPath = "";
+      if (implementationKind === "python_script") {
+        const srcDir = await ensureDirInPackage(RESOURCE_SRC_DIR);
+        const relPath = `${RESOURCE_SRC_DIR}/${newId}.py`;
+        const absPath = await join(srcDir, `${newId}.py`);
+        await window.tinder.writeText(
+          absPath,
+          `"""${name}\n\n资源主入口；由资源编辑器在创建时生成。\n"""\n`
+        );
+        generatedFiles.push({
+          file_id: `${newId}:primary`,
+          path: relPath,
+          storage: "managed",
+          role: "primary",
+          language: "python",
+          generated_region_status: "unknown"
+        });
+        artifactPath = relPath;
+      } else {
+        const srcDir = await ensureDirInPackage(RESOURCE_SRC_DIR);
+        const includeDir = await ensureDirInPackage(RESOURCE_INCLUDE_DIR);
+        const srcRel = `${RESOURCE_SRC_DIR}/${newId}.cpp`;
+        const headerRel = `${RESOURCE_INCLUDE_DIR}/${newId}.h`;
+        const guard =
+          newId.toUpperCase().replace(/[^A-Z0-9]/g, "_") + "_H";
+        await window.tinder.writeText(
+          await join(srcDir, `${newId}.cpp`),
+          `#include "${newId}.h"\n\n// ${name}\n// 由资源编辑器在创建时生成。\n`
+        );
+        await window.tinder.writeText(
+          await join(includeDir, `${newId}.h`),
+          `#ifndef ${guard}\n#define ${guard}\n\n// ${name}\n\n#endif // ${guard}\n`
+        );
+        generatedFiles.push(
+          {
+            file_id: `${newId}:src`,
+            path: srcRel,
+            storage: "managed",
+            role: "source",
+            language: "cpp",
+            generated_region_status: "unknown"
+          },
+          {
+            file_id: `${newId}:header`,
+            path: headerRel,
+            storage: "managed",
+            role: "header",
+            language: "c",
+            generated_region_status: "unknown"
+          }
+        );
+        // Suggested artifact path; the user wires a real build later.
+        artifactPath = `${RESOURCE_ARTIFACT_DIR}/${newId}.dll`;
+      }
+
       const implementation: ComputeResourceImplementation = {
         kind: implementationKind,
-        source_files: [],
+        source_files: generatedFiles,
         runtime_artifact: {
-          path: "",
+          path: artifactPath,
           kind:
             implementationKind === "cpp_library" ? "cpp_dylib" : "python_script",
           required_for_export: true
@@ -1804,6 +1996,7 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
         const created = await createDraftResource({
           kind: result.kind,
           displayName: result.displayName,
+          implementationKind: result.implementationKind,
           template: result.template
         });
         return created;
@@ -1814,6 +2007,38 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
     },
     [createDraftResource, dialog, disk, newResourceDialog]
   );
+
+  const loadTestData = useCallback(async (): Promise<boolean> => {
+    if (!disk) {
+      await dialog.notify({
+        title: "未选择数据根目录",
+        message: "请先在侧边栏选择数据根目录后再载入测试数据。"
+      });
+      return false;
+    }
+    const ok = await dialog.confirm({
+      title: "载入测试数据",
+      message: `这会把 ${TEST_DATA_FILE_COUNT} 组示例文件写入当前数据根（.tinder/profiles, .tinder/resources, .tinder/resource-templates）。同名文件会被覆盖。继续？`,
+      okLabel: "载入",
+      destructive: true
+    });
+    if (!ok) return false;
+    try {
+      await installTestData(disk.paths);
+      await reload();
+      await dialog.notify({
+        title: "测试数据已载入",
+        message: `已写入 ${TEST_DATA_FILE_COUNT} 组示例文件并刷新侧边栏。`
+      });
+      return true;
+    } catch (err) {
+      await dialog.notify({
+        title: "载入测试数据失败",
+        message: String(err)
+      });
+      return false;
+    }
+  }, [dialog, disk, reload]);
 
   const promptCopyResource = useCallback(
     async (
@@ -1884,6 +2109,7 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
       deleteLeaf,
       renameFolder,
       deleteFolder,
+      moveResourceToFolder,
       dropToProfile,
       removeFromProfile,
       setProfileResourceEnabled,
@@ -1896,15 +2122,18 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
       setCustomUsageEnabled,
       removeCustomUsage,
       saveResourceConfig,
+      renameManagedSourceFile,
       copyResource,
       promptCopyResource,
       createDraftResource,
       saveResourceAsTemplate,
       planResourceInterface,
       executeResourceInterface,
+      loadTestData,
       dialogPrompt: dialog.prompt,
       dialogConfirm: dialog.confirm,
-      dialogNotify: dialog.notify
+      dialogNotify: dialog.notify,
+      dialogPickOne: dialog.pickOne
     }),
     [
       dataRoot,
@@ -1928,6 +2157,7 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
       deleteLeaf,
       renameFolder,
       deleteFolder,
+      moveResourceToFolder,
       dropToProfile,
       removeFromProfile,
       setProfileResourceEnabled,
@@ -1940,15 +2170,18 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
       setCustomUsageEnabled,
       removeCustomUsage,
       saveResourceConfig,
+      renameManagedSourceFile,
       copyResource,
       promptCopyResource,
       createDraftResource,
       saveResourceAsTemplate,
       planResourceInterface,
       executeResourceInterface,
+      loadTestData,
       dialog.prompt,
       dialog.confirm,
-      dialog.notify
+      dialog.notify,
+      dialog.pickOne
     ]
   );
 

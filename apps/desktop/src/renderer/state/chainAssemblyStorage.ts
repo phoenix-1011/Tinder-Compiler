@@ -62,8 +62,18 @@ export interface ProfileExtras {
 }
 
 export type DragPayload =
-  | { kind: "standard"; resource: PlatformResourceInstance }
-  | { kind: "custom"; node: CustomNodeConfig };
+  | {
+      kind: "standard";
+      resource: PlatformResourceInstance;
+      /** Source disk path — package dir for v2, JSON file for legacy. Used
+       *  by the sidebar's folder drop targets to move the resource on disk. */
+      sourcePath?: string | null;
+    }
+  | {
+      kind: "custom";
+      node: CustomNodeConfig;
+      sourcePath?: string | null;
+    };
 
 /**
  * Cross-component drag handoff. Held in an object so the export reference
@@ -307,24 +317,11 @@ export async function join(...segs: string[]): Promise<string> {
   return window.tinder.joinPath(...segs);
 }
 export async function pathExists(p: string): Promise<boolean> {
-  try {
-    await window.tinder.readText(p);
-    return true;
-  } catch {
-    try {
-      await window.tinder.listDir(p);
-      return true;
-    } catch {
-      return false;
-    }
-  }
+  return window.tinder.exists(p);
 }
 export async function ensureDir(p: string): Promise<void> {
-  try {
-    await window.tinder.listDir(p);
-  } catch {
-    await window.tinder.createDir(p);
-  }
+  if (await window.tinder.exists(p)) return;
+  await window.tinder.createDir(p);
 }
 export async function ensureRootStructure(root: string): Promise<{
   tinderDir: string;
@@ -408,7 +405,7 @@ async function readResourcePackageFile(
 ): Promise<string | null> {
   const candidate = await join(dirPath, RESOURCE_PACKAGE_FILE);
   try {
-    return await window.tinder.readText(candidate);
+    return await window.tinder.tryReadText(candidate);
   } catch {
     return null;
   }
@@ -500,8 +497,10 @@ async function loadResourceTree<L>(
 
 async function loadExtras(tinderDir: string): Promise<Record<string, ProfileExtras>> {
   const extrasPath = await join(tinderDir, EXTRAS_FILE);
+  // Silent on ENOENT — the extras file is created lazily on first write.
+  const text = await window.tinder.tryReadText(extrasPath);
+  if (text === null) return {};
   try {
-    const text = await window.tinder.readText(extrasPath);
     return JSON.parse(text) as Record<string, ProfileExtras>;
   } catch {
     return {};
@@ -520,12 +519,11 @@ async function loadExtras(tinderDir: string): Promise<Record<string, ProfileExtr
 export async function loadResourceTemplates(
   templatesDir: string
 ): Promise<ComputeResourceTemplate[]> {
-  let items: Array<{ name: string; path: string; isDirectory: boolean }>;
-  try {
-    items = await window.tinder.listDir(templatesDir);
-  } catch {
-    return []; // directory may not exist yet — fine
-  }
+  // tryListDir returns null when the directory hasn't been created yet
+  // (e.g. fresh workspace before the first `另存为模板`). Treat that the
+  // same as an empty directory.
+  const items = await window.tinder.tryListDir(templatesDir);
+  if (!items) return [];
   const out: ComputeResourceTemplate[] = [];
   for (const item of items) {
     if (item.isDirectory || !item.name.endsWith(".json")) continue;

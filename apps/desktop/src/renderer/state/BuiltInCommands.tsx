@@ -11,6 +11,7 @@ import { runEditorAction } from "../monaco/registry";
  */
 export function BuiltInCommands() {
   const {
+    folder,
     openFolder,
     saveActive,
     documents,
@@ -19,7 +20,7 @@ export function BuiltInCommands() {
     closeActiveFile,
     cycleTab
   } = useWorkspace();
-  const { runs, kill } = useRun();
+  const { runs, kill, start } = useRun();
   const {
     toggleSidebar,
     togglePanel,
@@ -259,6 +260,25 @@ export function BuiltInCommands() {
 
   // ---- Run ----
   const runningTaskCount = useMemo(() => runs.filter((r) => r.status === "running").length, [runs]);
+
+  useCommand(
+    {
+      id: "run.dev",
+      category: "运行",
+      title: "以 dev 模式运行",
+      when: () => Boolean(folder),
+      run: async () => {
+        if (!folder) return;
+        await start({
+          command: "pnpm",
+          args: ["dev"],
+          cwd: folder.path,
+          label: "dev 模式"
+        });
+      }
+    },
+    [folder, start]
+  );
 
   useCommand(
     {

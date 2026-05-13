@@ -15,20 +15,27 @@ interface PersistedLayout {
   panelHeight: number;
   sidebarVisible: boolean;
   panelVisible: boolean;
+  /** Right-side AI panel — top-level, window-scoped (not in-editor). */
+  aiPanelVisible: boolean;
+  aiPanelWidth: number;
 }
 
 const DEFAULTS: PersistedLayout = {
   sidebarWidth: 280,
   panelHeight: 220,
   sidebarVisible: true,
-  panelVisible: true
+  panelVisible: true,
+  aiPanelVisible: false,
+  aiPanelWidth: 340
 };
 
 const LIMITS = {
   sidebarMin: 170,
   sidebarMax: 600,
   panelMin: 80,
-  panelMax: 600
+  panelMax: 600,
+  aiPanelMin: 240,
+  aiPanelMax: 720
 } as const;
 
 interface UIContextValue {
@@ -38,8 +45,12 @@ interface UIContextValue {
   setPanelHeight(height: number): void;
   sidebarVisible: boolean;
   panelVisible: boolean;
+  aiPanelVisible: boolean;
+  aiPanelWidth: number;
+  setAiPanelWidth(width: number): void;
   toggleSidebar(): void;
   togglePanel(): void;
+  toggleAiPanel(): void;
   showSidebar(): void;
   showPanel(): void;
   hidePanel(): void;
@@ -70,7 +81,13 @@ function loadLayout(): PersistedLayout {
       sidebarWidth: clamp(parsed.sidebarWidth ?? DEFAULTS.sidebarWidth, LIMITS.sidebarMin, LIMITS.sidebarMax),
       panelHeight: clamp(parsed.panelHeight ?? DEFAULTS.panelHeight, LIMITS.panelMin, LIMITS.panelMax),
       sidebarVisible: parsed.sidebarVisible ?? DEFAULTS.sidebarVisible,
-      panelVisible: parsed.panelVisible ?? DEFAULTS.panelVisible
+      panelVisible: parsed.panelVisible ?? DEFAULTS.panelVisible,
+      aiPanelVisible: parsed.aiPanelVisible ?? DEFAULTS.aiPanelVisible,
+      aiPanelWidth: clamp(
+        parsed.aiPanelWidth ?? DEFAULTS.aiPanelWidth,
+        LIMITS.aiPanelMin,
+        LIMITS.aiPanelMax
+      )
     };
   } catch {
     return DEFAULTS;
@@ -113,6 +130,17 @@ export function UIProvider({ children }: { children: ReactNode }) {
     setState((s) => ({ ...s, panelVisible: !s.panelVisible }));
   }, []);
 
+  const toggleAiPanel = useCallback(() => {
+    setState((s) => ({ ...s, aiPanelVisible: !s.aiPanelVisible }));
+  }, []);
+
+  const setAiPanelWidth = useCallback((width: number) => {
+    setState((s) => ({
+      ...s,
+      aiPanelWidth: clamp(width, LIMITS.aiPanelMin, LIMITS.aiPanelMax)
+    }));
+  }, []);
+
   const showSidebar = useCallback(() => {
     setState((s) => (s.sidebarVisible ? s : { ...s, sidebarVisible: true }));
   }, []);
@@ -143,8 +171,12 @@ export function UIProvider({ children }: { children: ReactNode }) {
       setPanelHeight,
       sidebarVisible: state.sidebarVisible,
       panelVisible: state.panelVisible,
+      aiPanelVisible: state.aiPanelVisible,
+      aiPanelWidth: state.aiPanelWidth,
+      setAiPanelWidth,
       toggleSidebar,
       togglePanel,
+      toggleAiPanel,
       showSidebar,
       showPanel,
       hidePanel,
@@ -167,8 +199,10 @@ export function UIProvider({ children }: { children: ReactNode }) {
       state,
       setSidebarWidth,
       setPanelHeight,
+      setAiPanelWidth,
       toggleSidebar,
       togglePanel,
+      toggleAiPanel,
       showSidebar,
       showPanel,
       hidePanel,

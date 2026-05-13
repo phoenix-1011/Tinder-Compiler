@@ -974,6 +974,47 @@ export function parseComputeResource(
   return migrateCustomResourceFromV1(parsed as CustomNodeConfig);
 }
 
+/**
+ * Walk a standard resource's `compute_nodes[]` and assign a stable
+ * `inactive_suffix` to candidates that don't already have one. Suffixes
+ * are unique per `node_id` group so codegen can mangle disabled
+ * functions without collision (e.g. two candidates for the same chain
+ * node get `_v1` and `_v2`, not both `_inactive`).
+ *
+ * Returns a new resource object when any change was made; otherwise the
+ * original reference.
+ */
+export function allocateInactiveSuffixes(
+  resource: StandardComputeResource,
+): StandardComputeResource {
+  // Group existing candidates by node_id and record which suffixes are
+  // already taken. We start from `_v1` (rather than the legacy
+  // `_inactive`) so the allocation is regular and reversible.
+  const groups = new Map<string, StandardComputeCandidate[]>();
+  for (const cand of resource.compute_nodes) {
+    const list = groups.get(cand.node_id);
+    if (list) list.push(cand);
+    else groups.set(cand.node_id, [cand]);
+  }
+  let mutated = false;
+  const next = resource.compute_nodes.map((cand) => {
+    if (cand.inactive_suffix && cand.inactive_suffix.trim() !== "") return cand;
+    const group = groups.get(cand.node_id) ?? [];
+    const taken = new Set(
+      group
+        .filter((c) => c !== cand && c.inactive_suffix)
+        .map((c) => c.inactive_suffix as string),
+    );
+    let n = 1;
+    while (taken.has(`_v${n}`)) n += 1;
+    const suffix = `_v${n}`;
+    taken.add(suffix);
+    mutated = true;
+    return { ...cand, inactive_suffix: suffix };
+  });
+  return mutated ? { ...resource, compute_nodes: next } : resource;
+}
+
 // Re-export so callers don't need to import the variant type just to satisfy
 // `noUnusedLocals` in stricter tsconfigs.
 export type { ResourceModelVariant };

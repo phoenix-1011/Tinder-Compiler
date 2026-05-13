@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useWorkspace } from "../state/WorkspaceContext";
+import { useUI } from "../state/UIContext";
 import { TitleBarMenu, type MenuItem } from "./TitleBarMenu";
 import type { RecentFolder } from "../../preload";
 
@@ -36,7 +37,7 @@ const VIEW_MENU: MenuItem[] = [
   { command: "view.showAi" }
 ];
 
-const RUN_MENU: MenuItem[] = [{ command: "run.killAll" }];
+const RUN_MENU: MenuItem[] = [{ command: "run.dev" }, { command: null }, { command: "run.killAll" }];
 
 const HELP_MENU: MenuItem[] = [
   { command: "preferences.openSettings", label: "设置…" },
@@ -48,6 +49,12 @@ const HELP_MENU: MenuItem[] = [
 export function TitleBar() {
   const { folder, openFolderByPath, canGoBack, canGoForward, goBack, goForward } =
     useWorkspace();
+  const {
+    panelVisible,
+    togglePanel,
+    aiPanelVisible,
+    toggleAiPanel
+  } = useUI();
   const [recents, setRecents] = useState<RecentFolder[]>([]);
 
   // Eagerly load recents so the menu is responsive when opened.
@@ -128,6 +135,28 @@ export function TitleBar() {
         </button>
       </div>
       <div className="titlebar-spacer" />
+      <div className="titlebar-toggles" role="group" aria-label="面板切换">
+        <button
+          type="button"
+          className={`titlebar-toggle-btn${panelVisible ? " is-active" : ""}`}
+          onClick={togglePanel}
+          title={`${panelVisible ? "关闭" : "打开"}终端面板 (Ctrl+J)`}
+          aria-label="切换终端面板"
+          aria-pressed={panelVisible}
+        >
+          <span className="codicon codicon-terminal" aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          className={`titlebar-toggle-btn${aiPanelVisible ? " is-active" : ""}`}
+          onClick={toggleAiPanel}
+          title={`${aiPanelVisible ? "关闭" : "打开"} AI 面板`}
+          aria-label="切换 AI 面板"
+          aria-pressed={aiPanelVisible}
+        >
+          <span className="codicon codicon-sparkle" aria-hidden="true" />
+        </button>
+      </div>
     </div>
   );
 }

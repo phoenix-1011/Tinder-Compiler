@@ -23,7 +23,16 @@ export type ResourceEditorKind = "standard" | "custom";
 
 export interface OpenDocument {
   uri: string;
+  /**
+   * Short display label shown on the tab itself. Kept compact for the
+   * lightweight tab strip; full descriptive text lives in `tooltip`.
+   */
   name: string;
+  /**
+   * Long-form descriptive text shown on hover (rendered as the tab's
+   * `title` attribute). Falls back to the URI when absent.
+   */
+  tooltip?: string;
   /**
    * Classifies what kind of content this tab holds. `file` uses Monaco;
    * `help-doc` renders a chain catalog node section as Markdown;
@@ -49,6 +58,13 @@ export interface OpenDocument {
   helpNodeId?: string;
   /** Profile id for chain-editor / profile-lifecycle tabs. */
   profileId?: string;
+  /**
+   * Profile display name carried alongside `profileId`. Used by the
+   * tab strip to label the parent profile-group pill so chain-editor /
+   * profile-lifecycle children can drop the profile prefix from their
+   * own labels.
+   */
+  profileDisplayName?: string;
   /** Resource instance id for resource-editor tabs. */
   resourceId?: string;
   /** Standard vs custom for resource-editor tabs. */
@@ -166,6 +182,17 @@ interface WorkspaceActions {
    * surface unsaved-changes state to the tab strip.
    */
   setSyntheticDirty(uri: string, dirty: boolean): void;
+  /**
+   * Register a save handler for a synthetic tab so the global Ctrl+S /
+   * `saveActive` flow routes there instead of trying to write the URI
+   * itself as a file path. Returns a deregister callback for the
+   * component's useEffect cleanup.
+   *
+   * The handler should perform whatever "save" means for the editor
+   * (e.g. the resource editor persists resource.json via
+   * `saveResourceConfig`) and resolve `true` on success.
+   */
+  registerSyntheticSave(uri: string, handler: () => Promise<boolean>): () => void;
   saveDocument(uri: string): Promise<boolean>;
   saveActive(): Promise<boolean>;
   revealAt(uri: string, position: EditorPosition): void;
@@ -392,11 +419,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     (params: {
       uri: string;
       name: string;
+      tooltip?: string;
       kind: Extract<
         DocumentKind,
         "chain-editor" | "profile-lifecycle" | "resource-editor"
       >;
       profileId?: string;
+      profileDisplayName?: string;
       resourceId?: string;
       resourceKind?: ResourceEditorKind;
       resourceSourcePath?: string | null;
@@ -431,6 +460,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       const doc: OpenDocument = {
         uri: params.uri,
         name: params.name,
+        tooltip: params.tooltip,
         kind: params.kind,
         preview: params.preview,
         language: "plaintext",
@@ -439,6 +469,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         dirty: false,
         eol: "lf",
         profileId: params.profileId,
+        profileDisplayName: params.profileDisplayName,
         resourceId: params.resourceId,
         resourceKind: params.resourceKind,
         resourceSourcePath: params.resourceSourcePath
@@ -460,12 +491,15 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     (profileId: string, displayName: string) => {
       // Chain-editor tabs default to pinned so they survive subsequent
       // preview opens; the user opens the editor with intent, not as a
-      // throwaway look.
+      // throwaway look. Short label is "链路" — the profile prefix is
+      // shown by the parent group pill instead.
       openSyntheticTab({
         uri: `chain-editor://${profileId}`,
-        name: `${displayName} · 链路`,
+        name: "链路",
+        tooltip: `${displayName} · 链路`,
         kind: "chain-editor",
         profileId,
+        profileDisplayName: displayName,
         preview: false
       });
     },
@@ -476,9 +510,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     (profileId: string, displayName: string) => {
       openSyntheticTab({
         uri: `profile-lifecycle://${profileId}`,
-        name: `${displayName} · 使用与版本`,
+        name: "使用与版本",
+        tooltip: `${displayName} · 使用与版本`,
         kind: "profile-lifecycle",
         profileId,
+        profileDisplayName: displayName,
         preview: false
       });
     },
@@ -494,7 +530,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }) => {
       openSyntheticTab({
         uri: `resource-editor://${params.resourceKind}/${params.resourceId}`,
-        name: `${params.displayName} · 计算实例`,
+        // Tab label is just the resource's display name; the descriptive
+        // suffix lives in the hover tooltip per the lightweight tab spec.
+        name: params.displayName,
+        tooltip: `${params.displayName} · 计算实例`,
         kind: "resource-editor",
         resourceId: params.resourceId,
         resourceKind: params.resourceKind,
@@ -543,6 +582,20 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       prev.map((d) => (d.uri === uri ? { ...d, dirty } : d))
     );
   }, []);
+
+  // Synthetic-tab save dispatch: keyed by tab uri. Used by Ctrl+S /
+  // `saveActive` on tabs whose URI is not a writable filesystem path.
+  const syntheticSaveHandlersRef = useRef(new Map<string, () => Promise<boolean>>());
+  const registerSyntheticSave = useCallback(
+    (uri: string, handler: () => Promise<boolean>) => {
+      syntheticSaveHandlersRef.current.set(uri, handler);
+      return () => {
+        const map = syntheticSaveHandlersRef.current;
+        if (map.get(uri) === handler) map.delete(uri);
+      };
+    },
+    []
+  );
 
   const updateContent = useCallback((uri: string, content: string) => {
     // Editing a preview tab pins it — matches VS Code's behaviour and keeps
@@ -593,6 +646,15 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const saveDocument = useCallback(async (uri: string): Promise<boolean> => {
     const doc = docsRef.current.find((d) => d.uri === uri);
     if (!doc) return false;
+    // Synthetic tabs (resource-editor / chain-editor / profile-lifecycle /
+    // help-doc) cannot be written as files — their URI is not a path.
+    // Route to a registered handler if the synthetic editor opted in,
+    // otherwise no-op so Ctrl+S doesn't try to write to the URI string.
+    if (doc.kind !== "file") {
+      const handler = syntheticSaveHandlersRef.current.get(uri);
+      if (handler) return handler();
+      return true;
+    }
     if (!doc.dirty) return true; // No-op
     setSaveStatus((s) => ({ ...s, [uri]: { kind: "saving" } }));
     try {
@@ -668,6 +730,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       pinDocument,
       updateContent,
       setSyntheticDirty,
+      registerSyntheticSave,
       saveDocument,
       saveActive,
       revealAt,
@@ -695,10 +758,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       openProfileLifecycle,
       openResourceEditor,
       closeFile,
+      closeActiveFile,
+      cycleTab,
       setActive,
       pinDocument,
       updateContent,
       setSyntheticDirty,
+      registerSyntheticSave,
       saveDocument,
       saveActive,
       revealAt,

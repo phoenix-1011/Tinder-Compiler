@@ -4,13 +4,49 @@ import { useUI } from "../state/UIContext";
 import { LanguagePicker } from "./LanguagePicker";
 import { ChainAssemblyPathStatus } from "./ChainAssemblyChrome";
 
+/**
+ * Strip the Electron IPC wrapper out of error messages and translate
+ * common Node fs error codes to a one-line Chinese summary. Falls back
+ * to the raw text (trimmed) when no pattern matches so we don't lose
+ * information for novel errors.
+ */
+function friendlyError(raw: string): string {
+  // "Error invoking remote method 'fs:writeText': Error: ENOENT: ..."
+  // → "Error: ENOENT: ..."
+  let msg = raw.replace(/^Error invoking remote method '[^']+':\s*/i, "");
+  // Trim duplicated "Error: " prefixes.
+  msg = msg.replace(/^(?:Error:\s*)+/i, "");
+  const match = msg.match(/^(E[A-Z]+):\s*([^,]+)(?:,\s*\w+\s+'([^']+)')?/);
+  if (match) {
+    const [, code, , filepath] = match;
+    const tail = filepath ? `（${filepath}）` : "";
+    switch (code) {
+      case "ENOENT":
+        return `路径不存在或父目录缺失${tail}`;
+      case "EACCES":
+        return `没有权限${tail}`;
+      case "EISDIR":
+        return `目标是目录而非文件${tail}`;
+      case "ENOTDIR":
+        return `路径中包含非目录段${tail}`;
+      case "EEXIST":
+        return `目标已存在${tail}`;
+      case "EBUSY":
+        return `文件被占用${tail}`;
+      default:
+        return `${code}${tail}`;
+    }
+  }
+  return msg.length > 120 ? `${msg.slice(0, 117)}…` : msg;
+}
+
 function formatStatus(
   status: ReturnType<typeof useWorkspace>["saveStatus"][string] | undefined,
   dirty: boolean
 ): string {
   if (!status || status.kind === "idle") return dirty ? "未保存" : "已保存";
   if (status.kind === "saving") return "保存中…";
-  if (status.kind === "error") return `保存失败: ${status.message}`;
+  if (status.kind === "error") return `保存失败：${friendlyError(status.message)}`;
   return dirty ? "未保存" : "已保存";
 }
 

@@ -1,6 +1,14 @@
 import { type ReactNode } from "react";
 import { CHAIN_CATALOG } from "./chain-catalog.generated";
 import { useChainHelp, type HelpSelection } from "./ChainHelpContext";
+import { useCa } from "../state/ChainAssemblyContext";
+
+/**
+ * Vite injects `import.meta.env.DEV = true` in `electron-vite dev`. In the
+ * packaged build it is `false`, so the dev-tools section is tree-shaken
+ * out of production bundles.
+ */
+const IS_DEV: boolean = Boolean(import.meta.env?.DEV);
 
 /** Foundation docs displayed in the "概览与规范" section. Order is fixed. */
 const FOUNDATION_LABELS: Record<string, string> = {
@@ -22,6 +30,8 @@ const FOUNDATION_ORDER = [
 
 export function ChainHelpSidebar() {
   const { selection, selectDoc, selectNode, expanded, toggle } = useChainHelp();
+  // Hook always called; the conditional render below decides visibility.
+  const ca = useCa();
 
   return (
     <div className="chain-help-sidebar">
@@ -110,6 +120,22 @@ export function ChainHelpSidebar() {
           );
         })}
       </Section>
+
+      {IS_DEV && (
+        <Section
+          id="section.dev-tools"
+          title="开发工具（仅 dev 模式）"
+          expanded={expanded["section.dev-tools"] ?? true}
+          onToggle={() => toggle("section.dev-tools")}
+        >
+          <Row
+            depth={1}
+            label="载入测试数据"
+            hint="把示例 profiles / 计算实例 / 模板写入当前数据根"
+            onClick={() => void ca.loadTestData()}
+          />
+        </Section>
+      )}
     </div>
   );
 }

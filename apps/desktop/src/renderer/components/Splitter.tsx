@@ -13,8 +13,12 @@ interface SplitterProps {
 }
 
 /**
- * A 4-pixel hit-target splitter with a 1-pixel visible line. Highlights on
- * hover/drag (VS Code does the same).
+ * Overlay-style splitter. The outer element occupies zero space in the
+ * parent grid/flex layout, so the two panels it separates sit flush against
+ * each other — no visible seam, no parent-colored gap. The actual hit area
+ * + visible feedback live in a child element absolutely positioned over the
+ * seam (6px wide/tall, centered), which captures pointer events and tints
+ * accent on hover/drag.
  */
 export function Splitter({ orientation, value, onChange, invert = false }: SplitterProps) {
   const [dragging, setDragging] = useState(false);
@@ -56,9 +60,13 @@ export function Splitter({ orientation, value, onChange, invert = false }: Split
       role="separator"
       aria-orientation={orientation}
       className={`splitter splitter-${orientation}${dragging ? " is-dragging" : ""}`}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-    />
+    >
+      <div
+        className={`splitter-hit splitter-hit-${orientation}`}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+      />
+    </div>
   );
 }
