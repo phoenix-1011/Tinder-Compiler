@@ -311,7 +311,14 @@ export function ChainAssemblyView() {
       return (
         <DropZone
           key={node.id}
-          onDrop={(payload) => void ca.moveResourceToFolder(payload, node.id)}
+          onDrop={(payload) => {
+            // Refuse cross-kind drops: dragging a custom resource onto a
+            // standard folder (or vice versa) would silently misplace it
+            // under a kind it can't parse as. Same-kind drops fall through
+            // to the on-disk rename.
+            if (payload.kind !== where) return;
+            void ca.moveResourceToFolder(payload, node.id);
+          }}
         >
           <Row
             depth={depth}
@@ -481,65 +488,84 @@ export function ChainAssemblyView() {
             expanded={collapse.sections.resources}
             onToggle={() => toggleSection("resources")}
           >
-            <Row
-              depth={0}
-              label="标准"
-              expandable
-              expanded={collapse.standardSub}
-              onClick={toggleStandardSub}
-              actions={[
-                {
-                  id: "new-standard",
-                  icon: "add",
-                  title: "新建标准计算实例…",
-                  onClick: () => void handleNewResource("standard")
-                },
-                {
-                  id: "new-standard-folder",
-                  icon: "new-folder",
-                  title: "新建子目录",
-                  onClick: () => ca.promptNewFolder("standard", null)
-                }
-              ]}
-            />
-            {collapse.standardSub &&
-              renderResourceTree<PlatformResourceInstance>(
-                disk.standardTree,
-                1,
-                "standard",
-                (r, sourcePath) => ({ kind: "standard", resource: r, sourcePath }),
-                standardLeafMenu
-              )}
+            {/* Wrapping the 标准 / 自定义 section root in a DropZone lets the
+                user drag a resource back out of any subdirectory by dropping
+                on the section header (or anywhere inside the section's body).
+                Subdirectory DropZones inside renderResourceTree call
+                e.stopPropagation, so a drop on a nested folder still wins. */}
+            <DropZone
+              onDrop={(payload) => {
+                if (payload.kind !== "standard") return;
+                void ca.moveResourceToFolder(payload, disk.paths.standardDir);
+              }}
+            >
+              <Row
+                depth={0}
+                label="标准"
+                expandable
+                expanded={collapse.standardSub}
+                onClick={toggleStandardSub}
+                actions={[
+                  {
+                    id: "new-standard",
+                    icon: "add",
+                    title: "新建标准计算实例…",
+                    onClick: () => void handleNewResource("standard")
+                  },
+                  {
+                    id: "new-standard-folder",
+                    icon: "new-folder",
+                    title: "新建子目录",
+                    onClick: () => ca.promptNewFolder("standard", null)
+                  }
+                ]}
+              />
+              {collapse.standardSub &&
+                renderResourceTree<PlatformResourceInstance>(
+                  disk.standardTree,
+                  1,
+                  "standard",
+                  (r, sourcePath) => ({ kind: "standard", resource: r, sourcePath }),
+                  standardLeafMenu
+                )}
+            </DropZone>
 
-            <Row
-              depth={0}
-              label="自定义"
-              expandable
-              expanded={collapse.customSub}
-              onClick={toggleCustomSub}
-              actions={[
-                {
-                  id: "new-custom",
-                  icon: "add",
-                  title: "新建自定义计算实例…",
-                  onClick: () => void handleNewResource("custom")
-                },
-                {
-                  id: "new-custom-folder",
-                  icon: "new-folder",
-                  title: "新建子目录",
-                  onClick: () => ca.promptNewFolder("custom", null)
-                }
-              ]}
-            />
-            {collapse.customSub &&
-              renderResourceTree<CustomNodeConfig>(
-                disk.customTree,
-                1,
-                "custom",
-                (n, sourcePath) => ({ kind: "custom", node: n, sourcePath }),
-                customLeafMenu
-              )}
+            <DropZone
+              onDrop={(payload) => {
+                if (payload.kind !== "custom") return;
+                void ca.moveResourceToFolder(payload, disk.paths.customDir);
+              }}
+            >
+              <Row
+                depth={0}
+                label="自定义"
+                expandable
+                expanded={collapse.customSub}
+                onClick={toggleCustomSub}
+                actions={[
+                  {
+                    id: "new-custom",
+                    icon: "add",
+                    title: "新建自定义计算实例…",
+                    onClick: () => void handleNewResource("custom")
+                  },
+                  {
+                    id: "new-custom-folder",
+                    icon: "new-folder",
+                    title: "新建子目录",
+                    onClick: () => ca.promptNewFolder("custom", null)
+                  }
+                ]}
+              />
+              {collapse.customSub &&
+                renderResourceTree<CustomNodeConfig>(
+                  disk.customTree,
+                  1,
+                  "custom",
+                  (n, sourcePath) => ({ kind: "custom", node: n, sourcePath }),
+                  customLeafMenu
+                )}
+            </DropZone>
           </Section>
         </>
       )}
