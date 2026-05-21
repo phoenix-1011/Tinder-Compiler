@@ -131,13 +131,14 @@ Avoid using `variant` for the new product concept unless referring to legacy com
 
 ## Standard Candidate Selection
 
-Do not implement profile-local standard candidate overrides.
+Implement profile-local standard candidate overrides only for selecting among existing candidates on the selected branch.
 
 When a profile user changes which candidate implements a standard chain node:
 
-- treat it as editing the selected branch
-- if the selected branch is exclusive to the current profile slot, edit directly in profile context
-- if shared, show the shared branch guard with `创建当前档案分支` and `在计算实例中打开并修改`
-- write the changed effective candidate selection to branch storage, not profile storage
+- if the change is only "which existing candidate is effective for this slot", write `profile.resources[].overrides.effective_candidates`
+- if the change edits code, candidate definitions, candidate membership, or branch metadata, treat it as editing the selected branch
+- if branch editing is needed and the selected branch is exclusive to the current profile slot, edit directly in profile context
+- if branch editing is needed and the branch is shared, show the shared branch guard with `创建当前档案分支` and `在计算实例中打开并修改`
+- when creating a current-profile branch from a slot with overrides, bake the overrides into the new branch and clear the profile override
 
 Existing `model_variants[]` should be treated as legacy/migration input until a separate branch-internal model-binding design is accepted.

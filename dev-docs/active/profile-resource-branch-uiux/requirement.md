@@ -84,7 +84,7 @@ custom_nodes: CustomComputeNodeDef[];
 
 Decision B10 is frozen: custom `action_index` values are system-managed, not ordinary user-authored fields. They must be unique across the project-level compute-instance SSOT, including all custom resource families and all custom branches, regardless of whether a branch is currently referenced by any profile or enabled for export. The allocator may use monotonic, sparse, or random candidate generation, but every allocation and generation pass must validate against the full known project index set before writing.
 
-Decision B9 is frozen: standard compute-node implementation selection is branch-owned. If a profile user needs to replace which candidate implements a standard chain node, that is a branch edit. For a shared branch, the profile-context UI must offer the same two actions as code edits: create a new current-profile branch, or jump to the global compute-instance branch editor.
+Decision B9 is frozen: a profile slot may override which existing standard candidate is effective for that slot only. This is profile-owned projection state and must not mutate the compute branch. If a profile user changes implementation content, branch metadata, or the candidate set itself, that is a branch edit; for a shared branch, the profile-context UI must offer the same two actions as code edits: create a new current-profile branch, or jump to the global compute-instance branch editor.
 
 The profile-facing workflow does not select `model_variants[]`. Existing `model_variants[]` data should be treated as migration input or as a future internal branch-level concept only if a separate model-binding need is proven later.
 
@@ -104,6 +104,13 @@ interface ProfileStandardBranchSlot {
   selected_branch_id: string;
   enabled: boolean;
   folder?: string;
+  overrides?: {
+    /**
+     * Profile-local usage override. A string selects an existing candidate for
+     * this slot only; null clears the branch default for this slot.
+     */
+    effective_candidates?: Record<string, string | null>;
+  };
 }
 
 interface ProfileCustomBranchSlot {
@@ -121,6 +128,7 @@ The profile owns:
 - selected branch ID
 - active/disabled state
 - profile-local folder
+- profile-local standard effective-candidate overrides
 - custom-node usage placement
 
 The branch owns:
@@ -135,7 +143,7 @@ Decision B3 is frozen: all editable implementation content belongs to the branch
 
 Decision B6 is frozen: `计算实例` is the source of truth for branch content. Configuration profiles are projection layers over that source of truth. Profile files must not duplicate branch-owned implementation content.
 
-Profile files must not store standard candidate overrides. They select a branch; the selected branch determines effective standard candidates.
+Profile files may store standard candidate overrides only as slot-local usage choices. The selected branch remains the implementation SSOT; profile overrides must never duplicate code, candidate definitions, branch metadata, or generated interface state.
 
 ## Profile UI Requirements
 

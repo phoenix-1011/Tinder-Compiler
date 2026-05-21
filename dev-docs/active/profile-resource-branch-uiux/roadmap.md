@@ -18,7 +18,7 @@ Profiles should present compute resources as branch slots: users can switch the 
 | B6 | Switching / editing / creation | **Frozen:** Switching branch edits only the profile slot `selected_branch_id`; editing branch edits branch-owned files/content in the compute-instance SSOT; profile-context branch creation copies the current slot's selected branch and switches the slot, while global creation may copy any branch or start blank. | Separates profile projection from compute-instance source of truth and avoids accidental empty/ambiguous profile branches. |
 | B7 | Storage shape | **Frozen:** Store branch-owned metadata and files under per-branch directories inside the compute-resource family: family `resource.json`, branch `branches/<branch_id>/branch.json`, and branch-local `src/`, `include/`, `artifact/`. | Branch-owned code and artifacts need physical isolation while the compute instance remains the SSOT. |
 | B8 | Duplicate family slots | **Frozen:** A configuration profile must not contain multiple slots for the same `resource_instance_id`. One compute-resource family appears at most once per profile; users switch `selected_branch_id` to choose the implementation branch. | Keeps the profile mental model simple and avoids ambiguous parallel execution of the same compute instance family. |
-| B9 | Standard candidate selection | **Frozen:** Replacing a standard compute node's effective implementation/candidate is a branch edit, same as editing code. In profile context, shared-branch guards apply: create a new current-profile branch or jump to the global compute-instance branch editor. | Keeps profile files as projection state only and avoids reintroducing profile-local implementation overrides. |
+| B9 | Standard candidate selection | **Frozen:** A profile slot may override which existing standard candidate is effective for that slot only. The override is profile-owned projection state and does not mutate the compute branch. Editing code, branch metadata, adding/removing candidates, or changing candidate definitions remains branch-owned and uses the shared-branch guard. | Lets configuration profiles tune usage choices while preserving the compute instance as the SSOT for implementation content. |
 | B10 | Custom action index allocation | **Frozen:** `action_index` is system-managed and project-globally unique across all custom compute-resource branches. Creation, branch copy, interface generation, save, and runtime export must validate uniqueness; conflicts are blocking until resolved by system reallocation or explicit repair. | Runtime custom dispatch depends on stable unique action indexes, and branch/profile switching should never introduce hidden duplicate invocation IDs. |
 | B11 | Branch copy artifact policy | **Frozen:** Branch copy copies branch metadata and managed source files. Managed Python source artifacts may be redirected to the copied source file. Compiled/binary artifacts are not copied by default and become pending. External artifacts are not inherited automatically and must be reselected or explicitly confirmed. | Prevents copied branches from silently sharing stale or unsafe runtime outputs while keeping Python source-entry branches ergonomic. |
 | B12 | Legacy v2 migration | **Frozen:** Legacy v2 resource packages are compatibility-read as family + branches without modifying disk. First branch write requires explicit migration. Migration writes branch-directory storage, maps old `variant_id` to `selected_branch_id`, and saves a legacy snapshot for reference only; the snapshot is not used by future reads, exports, or writes. | Avoids surprise disk rewrites while giving users a recoverable old-format snapshot during the branch-storage transition. |
@@ -45,11 +45,11 @@ Done when:
 
 Deliverables:
 
-- decide branch storage shape
+- encode frozen branch storage shape in TypeScript schema
 - define profile branch-slot schema
 - define family metadata schema
 - define branch metadata schema
-- define migration from current v2 resource packages and profile refs
+- implement migration model from current v2 resource packages and profile refs
 
 Done when:
 
@@ -126,3 +126,14 @@ Deliverables:
 Done when:
 
 - branch workflow is usable without reading raw JSON
+
+## Implementation Progress
+
+- Phase 1 partial: branch-aware TypeScript schema, profile `selected_branch_id`, branch-family index, and selected-branch runtime projection are implemented.
+- Phase 2 partial: profile resource rows open a branch workspace; branch switching writes only the current profile slot.
+- Phase 2/4 partial: shared branch guard is visible in profile context; "create current-profile branch" copies the selected branch, migrates v2 resource packages on first branch write, and switches the profile slot to the new branch.
+- Phase 3 partial: global/profile branch workspace shows context, branch list, usage, and shared-edit risk. Full branch-owned metadata/capability/source editing remains the next implementation slice.
+- Phase 3 partial: branch workspace now supports branch-owned summary editing, standard/custom capability editing, branch save/revert, Ctrl+S dirty-state integration, and managed source-file opening from the branch directory. Standard branch editing locks legacy nested variant management so the selected branch remains the implementation boundary.
+- Phase 4 partial: saving a branch updates `branches/<branch_id>/branch.json` plus the family branch summary; saving a legacy v2 projected branch performs the first branch-layout migration and writes the inert legacy snapshot.
+- Readiness fixes: dirty branch switching now prompts save/discard/cancel; legacy v2 package and single-file migration share one branch-layout helper and copy managed source files for every migrated branch; global branch management now includes copying the current branch and deleting unused branches.
+- Profile slot override slice: standard-resource effective candidate selection is now stored on `profile.resources[].overrides.effective_candidates`, projected over the selected branch for profile/runtime use, and does not mutate the compute branch definition. Branch metadata, code, and node structure edits still require a profile-private branch or global compute-instance editing.
