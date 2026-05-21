@@ -8,6 +8,7 @@ import { HelpDocTab } from "./HelpDocTab";
 import { ChainEditorView } from "./ChainEditorView";
 import { ProfileLifecycleView } from "./ProfileLifecycleView";
 import { ResourceEditorView } from "./ResourceEditorView";
+import { ResourceBranchView } from "./ResourceBranchView";
 
 /**
  * Items rendered along the tab strip. A "standalone" item is a single
@@ -26,7 +27,9 @@ type TabStripItem =
 
 function isProfileChild(doc: OpenDocument): boolean {
   return (
-    (doc.kind === "chain-editor" || doc.kind === "profile-lifecycle") &&
+    (doc.kind === "chain-editor" ||
+      doc.kind === "profile-lifecycle" ||
+      doc.kind === "resource-branch") &&
     !!doc.profileId
   );
 }
@@ -264,6 +267,16 @@ export function EditorArea() {
             resourceKind={active.resourceKind ?? "standard"}
             sourcePath={active.resourceSourcePath ?? null}
             tabUri={active.uri}
+          />
+        ) : active.kind === "resource-branch" ? (
+          <ResourceBranchView
+            key={active.uri}
+            tabUri={active.uri}
+            scope={active.resourceBranchScope ?? "global"}
+            profileId={active.profileId}
+            resourceId={active.resourceId ?? ""}
+            resourceKind={active.resourceKind ?? "standard"}
+            initialBranchId={active.resourceBranchId ?? "default"}
           />
         ) : (
           <MonacoEditor

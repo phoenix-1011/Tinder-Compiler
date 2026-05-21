@@ -60,6 +60,7 @@ interface StandardCapabilityTabProps {
   ) => void;
   /** Open a chain catalog doc for `相关文档` quick links. */
   onOpenDocsForNode: (nodeId: string) => void;
+  lockVariantManagement?: boolean;
 }
 
 export function StandardCapabilityTab({
@@ -69,7 +70,8 @@ export function StandardCapabilityTab({
   patch,
   sourcePath,
   onOpenFile,
-  onOpenDocsForNode
+  onOpenDocsForNode,
+  lockVariantManagement
 }: StandardCapabilityTabProps) {
   const ca = useCa();
   const candidates = draft.compute_nodes;
@@ -390,61 +392,65 @@ export function StandardCapabilityTab({
     <div className="profile-lifecycle">
       <section className="profile-lifecycle-section">
         <h2>
-          分支
-          <select
-            className="resource-editor-input resource-editor-heading-select"
-            value={variant?.variant_id ?? ""}
-            onChange={(e) => onSelectVariant(e.target.value || null)}
-            aria-label="当前分支"
-          >
-            {variants.map((v) => (
-              <option key={v.variant_id} value={v.variant_id}>
-                {v.display_name}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            className="section-add-btn"
-            onClick={() => void handleAddVariant()}
-            title="新建分支"
-            aria-label="新建分支"
-          >
-            <span className="codicon codicon-add" aria-hidden="true" />
-          </button>
-          {variant && (
-            <button
-              type="button"
-              className="section-add-btn"
-              onClick={(e) =>
-                variantMoreMenu.open(e, [
-                  {
-                    id: "rename",
-                    label: "重命名当前分支…",
-                    run: () => void handleRenameVariant(variant)
-                  },
-                  {
-                    id: "copy",
-                    label: "复制当前分支…",
-                    run: () => void handleCopyVariant(variant)
-                  },
-                  { separator: true },
-                  {
-                    id: "delete",
-                    label: "删除当前分支",
-                    disabled: variants.length <= 1,
-                    run: () => void handleDeleteVariant(variant)
+          {lockVariantManagement ? "节点实现" : "分支"}
+          {!lockVariantManagement && (
+            <>
+              <select
+                className="resource-editor-input resource-editor-heading-select"
+                value={variant?.variant_id ?? ""}
+                onChange={(e) => onSelectVariant(e.target.value || null)}
+                aria-label="当前分支"
+              >
+                {variants.map((v) => (
+                  <option key={v.variant_id} value={v.variant_id}>
+                    {v.display_name}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="section-add-btn"
+                onClick={() => void handleAddVariant()}
+                title="新建分支"
+                aria-label="新建分支"
+              >
+                <span className="codicon codicon-add" aria-hidden="true" />
+              </button>
+              {variant && (
+                <button
+                  type="button"
+                  className="section-add-btn"
+                  onClick={(e) =>
+                    variantMoreMenu.open(e, [
+                      {
+                        id: "rename",
+                        label: "重命名当前分支…",
+                        run: () => void handleRenameVariant(variant)
+                      },
+                      {
+                        id: "copy",
+                        label: "复制当前分支…",
+                        run: () => void handleCopyVariant(variant)
+                      },
+                      { separator: true },
+                      {
+                        id: "delete",
+                        label: "删除当前分支",
+                        disabled: variants.length <= 1,
+                        run: () => void handleDeleteVariant(variant)
+                      }
+                    ])
                   }
-                ])
-              }
-              title="更多操作"
-              aria-label="更多操作"
-            >
-              <span
-                className="codicon codicon-ellipsis"
-                aria-hidden="true"
-              />
-            </button>
+                  title="更多操作"
+                  aria-label="更多操作"
+                >
+                  <span
+                    className="codicon codicon-ellipsis"
+                    aria-hidden="true"
+                  />
+                </button>
+              )}
+            </>
           )}
         </h2>
         <div className="profile-lifecycle-section-body">

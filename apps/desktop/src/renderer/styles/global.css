@@ -1085,6 +1085,149 @@ button:focus-visible {
   border-bottom: 1px solid var(--tc-border-popup);
   background: var(--tc-bg-tab-strip, var(--tc-bg-editor));
 }
+.resource-branch-nav-title {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  margin-right: 14px;
+  color: var(--tc-fg-strong);
+  font-size: 13px;
+  font-weight: 600;
+}
+.resource-branch-selector {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 220px;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--tc-fg-strong);
+  font: inherit;
+  cursor: pointer;
+}
+.resource-branch-selector:hover {
+  background: var(--tc-bg-hover);
+  border-color: var(--tc-border-popup);
+}
+.resource-branch-selector > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.resource-branch-selector .codicon {
+  color: var(--tc-fg-muted);
+  font-size: 13px;
+  flex: 0 0 auto;
+}
+.resource-branch-dialog {
+  width: 460px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.resource-branch-create-mode {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.resource-branch-create-option {
+  text-align: left;
+  border: 1px solid var(--tc-border-popup);
+  border-radius: 4px;
+  background: var(--tc-bg-card);
+  color: var(--tc-fg-default);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  cursor: pointer;
+}
+.resource-branch-create-option:hover {
+  background: var(--tc-bg-hover);
+}
+.resource-branch-create-option.is-selected {
+  border-color: var(--tc-bg-button);
+  background: rgba(0, 122, 204, 0.16);
+}
+.resource-branch-create-option span {
+  color: var(--tc-fg-strong);
+  font-size: 13px;
+  font-weight: 600;
+}
+.resource-branch-create-option small {
+  color: var(--tc-fg-muted);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+.shared-branch-edit-dialog {
+  width: 540px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 24px 26px 20px;
+}
+.shared-branch-edit-title {
+  color: var(--tc-fg-strong);
+  font-size: 18px;
+  font-weight: 700;
+}
+.shared-branch-edit-message {
+  margin: 0;
+  color: var(--tc-fg-default);
+  font-size: 13px;
+  line-height: 1.65;
+}
+.shared-branch-edit-options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 2px;
+}
+.shared-branch-edit-option {
+  position: relative;
+  text-align: left;
+  border: 1px solid var(--tc-border-popup);
+  border-radius: 5px;
+  background: var(--tc-bg-card);
+  color: var(--tc-fg-default);
+  padding: 16px 16px 15px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  cursor: pointer;
+}
+.shared-branch-edit-option:hover {
+  background: var(--tc-bg-hover);
+  border-color: var(--tc-border-strong, var(--tc-border-popup));
+}
+.shared-branch-edit-option.is-recommended {
+  border-color: var(--tc-bg-button);
+  background: rgba(0, 122, 204, 0.14);
+}
+.shared-branch-edit-badge {
+  align-self: flex-start;
+  color: var(--tc-fg-strong);
+  background: rgba(0, 122, 204, 0.32);
+  border: 1px solid rgba(86, 156, 214, 0.45);
+  border-radius: 3px;
+  padding: 1px 6px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.shared-branch-edit-option-title {
+  color: var(--tc-fg-strong);
+  font-size: 14px;
+  font-weight: 650;
+}
+.shared-branch-edit-option-desc {
+  color: var(--tc-fg-muted);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
 .resource-editor-tab {
   background: transparent;
   border: none;
@@ -1433,6 +1576,28 @@ button:focus-visible {
 .resource-editor-control {
   font-size: 13px;
   color: var(--tc-fg-default);
+}
+.resource-summary-section {
+  gap: 0;
+}
+.resource-summary-body {
+  background: transparent;
+  border-radius: 0;
+  padding: 0 18px;
+}
+.resource-summary-node-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+}
+.resource-summary-node-row {
+  padding: 2px 0;
+  color: var(--tc-fg-default);
+  overflow-wrap: anywhere;
+}
+.resource-summary-node-row + .resource-summary-node-row {
+  margin-top: 6px;
 }
 .resource-editor-input {
   width: 100%;
@@ -1857,6 +2022,21 @@ textarea.resource-editor-input {
   padding: 8px 0 24px;
 }
 
+.chain-editor-list-header {
+  display: grid;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 24px 8px;
+  border-left: 3px solid transparent;
+  color: var(--tc-fg-muted);
+  font-size: 11.5px;
+  border-bottom: 1px solid var(--tc-border-soft);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--tc-bg-editor);
+}
+
 .chain-editor-row {
   display: grid;
   /* Grid template is set per-mode by the parent's `is-mode-*` class. */
@@ -1869,13 +2049,19 @@ textarea.resource-editor-input {
 }
 
 /* Mode 1: 完整链路节点 — order · 名称 · 类型 · 分类 · 状态. */
+.chain-editor-list.is-mode-full .chain-editor-list-header,
 .chain-editor-list.is-mode-full .chain-editor-row {
-  grid-template-columns: 80px 1fr 60px 140px 100px;
+  grid-template-columns: 76px minmax(160px, 240px) 64px minmax(180px, 1fr) 212px;
 }
 
 /* Mode 2: 实际执行链路 — order · 链路节点 · 计算实例 · 类型 · 分类. */
+.chain-editor-list.is-mode-execution .chain-editor-list-header,
 .chain-editor-list.is-mode-execution .chain-editor-row {
-  grid-template-columns: 80px 1fr 1fr 60px 140px;
+  grid-template-columns: 76px minmax(150px, 220px) minmax(180px, 1fr) 64px minmax(150px, 220px) 212px;
+}
+
+.chain-editor-list-header > span:first-child {
+  text-align: center;
 }
 
 .chain-editor-row-type {
@@ -1916,7 +2102,7 @@ textarea.resource-editor-input {
 
 .chain-editor-row-order-cell {
   position: relative;
-  text-align: right;
+  text-align: center;
   font-variant-numeric: tabular-nums;
   color: var(--tc-fg-muted);
   min-height: 22px;
@@ -1924,7 +2110,7 @@ textarea.resource-editor-input {
 .chain-editor-row-order-cell .chain-editor-row-order {
   display: inline-block;
   width: 100%;
-  text-align: right;
+  text-align: center;
 }
 .chain-editor-row-doc {
   position: absolute;
@@ -1989,6 +2175,188 @@ textarea.resource-editor-input {
 .chain-editor-row.is-custom.is-disabled .chain-editor-row-label {
   color: var(--tc-fg-muted);
 }
+
+.chain-editor-row-info-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.chain-editor-row-info-btn {
+  height: 24px;
+  padding: 0 5px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: #c8c8c8;
+  font-size: 11.5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.chain-editor-row-info-btn:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(200, 200, 200, 0.22);
+  color: #f0f0f0;
+}
+
+.chain-node-info-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  background: rgba(0, 0, 0, 0.42);
+}
+
+.chain-node-info-modal {
+  width: min(920px, calc(100vw - 64px));
+  max-height: min(760px, calc(100vh - 64px));
+  display: flex;
+  flex-direction: column;
+  background: var(--tc-bg-panel);
+  border: 1px solid var(--tc-border-popup);
+  border-radius: 6px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.55);
+  color: var(--tc-fg-default);
+}
+
+.chain-node-info-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 20px 24px 12px;
+  border-bottom: 1px solid var(--tc-border-soft);
+}
+
+.chain-node-info-kicker {
+  margin-bottom: 6px;
+  color: var(--tc-fg-muted);
+  font-size: 12px;
+}
+
+.chain-node-info-header h2 {
+  margin: 0 0 8px;
+  font-size: 22px;
+  line-height: 1.25;
+  color: var(--tc-fg-strong);
+}
+
+.chain-node-info-header code {
+  font-size: 12px;
+  color: var(--tc-fg-muted);
+  word-break: break-all;
+}
+
+.chain-node-info-close {
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--tc-border-popup);
+  border-radius: 3px;
+  background: var(--tc-bg-button);
+  color: var(--tc-fg-default);
+  cursor: pointer;
+}
+
+.chain-node-info-close:hover {
+  border-color: var(--tc-accent);
+}
+
+.chain-node-info-source {
+  padding: 10px 24px;
+  color: var(--tc-fg-muted);
+  font-size: 12px;
+  border-bottom: 1px solid var(--tc-border-soft);
+}
+
+.chain-node-info-body {
+  min-height: 0;
+  overflow: auto;
+  padding: 20px 24px 24px;
+}
+
+.chain-node-info-stack,
+.chain-node-info-io {
+  display: grid;
+  gap: 18px;
+}
+
+.chain-node-info-field {
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.chain-node-info-field h3 {
+  margin: 0 0 10px;
+  color: var(--tc-fg-strong);
+  font-size: 14px;
+}
+
+.chain-node-info-list {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.chain-node-info-list li + li {
+  margin-top: 6px;
+}
+
+.chain-node-info-meta-grid {
+  display: grid;
+  border: 1px solid var(--tc-border-soft);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.chain-node-info-meta-row {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 16px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--tc-border-soft);
+}
+
+.chain-node-info-meta-row:last-child {
+  border-bottom: none;
+}
+
+.chain-node-info-meta-row span {
+  color: var(--tc-fg-muted);
+}
+
+.chain-node-info-meta-row strong {
+  color: var(--tc-fg-default);
+  font-weight: 500;
+}
+
+.chain-node-info-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.chain-node-info-table th,
+.chain-node-info-table td {
+  padding: 8px 10px;
+  border: 1px solid var(--tc-border-soft);
+  text-align: left;
+  vertical-align: top;
+}
+
+.chain-node-info-table th {
+  color: var(--tc-fg-muted);
+  font-weight: 500;
+  background: var(--tc-bg-card);
+}
+
+.chain-node-info-empty {
+  color: var(--tc-fg-muted);
+  font-size: 12.5px;
+}
 /* Picker dialog --------------------------------------------- */
 .ca-picker-card {
   width: 480px;
@@ -1997,6 +2365,9 @@ textarea.resource-editor-input {
   flex-direction: column;
   gap: 10px;
   padding: 18px 20px;
+}
+.ca-picker-card .ca-dialog-title {
+  font-size: 17px;
 }
 /* Picker toolbar — category filter + search input on one line. The
    select shrinks to fit its longest option; the search input takes the
@@ -3502,8 +3873,9 @@ kbd {
 
 .context-menu-sep {
   height: 1px;
-  background: var(--tc-border-soft);
-  margin: 4px 0;
+  background: var(--tc-border-popup);
+  margin: 7px 8px;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
 /* Generic modal -------------------------------------------- */

@@ -1,10 +1,13 @@
 import type {
+  ComputeResourceV2,
+  CustomComputeResource,
   CustomNodeConfig,
   CustomNodeUsage,
   GuiProjectFile,
-  PlatformResourceInstance,
-  ProfileStandardVariantRef
+  ProfileStandardVariantRef,
+  StandardComputeResource
 } from "@tinder/nextstep";
+import { profileResourceBranchId } from "@tinder/nextstep";
 import { CHAIN_CATALOG } from "../help/chain-catalog.generated";
 
 /**
@@ -92,42 +95,39 @@ export type ExecutionRow = ExecutionStandardRow | CustomUsageRow;
  * - `profile.resources[]` filtered to active standard refs gives coverage.
  * - `profile.custom_node_usages[]` (enabled only) provides custom placements,
  *   sorted by `order` within each anchor.
- * - `standardCatalog` is the flat list of standard resource leaves so we can
- *   look up `compute_nodes[]` and display names.
+ * - `profileResources` is the profile-effective v2 resource list. It already
+ *   resolves selected branches and profile-local effective-candidate overrides.
  * - `customLeaves` is the flat list of custom leaves for usage display names.
  *
  * The function never reads from disk and is safe to call on every render.
  */
 export function buildChainProjection(
   profile: GuiProjectFile,
-  standardCatalog: PlatformResourceInstance[],
+  profileResources: ComputeResourceV2[],
   customLeaves: CustomNodeConfig[]
 ): ChainProjectionRow[] {
   const orderedNodes = CHAIN_CATALOG.orderedNodes;
 
-  // Index active standard refs by which canonical node ids their resources
-  // cover. The current MVP treats every compute_node on a resource as
-  // covering (no model_variants[] filtering yet — that's owned by the
-  // resource-editor task package).
+  // Index active standard refs by the canonical node ids selected by their
+  // branch-effective variant. Unselected candidates stay in resource metadata
+  // but do not count as profile coverage.
   const activeStandardRefs = (profile.resources ?? []).filter(
     (r): r is ProfileStandardVariantRef => r.kind === "standard" && r.enabled
   );
-  const standardById = new Map<string, PlatformResourceInstance>();
-  for (const r of standardCatalog) {
-    standardById.set(r.resource_instance_id, r);
-  }
+  const standardById = standardResourceIndex(profileResources);
   const coverageByNodeId = new Map<string, ChainCoverage["resources"]>();
   for (const ref of activeStandardRefs) {
     const resource = standardById.get(ref.resource_instance_id);
     if (!resource) continue;
-    for (const cn of resource.compute_nodes) {
-      const list = coverageByNodeId.get(cn.node_id) ?? [];
+    const variantId = profileResourceBranchId(ref);
+    for (const { nodeId } of effectiveStandardCandidates(resource, variantId)) {
+      const list = coverageByNodeId.get(nodeId) ?? [];
       list.push({
         resourceId: ref.resource_instance_id,
-        variantId: ref.variant_id,
+        variantId,
         displayName: resource.display_name
       });
-      coverageByNodeId.set(cn.node_id, list);
+      coverageByNodeId.set(nodeId, list);
     }
   }
 
@@ -159,20 +159,10 @@ export function buildChainProjection(
   }
   tailUsages.sort((a, b) => a.usage.order - b.usage.order);
 
-  // Custom leaf lookup for display names. In the current pre-multi-node
-  // codebase one leaf == one node, keyed by `custom_node_id`.
-  const customByResourceId = new Map<string, CustomNodeConfig>();
-  for (const leaf of customLeaves) {
-    customByResourceId.set(
-      leaf.resource_instance_id ?? leaf.custom_node_id,
-      leaf
-    );
-  }
-  const customDisplayName = (usage: CustomNodeUsage): string => {
-    const leaf = customByResourceId.get(usage.resource_instance_id);
-    if (leaf?.display_name) return leaf.display_name;
-    return `${usage.resource_instance_id}/${usage.node_id}`;
-  };
+  const customDisplayName = customDisplayNameResolver(
+    profileResources,
+    customLeaves
+  );
 
   // Index groups by docSlug so we can label each node with its owning chain
   // doc (e.g. "平台基础链路"). Falls back to the slug if the catalog hasn't
@@ -237,7 +227,7 @@ export function buildChainProjection(
  */
 export function buildExecutionProjection(
   profile: GuiProjectFile,
-  standardCatalog: PlatformResourceInstance[],
+  profileResources: ComputeResourceV2[],
   customLeaves: CustomNodeConfig[]
 ): ExecutionRow[] {
   const orderedNodes = CHAIN_CATALOG.orderedNodes;
@@ -245,24 +235,26 @@ export function buildExecutionProjection(
   const activeStandardRefs = (profile.resources ?? []).filter(
     (r): r is ProfileStandardVariantRef => r.kind === "standard" && r.enabled
   );
-  const standardById = new Map<string, PlatformResourceInstance>();
-  for (const r of standardCatalog) {
-    standardById.set(r.resource_instance_id, r);
-  }
+  const standardById = standardResourceIndex(profileResources);
   // For each canonical node id, the list of (ref, resource) pairs whose
-  // compute_nodes touch it. Order within the list follows the order refs
-  // were added to the profile so re-orderings stay deterministic.
+  // effective_candidates select it. Order within the list follows the order
+  // refs were added to the profile so re-orderings stay deterministic.
   const coverageByNodeId = new Map<
     string,
-    Array<{ ref: ProfileStandardVariantRef; resource: PlatformResourceInstance }>
+    Array<{
+      ref: ProfileStandardVariantRef;
+      resource: StandardComputeResource;
+      variantId: string;
+    }>
   >();
   for (const ref of activeStandardRefs) {
     const resource = standardById.get(ref.resource_instance_id);
     if (!resource) continue;
-    for (const cn of resource.compute_nodes) {
-      const list = coverageByNodeId.get(cn.node_id) ?? [];
-      list.push({ ref, resource });
-      coverageByNodeId.set(cn.node_id, list);
+    const variantId = profileResourceBranchId(ref);
+    for (const { nodeId } of effectiveStandardCandidates(resource, variantId)) {
+      const list = coverageByNodeId.get(nodeId) ?? [];
+      list.push({ ref, resource, variantId });
+      coverageByNodeId.set(nodeId, list);
     }
   }
 
@@ -297,16 +289,10 @@ export function buildExecutionProjection(
   }
   tailUsages.sort((a, b) => a.usage.order - b.usage.order);
 
-  const customByResourceId = new Map<string, CustomNodeConfig>();
-  for (const leaf of customLeaves) {
-    customByResourceId.set(
-      leaf.resource_instance_id ?? leaf.custom_node_id,
-      leaf
-    );
-  }
-  const customDisplayName = (usage: CustomNodeUsage): string =>
-    customByResourceId.get(usage.resource_instance_id)?.display_name ??
-    `${usage.resource_instance_id}/${usage.node_id}`;
+  const customDisplayName = customDisplayNameResolver(
+    profileResources,
+    customLeaves
+  );
 
   const rows: ExecutionRow[] = [];
   for (const node of orderedNodes) {
@@ -323,7 +309,7 @@ export function buildExecutionProjection(
     const covers = coverageByNodeId.get(node.nodeId);
     if (!covers || covers.length === 0) continue;
     const group = groupBySlug.get(node.docSlug);
-    for (const { ref, resource } of covers) {
+    for (const { ref, resource, variantId } of covers) {
       rows.push({
         kind: "exec-standard",
         chainNodeId: node.nodeId,
@@ -333,7 +319,7 @@ export function buildExecutionProjection(
         docTitle: group?.title ?? node.docSlug,
         resourceId: ref.resource_instance_id,
         resourceDisplayName: resource.display_name,
-        variantId: ref.variant_id
+        variantId
       });
     }
   }
@@ -347,4 +333,82 @@ export function buildExecutionProjection(
     });
   }
   return rows;
+}
+
+function standardResourceIndex(
+  resources: ComputeResourceV2[]
+): Map<string, StandardComputeResource> {
+  const out = new Map<string, StandardComputeResource>();
+  for (const resource of resources) {
+    if (resource.resource_kind === "standard") {
+      out.set(resource.resource_instance_id, resource);
+    }
+  }
+  return out;
+}
+
+function standardCandidateFor(
+  resource: StandardComputeResource,
+  nodeId: string,
+  candidateId: string
+): StandardComputeResource["compute_nodes"][number] | null {
+  const group = resource.compute_nodes.filter(
+    (candidate) => candidate.node_id === nodeId
+  );
+  return (
+    group.find((candidate, index) => {
+      const ids = [
+        candidate.candidate_id,
+        candidate.node_id,
+        `${nodeId}#${index}`
+      ].filter((id): id is string => Boolean(id));
+      return ids.includes(candidateId);
+    }) ?? null
+  );
+}
+
+function effectiveStandardCandidates(
+  resource: StandardComputeResource,
+  variantId: string
+): Array<{ nodeId: string; candidateId: string }> {
+  const variant = resource.model_variants.find((v) => v.variant_id === variantId);
+  if (!variant) return [];
+  return Object.entries(variant.effective_candidates ?? {})
+    .filter(([nodeId, candidateId]) => {
+      const candidate = standardCandidateFor(resource, nodeId, candidateId);
+      return !!candidate && candidate.status !== "disabled";
+    })
+    .map(([nodeId, candidateId]) => ({ nodeId, candidateId }));
+}
+
+function customDisplayNameResolver(
+  profileResources: ComputeResourceV2[],
+  customLeaves: CustomNodeConfig[]
+): (usage: CustomNodeUsage) => string {
+  const customByResourceId = new Map<string, CustomComputeResource>();
+  for (const resource of profileResources) {
+    if (resource.resource_kind === "custom") {
+      customByResourceId.set(resource.resource_instance_id, resource);
+    }
+  }
+
+  const legacyCustomByResourceId = new Map<string, CustomNodeConfig>();
+  for (const leaf of customLeaves) {
+    legacyCustomByResourceId.set(
+      leaf.resource_instance_id ?? leaf.custom_node_id,
+      leaf
+    );
+  }
+
+  return (usage: CustomNodeUsage): string => {
+    const resource = customByResourceId.get(usage.resource_instance_id);
+    const node = resource?.custom_nodes.find((n) => n.node_id === usage.node_id);
+    if (node?.display_name) return node.display_name;
+    if (resource?.display_name) {
+      return `${resource.display_name}/${usage.node_id}`;
+    }
+    const leaf = legacyCustomByResourceId.get(usage.resource_instance_id);
+    if (leaf?.display_name) return leaf.display_name;
+    return `${usage.resource_instance_id}/${usage.node_id}`;
+  };
 }

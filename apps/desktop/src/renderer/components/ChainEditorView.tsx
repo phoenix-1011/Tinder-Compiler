@@ -1,9 +1,11 @@
 import { useMemo, useState } from "react";
+import type { ChainContractRow, ChainNodeEntry } from "@tinder/nextstep";
 import { ContextMenu, useContextMenu, type ContextMenuItem } from "./ContextMenu";
 import { useCa } from "../state/ChainAssemblyContext";
 import { useWorkspace } from "../state/WorkspaceContext";
 import {
-  collectV2Resources,
+  collectProfileV2Resources,
+  collectProjectV2Resources,
   flattenLeaves
 } from "../state/chainAssemblyStorage";
 import {
@@ -19,6 +21,7 @@ import {
 } from "../state/runtimeReport";
 import { RuntimeReportModal } from "./RuntimeReportModal";
 import { CHAIN_CATALOG } from "../help/chain-catalog.generated";
+import { MarkdownInline } from "../help/Markdown";
 
 /**
  * Main-pane chain editor for the active profile. Opens when the user clicks
@@ -40,6 +43,10 @@ export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
   const [reportState, setReportState] = useState<{
     report: RuntimeReport;
     exportPath: string;
+  } | null>(null);
+  const [nodeInfo, setNodeInfo] = useState<{
+    nodeId: string;
+    kind: ChainNodeInfoKind;
   } | null>(null);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
   /**
@@ -68,10 +75,6 @@ export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
     return ca.disk.profiles.find((p) => p.id === profileId) ?? null;
   }, [ca.disk, profileId]);
 
-  const flatStandard = useMemo(
-    () => (ca.disk ? flattenLeaves(ca.disk.standardTree) : []),
-    [ca.disk]
-  );
   const flatCustom = useMemo(
     () => (ca.disk ? flattenLeaves(ca.disk.customTree) : []),
     [ca.disk]
@@ -83,43 +86,38 @@ export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
    * variant-resolved effective candidates.
    */
   const v2Resources = useMemo(
-    () => (ca.disk ? collectV2Resources(ca.disk) : []),
+    () =>
+      ca.disk && profile
+        ? collectProfileV2Resources(ca.disk, profile.project)
+        : [],
+    [ca.disk, profile]
+  );
+  const projectV2Resources = useMemo(
+    () => (ca.disk ? collectProjectV2Resources(ca.disk) : []),
     [ca.disk]
   );
 
   const fullProjection = useMemo(
     () =>
       profile
-        ? buildChainProjection(profile.project, flatStandard, flatCustom)
+        ? buildChainProjection(profile.project, v2Resources, flatCustom)
         : [],
-    [profile, flatStandard, flatCustom]
+    [profile, v2Resources, flatCustom]
   );
   const executionProjection = useMemo(
     () =>
       profile
-        ? buildExecutionProjection(profile.project, flatStandard, flatCustom)
+        ? buildExecutionProjection(profile.project, v2Resources, flatCustom)
         : [],
-    [profile, flatStandard, flatCustom]
+    [profile, v2Resources, flatCustom]
   );
 
   const visibleFull = useMemo(() => {
-    // Pre-compute chain-node ids that pass the group filter so a custom
-    // usage anchored at a hidden chain row hides too.
-    const visibleChainIds = new Set<string>();
-    for (const row of fullProjection) {
-      if (row.kind !== "chain-node") continue;
-      if (groupFilter !== "all" && row.docSlug !== groupFilter) continue;
-      visibleChainIds.add(row.nodeId);
-    }
     return fullProjection.filter((row) => {
       if (row.kind === "chain-node") {
         return groupFilter === "all" || row.docSlug === groupFilter;
       }
-      if (groupFilter !== "all") {
-        if (!row.anchorChainId) return false;
-        return visibleChainIds.has(row.anchorChainId);
-      }
-      return true;
+      return false;
     });
   }, [fullProjection, groupFilter]);
 
@@ -222,7 +220,11 @@ export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
   };
 
   const onGenerate = () => {
-    const report = buildRuntimeReport(profile.project, v2Resources);
+    const report = buildRuntimeReport(
+      profile.project,
+      v2Resources,
+      projectV2Resources
+    );
     setReportState({ report, exportPath: runtimeExportPath });
   };
 
@@ -287,6 +289,26 @@ export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
       <div
         className={`chain-editor-list is-mode-${chainMode}`}
       >
+        <div className="chain-editor-list-header">
+          {chainMode === "full" ? (
+            <>
+              <span>#</span>
+              <span>节点</span>
+              <span>类型</span>
+              <span>分类</span>
+              <span>信息</span>
+            </>
+          ) : (
+            <>
+              <span>#</span>
+              <span>链路节点</span>
+              <span>计算实例</span>
+              <span>类型</span>
+              <span>分类</span>
+              <span>信息</span>
+            </>
+          )}
+        </div>
         {chainMode === "full" ? (
           visibleFull.length === 0 ? (
             <div className="chain-editor-empty-list">
@@ -294,7 +316,7 @@ export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
             </div>
           ) : (
             visibleFull.map((row, idx) =>
-              renderFullRow(row, idx, openHelpDoc, customMenu)
+              renderFullRow(row, idx, setNodeInfo, openHelpDoc, customMenu)
             )
           )
         ) : visibleExecution.length === 0 ? (
@@ -303,7 +325,7 @@ export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
           </div>
         ) : (
           visibleExecution.map((row, idx) =>
-            renderExecutionRow(row, idx, openHelpDoc, customMenu)
+            renderExecutionRow(row, idx, setNodeInfo, openHelpDoc, customMenu)
           )
         )}
       </div>
@@ -320,6 +342,13 @@ export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
           onClose={() => setReportState(null)}
         />
       )}
+      {nodeInfo && (
+        <ChainNodeInfoModal
+          nodeId={nodeInfo.nodeId}
+          kind={nodeInfo.kind}
+          onClose={() => setNodeInfo(null)}
+        />
+      )}
     </div>
   );
 }
@@ -329,12 +358,17 @@ type CustomMenuOpener = (
   row: ChainProjectionRow & { kind: "custom" }
 ) => void;
 
+type ChainNodeInfoKind = "summary" | "responsibility" | "io";
+
+type NodeInfoOpener = (next: { nodeId: string; kind: ChainNodeInfoKind }) => void;
+
 /**
  * `完整链路节点` row layout. Columns: order/doc · 名称 · 类型 · 分类 · 状态.
  */
 function renderFullRow(
   row: ChainProjectionRow,
   idx: number,
+  openNodeInfo: NodeInfoOpener,
   openHelpDoc: (nodeId: string) => void,
   customMenu: CustomMenuOpener
 ) {
@@ -354,6 +388,7 @@ function renderFullRow(
         <span className="chain-editor-row-label">{row.displayName}</span>
         <span className="chain-editor-row-type is-custom">自定义</span>
         <span className="chain-editor-row-category is-custom">自定义</span>
+        <span className="chain-editor-row-info-actions" />
       </div>
     );
   }
@@ -386,6 +421,7 @@ function renderFullRow(
       <span className="chain-editor-row-category" title={row.docSlug}>
         {row.docTitle}
       </span>
+      {renderNodeInfoButtons(row.nodeId, openNodeInfo)}
     </div>
   );
 }
@@ -399,6 +435,7 @@ function renderFullRow(
 function renderExecutionRow(
   row: ExecutionRow,
   idx: number,
+  openNodeInfo: NodeInfoOpener,
   openHelpDoc: (nodeId: string) => void,
   customMenu: CustomMenuOpener
 ) {
@@ -417,6 +454,7 @@ function renderExecutionRow(
         </span>
         <span className="chain-editor-row-type is-custom">自定义</span>
         <span className="chain-editor-row-category is-custom">自定义</span>
+        <span className="chain-editor-row-info-actions" />
       </div>
     );
   }
@@ -451,6 +489,205 @@ function renderExecutionRow(
       <span className="chain-editor-row-category" title={row.docSlug}>
         {row.docTitle}
       </span>
+      {renderNodeInfoButtons(row.chainNodeId, openNodeInfo)}
     </div>
+  );
+}
+
+function renderNodeInfoButtons(nodeId: string, openNodeInfo: NodeInfoOpener) {
+  return (
+    <span className="chain-editor-row-info-actions">
+      {[
+        ["summary", "摘要"],
+        ["responsibility", "职责"],
+        ["io", "输入输出"]
+      ].map(([kind, label]) => (
+        <button
+          key={kind}
+          type="button"
+          className="chain-editor-row-info-btn"
+          onClick={(e) => {
+            e.stopPropagation();
+            openNodeInfo({ nodeId, kind: kind as ChainNodeInfoKind });
+          }}
+        >
+          {label}
+        </button>
+      ))}
+    </span>
+  );
+}
+
+function ChainNodeInfoModal({
+  nodeId,
+  kind,
+  onClose
+}: {
+  nodeId: string;
+  kind: ChainNodeInfoKind;
+  onClose(): void;
+}) {
+  const node = CHAIN_CATALOG.nodes[nodeId];
+  const doc = node ? CHAIN_CATALOG.docs[node.docSlug] : undefined;
+  const title = kind === "summary" ? "摘要" : kind === "responsibility" ? "职责" : "输入输出";
+
+  return (
+    <div className="chain-node-info-backdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className="chain-node-info-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`${node?.displayName ?? nodeId} ${title}`}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <header className="chain-node-info-header">
+          <div>
+            <div className="chain-node-info-kicker">{title}</div>
+            <h2>{node?.displayName ?? nodeId}</h2>
+            <code>{nodeId}</code>
+          </div>
+          <button type="button" className="chain-node-info-close" onClick={onClose}>
+            关闭
+          </button>
+        </header>
+        <div className="chain-node-info-source">
+          来源：{doc?.title ?? node?.docSlug ?? "未找到链路文档"}
+        </div>
+        <div className="chain-node-info-body">
+          {node ? <ChainNodeInfoContent node={node} kind={kind} /> : <p>未找到该节点的文档信息。</p>}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ChainNodeInfoContent({
+  node,
+  kind
+}: {
+  node: ChainNodeEntry;
+  kind: ChainNodeInfoKind;
+}) {
+  if (kind === "summary") {
+    return (
+      <div className="chain-node-info-stack">
+        <InfoField title="目的">
+          {node.purpose ? <MarkdownInline source={node.purpose} /> : "文档中暂无目的摘要。"}
+        </InfoField>
+        <InfoMetaGrid
+          rows={[
+            ["执行序号", node.order ? String(node.order) : "-"],
+            ["分类", CHAIN_CATALOG.docs[node.docSlug]?.title ?? node.docSlug],
+            ["Fallback", node.fallback ?? "-"]
+          ]}
+        />
+      </div>
+    );
+  }
+
+  if (kind === "responsibility") {
+    return (
+      <div className="chain-node-info-stack">
+        <InfoField title="运行时契约">
+          {node.runtimeContract && node.runtimeContract.length > 0 ? (
+            <ul className="chain-node-info-list">
+              {node.runtimeContract.map((line, i) => (
+                <li key={i}>
+                  <MarkdownInline source={line} />
+                </li>
+              ))}
+            </ul>
+          ) : (
+            "文档中暂无运行时契约。"
+          )}
+        </InfoField>
+        <InfoField title="状态与保留">
+          {node.state ? <MarkdownInline source={node.state} /> : "文档中暂无状态与保留说明。"}
+        </InfoField>
+      </div>
+    );
+  }
+
+  return (
+    <div className="chain-node-info-io">
+      <ContractInfoTable title="输入" rows={node.inputs ?? []} kind="input" />
+      <ContractInfoTable title="输出" rows={node.outputs ?? []} kind="output" />
+    </div>
+  );
+}
+
+function InfoField({
+  title,
+  children
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="chain-node-info-field">
+      <h3>{title}</h3>
+      <div>{children}</div>
+    </section>
+  );
+}
+
+function InfoMetaGrid({ rows }: { rows: Array<[string, string]> }) {
+  return (
+    <div className="chain-node-info-meta-grid">
+      {rows.map(([label, value]) => (
+        <div key={label} className="chain-node-info-meta-row">
+          <span>{label}</span>
+          <strong>{value}</strong>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ContractInfoTable({
+  title,
+  rows,
+  kind
+}: {
+  title: string;
+  rows: ChainContractRow[];
+  kind: "input" | "output";
+}) {
+  return (
+    <section className="chain-node-info-field">
+      <h3>{title}</h3>
+      {rows.length === 0 ? (
+        <div className="chain-node-info-empty">文档中暂无{title} contract。</div>
+      ) : (
+        <table className="chain-node-info-table">
+          <thead>
+            <tr>
+              <th>Contract</th>
+              <th>{kind === "input" ? "来源" : "目标"}</th>
+              <th>{kind === "input" ? "必需" : "生命周期"}</th>
+              <th>说明</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, i) => (
+              <tr key={i}>
+                <td>
+                  <MarkdownInline source={row.contract} />
+                </td>
+                <td>
+                  <MarkdownInline source={row.endpoint} />
+                </td>
+                <td>
+                  <MarkdownInline source={row.qualifier ?? ""} />
+                </td>
+                <td>
+                  <MarkdownInline source={row.note ?? ""} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </section>
   );
 }

@@ -1,9 +1,14 @@
 import type {
   BuiltinNodeConfig,
   CatalogBuiltinNode,
+  ComputeResourceBranch,
+  ComputeResourceBranchSummary,
+  ComputeResourceFamilyFile,
   ComputeResourceImplementation,
+  ComputeResourceKind,
   ComputeResourceV2,
   CustomComputeNodeDef,
+  CustomComputeResourceBranch,
   CustomComputeResource,
   CustomNodeConfig,
   ExecutionItem,
@@ -15,7 +20,9 @@ import type {
   PlatformResourceInstance,
   PlatformTemplate,
   ProfileCustomResourceRef,
+  ProfileResourceSlot,
   ProfileResourceRef,
+  ProfileStandardBranchSlot,
   ProfileStandardVariantRef,
   ResourceCatalogEntry,
   ResourceCatalogFile,
@@ -23,6 +30,7 @@ import type {
   RuntimeArtifactKind,
   RuntimeCustomNodeConfig,
   RuntimeConfigFile,
+  StandardComputeResourceBranch,
   StandardComputeCandidate,
   StandardComputeResource,
   ValidationIssue,
@@ -570,6 +578,95 @@ export function executionItemLabel(
  * recognise it.
  */
 export const DEFAULT_PROFILE_VARIANT_ID = "default";
+export const DEFAULT_BRANCH_ID = "default";
+
+export function profileResourceBranchId(ref: ProfileResourceRef): string {
+  if (ref.kind === "standard") {
+    return ref.selected_branch_id ?? ref.variant_id ?? DEFAULT_BRANCH_ID;
+  }
+  return ref.selected_branch_id ?? DEFAULT_BRANCH_ID;
+}
+
+export function branchKey(
+  kind: ComputeResourceKind,
+  resourceInstanceId: string,
+  branchId: string,
+): string {
+  return `${kind}:${resourceInstanceId}:${branchId}`;
+}
+
+export function profileSlotKey(
+  slot: ProfileResourceSlot | ProfileResourceRef,
+): string {
+  return `${slot.kind}:${slot.resource_instance_id}`;
+}
+
+export function normalizeProfileResourceSlot(
+  ref: ProfileResourceRef | ProfileResourceSlot,
+): ProfileResourceSlot {
+  if (ref.kind === "standard") {
+    const selected =
+      "selected_branch_id" in ref && ref.selected_branch_id
+        ? ref.selected_branch_id
+        : "variant_id" in ref
+          ? ref.variant_id
+          : DEFAULT_BRANCH_ID;
+    return {
+      kind: "standard",
+      resource_instance_id: ref.resource_instance_id,
+      selected_branch_id: selected || DEFAULT_BRANCH_ID,
+      enabled: ref.enabled,
+      folder: ref.folder,
+      overrides: "overrides" in ref ? ref.overrides : undefined,
+    };
+  }
+  return {
+    kind: "custom",
+    resource_instance_id: ref.resource_instance_id,
+    selected_branch_id:
+      "selected_branch_id" in ref && ref.selected_branch_id
+        ? ref.selected_branch_id
+        : DEFAULT_BRANCH_ID,
+    enabled: ref.enabled,
+    folder: ref.folder,
+  };
+}
+
+export function profileSlotToLegacyRef(slot: ProfileResourceSlot): ProfileResourceRef {
+  if (slot.kind === "standard") {
+    return {
+      kind: "standard",
+      resource_instance_id: slot.resource_instance_id,
+      variant_id: slot.selected_branch_id,
+      selected_branch_id: slot.selected_branch_id,
+      enabled: slot.enabled,
+      folder: slot.folder,
+      overrides: slot.overrides,
+    };
+  }
+  return {
+    kind: "custom",
+    resource_instance_id: slot.resource_instance_id,
+    selected_branch_id: slot.selected_branch_id,
+    enabled: slot.enabled,
+    folder: slot.folder,
+  };
+}
+
+export function normalizeProfileResourceRefs(
+  refs: Array<ProfileResourceRef | ProfileResourceSlot>,
+): ProfileResourceRef[] {
+  const out: ProfileResourceRef[] = [];
+  const seen = new Set<string>();
+  for (const ref of refs) {
+    const slot = normalizeProfileResourceSlot(ref);
+    const key = profileSlotKey(slot);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(profileSlotToLegacyRef(slot));
+  }
+  return out;
+}
 
 /**
  * Pure migration from a v1 profile shape + its `profile-extras.json` entry to
@@ -597,10 +694,10 @@ export function migrateProfileFromV1(
     return profile;
   }
   const resources: ProfileResourceRef[] = profile.resources
-    ? [...profile.resources]
+    ? normalizeProfileResourceRefs(profile.resources)
     : [];
   const seen = new Set(
-    resources.map((ref) => profileResourceRefKey(ref)),
+    resources.map((ref) => profileSlotKey(ref)),
   );
 
   const pushStandard = (resourceId: string) => {
@@ -610,7 +707,7 @@ export function migrateProfileFromV1(
       variant_id: DEFAULT_PROFILE_VARIANT_ID,
       enabled: true,
     };
-    const key = profileResourceRefKey(ref);
+    const key = profileSlotKey(ref);
     if (seen.has(key)) return;
     seen.add(key);
     resources.push(ref);
@@ -626,9 +723,10 @@ export function migrateProfileFromV1(
     const ref: ProfileCustomResourceRef = {
       kind: "custom",
       resource_instance_id: custom.custom_node_id,
+      selected_branch_id: DEFAULT_BRANCH_ID,
       enabled: custom.enabled ?? true,
     };
-    const key = profileResourceRefKey(ref);
+    const key = profileSlotKey(ref);
     if (seen.has(key)) continue;
     seen.add(key);
     resources.push(ref);
@@ -643,9 +741,7 @@ export function migrateProfileFromV1(
 
 /** Stable dedupe key for a profile resource ref. */
 export function profileResourceRefKey(ref: ProfileResourceRef): string {
-  return ref.kind === "standard"
-    ? `standard:${ref.resource_instance_id}:${ref.variant_id}`
-    : `custom:${ref.resource_instance_id}`;
+  return profileSlotKey(ref);
 }
 
 /** Resource refs flagged active. Migration always runs on v1 profiles first. */
@@ -731,6 +827,134 @@ export function isComputeResourceV2(value: unknown): value is ComputeResourceV2 
     typeof obj.implementation === "object" &&
     obj.implementation !== null
   );
+}
+
+export function isComputeResourceFamilyFile(
+  value: unknown,
+): value is ComputeResourceFamilyFile {
+  if (!value || typeof value !== "object") return false;
+  const obj = value as Record<string, unknown>;
+  return (
+    obj.schema_version === 3 &&
+    (obj.resource_kind === "standard" || obj.resource_kind === "custom") &&
+    typeof obj.resource_instance_id === "string" &&
+    typeof obj.display_name === "string" &&
+    typeof obj.default_branch_id === "string" &&
+    Array.isArray(obj.branches)
+  );
+}
+
+export function isComputeResourceBranch(
+  value: unknown,
+): value is ComputeResourceBranch {
+  if (!value || typeof value !== "object") return false;
+  const obj = value as Record<string, unknown>;
+  return (
+    obj.schema_version === 3 &&
+    (obj.resource_kind === "standard" || obj.resource_kind === "custom") &&
+    typeof obj.resource_instance_id === "string" &&
+    typeof obj.branch_id === "string" &&
+    typeof obj.display_name === "string" &&
+    typeof obj.implementation === "object" &&
+    obj.implementation !== null
+  );
+}
+
+export function familyBranchSummary(
+  branch: ComputeResourceBranch,
+): ComputeResourceBranchSummary {
+  return {
+    branch_id: branch.branch_id,
+    display_name: branch.display_name,
+    status: branch.status,
+    updated_at: branch.updated_at,
+  };
+}
+
+export function computeResourceV2ToBranches(
+  resource: ComputeResourceV2,
+): ComputeResourceBranch[] {
+  const common = {
+    schema_version: 3 as const,
+    resource_instance_id: resource.resource_instance_id,
+    display_name: resource.display_name,
+    description: resource.description,
+    status: resource.status,
+    implementation: resource.implementation,
+    notes: resource.notes,
+    created_at: resource.created_at,
+    updated_at: resource.updated_at,
+  };
+  if (resource.resource_kind === "custom") {
+    const branch: CustomComputeResourceBranch = {
+      ...common,
+      resource_kind: "custom",
+      branch_id: DEFAULT_BRANCH_ID,
+      custom_nodes: resource.custom_nodes.map((n) => ({ ...n })),
+    };
+    return [branch];
+  }
+
+  const variants =
+    resource.model_variants.length > 0
+      ? resource.model_variants
+      : [
+          {
+            variant_id: DEFAULT_BRANCH_ID,
+            display_name: "默认",
+            effective_candidates: {},
+          } satisfies ResourceModelVariant,
+        ];
+  return variants.map((variant) => {
+    const branch: StandardComputeResourceBranch = {
+      ...common,
+      resource_kind: "standard",
+      branch_id: variant.variant_id || DEFAULT_BRANCH_ID,
+      display_name: variant.display_name || resource.display_name,
+      notes: variant.notes ?? resource.notes,
+      compute_nodes: resource.compute_nodes.map((c) => ({ ...c })),
+      effective_candidates: { ...(variant.effective_candidates ?? {}) },
+    };
+    return branch;
+  });
+}
+
+export function computeResourceV2ToFamily(
+  resource: ComputeResourceV2,
+): ComputeResourceFamilyFile {
+  const branches = computeResourceV2ToBranches(resource);
+  return {
+    schema_version: 3,
+    resource_kind: resource.resource_kind,
+    resource_instance_id: resource.resource_instance_id,
+    display_name: resource.display_name,
+    description: resource.description,
+    tags: resource.tags,
+    default_branch_id: branches[0]?.branch_id ?? DEFAULT_BRANCH_ID,
+    branches: branches.map(familyBranchSummary),
+    created_at: resource.created_at,
+    updated_at: resource.updated_at,
+  };
+}
+
+export function parseComputeResourceFamilyFile(
+  text: string,
+): ComputeResourceFamilyFile {
+  const parsed = JSON.parse(text) as unknown;
+  if (!isComputeResourceFamilyFile(parsed)) {
+    throw new Error("Resource family file must use schema_version 3.");
+  }
+  return parsed;
+}
+
+export function parseComputeResourceBranchFile(
+  text: string,
+): ComputeResourceBranch {
+  const parsed = JSON.parse(text) as unknown;
+  if (!isComputeResourceBranch(parsed)) {
+    throw new Error("Resource branch file must use schema_version 3.");
+  }
+  return parsed;
 }
 
 function inferLanguageFromPath(path: string): ImplementationFileLanguage {
@@ -913,6 +1137,105 @@ export function projectCustomResourceToV1(
     action_index: headline?.action_index ?? 0,
     default_parameters: headline?.default_parameters,
     enabled: v2.status !== "disabled",
+  };
+}
+
+export function projectStandardBranchToV1(
+  family: ComputeResourceFamilyFile,
+  branch: StandardComputeResourceBranch,
+): PlatformResourceInstance {
+  return projectStandardResourceToV1({
+    schema_version: 2,
+    resource_kind: "standard",
+    resource_instance_id: family.resource_instance_id,
+    display_name: family.display_name,
+    description: family.description ?? branch.description,
+    tags: family.tags,
+    status: branch.status,
+    implementation: branch.implementation,
+    compute_nodes: branch.compute_nodes,
+    model_variants: [
+      {
+        variant_id: branch.branch_id,
+        display_name: branch.display_name,
+        effective_candidates: { ...branch.effective_candidates },
+      },
+    ],
+    created_at: branch.created_at,
+    updated_at: branch.updated_at,
+  });
+}
+
+export function projectCustomBranchToV1(
+  family: ComputeResourceFamilyFile,
+  branch: CustomComputeResourceBranch,
+): CustomNodeConfig {
+  return projectCustomResourceToV1({
+    schema_version: 2,
+    resource_kind: "custom",
+    resource_instance_id: family.resource_instance_id,
+    display_name: family.display_name,
+    description: family.description ?? branch.description,
+    tags: family.tags,
+    status: branch.status,
+    implementation: branch.implementation,
+    custom_nodes: branch.custom_nodes,
+    created_at: branch.created_at,
+    updated_at: branch.updated_at,
+  });
+}
+
+export function branchToComputeResourceV2(
+  family: ComputeResourceFamilyFile,
+  branch: ComputeResourceBranch,
+  options: {
+    effectiveCandidateOverrides?: Record<string, string | null>;
+  } = {},
+): ComputeResourceV2 {
+  if (branch.resource_kind === "standard") {
+    const effectiveCandidates = { ...branch.effective_candidates };
+    for (const [nodeId, candidateId] of Object.entries(
+      options.effectiveCandidateOverrides ?? {},
+    )) {
+      if (candidateId === null || candidateId === "") {
+        delete effectiveCandidates[nodeId];
+      } else {
+        effectiveCandidates[nodeId] = candidateId;
+      }
+    }
+    return {
+      schema_version: 2,
+      resource_kind: "standard",
+      resource_instance_id: family.resource_instance_id,
+      display_name: family.display_name,
+      description: family.description ?? branch.description,
+      tags: family.tags,
+      status: branch.status,
+      implementation: branch.implementation,
+      compute_nodes: branch.compute_nodes,
+      model_variants: [
+        {
+          variant_id: branch.branch_id,
+          display_name: branch.display_name,
+          effective_candidates: effectiveCandidates,
+        },
+      ],
+      created_at: branch.created_at,
+      updated_at: branch.updated_at,
+    };
+  }
+  return {
+    schema_version: 2,
+    resource_kind: "custom",
+    resource_instance_id: family.resource_instance_id,
+    display_name: family.display_name,
+    description: family.description ?? branch.description,
+    tags: family.tags,
+    status: branch.status,
+    implementation: branch.implementation,
+    custom_nodes: branch.custom_nodes,
+    created_at: branch.created_at,
+    updated_at: branch.updated_at,
   };
 }
 

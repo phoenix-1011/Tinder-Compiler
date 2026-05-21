@@ -48,7 +48,8 @@ function DropZone({
         if (!dragState.value) return;
         e.preventDefault();
         e.stopPropagation();
-        e.dataTransfer.dropEffect = "copy";
+        e.dataTransfer.dropEffect =
+          dragState.value.kind === "profile-resource" ? "move" : "copy";
       }}
       onDragEnter={(e) => {
         if (!dragState.value) return;
@@ -71,6 +72,52 @@ function DropZone({
   );
 }
 
+function normalizeProfileFolderPath(folder?: string | null): string | null {
+  const normalized = (folder ?? "")
+    .split("/")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join("/");
+  return normalized || null;
+}
+
+function ensureProfileFolder(
+  root: ProfileResourceFolder,
+  folderPath: string
+): void {
+  const normalized = normalizeProfileFolderPath(folderPath);
+  if (!normalized) return;
+  let cursor = root;
+  let acc = "";
+  for (const segment of normalized.split("/")) {
+    acc = acc ? `${acc}/${segment}` : segment;
+    let child = cursor.children.find((candidate) => candidate.name === segment);
+    if (!child) {
+      child = { name: segment, path: acc, children: [], resources: [] };
+      cursor.children.push(child);
+    }
+    cursor = child;
+  }
+}
+
+function withExplicitProfileFolders(
+  root: ProfileResourceFolder,
+  folders?: string[]
+): ProfileResourceFolder {
+  for (const folder of folders ?? []) {
+    ensureProfileFolder(root, folder);
+  }
+  return root;
+}
+
+function safeDecodeUriComponent(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // View body
 // ─────────────────────────────────────────────────────────────────────────────
@@ -78,7 +125,13 @@ function DropZone({
 export function ChainAssemblyView() {
   const ca = useCa();
   const cm = useContextMenu();
-  const { activeUri, openChainEditor, openProfileLifecycle, openResourceEditor } =
+  const {
+    activeUri,
+    openChainEditor,
+    openProfileLifecycle,
+    openResourceEditor,
+    openResourceBranch
+  } =
     useWorkspace();
   const { dataRoot, disk, loading, loadError, collapse, setCollapse } = ca;
 
@@ -104,9 +157,25 @@ export function ChainAssemblyView() {
     if (activeUri) {
       const m = activeUri.match(/^(?:chain-editor|profile-lifecycle):\/\/(.+)$/);
       if (m) return m[1] ?? null;
+      const branch = activeUri.match(/^resource-branch:\/\/profile\/([^/]+)\//);
+      if (branch) return safeDecodeUriComponent(branch[1] ?? "");
     }
     return ca.activeProfileId;
   }, [activeUri, ca.activeProfileId]);
+  const highlightedProfileResource = useMemo<{
+    profileId: string;
+    resourceKey: string;
+  } | null>(() => {
+    if (!activeUri) return null;
+    const m = activeUri.match(
+      /^resource-branch:\/\/profile\/([^/]+)\/(standard|custom)\/([^/]+)$/
+    );
+    if (!m) return null;
+    return {
+      profileId: safeDecodeUriComponent(m[1] ?? ""),
+      resourceKey: `${m[2]}:${safeDecodeUriComponent(m[3] ?? "")}`
+    };
+  }, [activeUri]);
 
   useEffect(() => {
     if (!activeProfile) return;
@@ -288,19 +357,32 @@ export function ChainAssemblyView() {
         // legacy v1 the leaf id (the JSON file path) is. Either is what
         // moveResourceToFolder needs to relocate the entry.
         const sourcePath = node.packagePath ?? node.id;
+        const familyEntry = disk?.resourceIndex.familyByKey.get(
+          `${where}:${resourceId}`
+        );
         return (
           <Row
             key={node.id}
             depth={depth}
             label={node.name}
-            onClick={() =>
+            onClick={() => {
+              if (familyEntry) {
+                openResourceBranch({
+                  scope: "global",
+                  resourceId,
+                  resourceKind: where,
+                  branchId: familyEntry.family.default_branch_id,
+                  displayName: node.name
+                });
+                return;
+              }
               openResourceEditor({
                 resourceId,
                 resourceKind: where,
                 displayName: node.name,
                 sourcePath
-              })
-            }
+              });
+            }}
             draggable
             dragPayload={makeDragPayload(node.data, sourcePath)}
             onContextMenu={(e) => leafMenu(e, node)}
@@ -382,7 +464,7 @@ export function ChainAssemblyView() {
               // walker can resolve label/menu data per ref without re-running
               // the full mapping for each render branch.
               const buildItemMap = (subset: typeof refs) => {
-                const items = profileResourceItems(subset, flatStandard);
+                const items = profileResourceItems(subset, flatStandard, flatCustom);
                 const map = new Map<string, ProfileResourceItem>();
                 subset.forEach((ref, i) => {
                   const item = items[i];
@@ -393,13 +475,24 @@ export function ChainAssemblyView() {
               const activeItemMap = buildItemMap(activeRefs);
               const disabledItemMap = buildItemMap(disabledRefs);
 
-              const activeRoot = profileResourcesByFolder(activeRefs);
-              const disabledRoot = profileResourcesByFolder(disabledRefs);
+              const profileExtras = disk.extras[profile.extrasKey];
+              const activeRoot = withExplicitProfileFolders(
+                profileResourcesByFolder(activeRefs),
+                profileExtras?.profileFolders?.active
+              );
+              const disabledRoot = withExplicitProfileFolders(
+                profileResourcesByFolder(disabledRefs),
+                profileExtras?.profileFolders?.disabled
+              );
               const chainEditorOpen =
                 activeUri === `chain-editor://${profile.id}`;
               const lifecycleOpen =
                 activeUri === `profile-lifecycle://${profile.id}`;
               const isActive = profile.id === highlightedProfileId;
+              const activeResourceKey =
+                highlightedProfileResource?.profileId === profile.id
+                  ? highlightedProfileResource.resourceKey
+                  : null;
 
               return (
                 <div key={profile.id}>
@@ -436,12 +529,24 @@ export function ChainAssemblyView() {
                           activeRoot,
                           2,
                           profile.id,
+                          profile.name,
                           "active",
                           true,
                           activeItemMap,
+                          activeResourceKey,
                           collapse.profileFolders,
                           toggleProfileFolder,
                           profileResourceMenu,
+                          (profileId, profileName, item) =>
+                            openResourceBranch({
+                              scope: "profile",
+                              profileId,
+                              profileDisplayName: profileName,
+                              resourceId: item.resourceId,
+                              resourceKind: item.kind,
+                              branchId: item.branchId,
+                              displayName: item.label
+                            }),
                           ca.dropToProfile
                         )}
                       </DropZone>
@@ -461,12 +566,24 @@ export function ChainAssemblyView() {
                           disabledRoot,
                           2,
                           profile.id,
+                          profile.name,
                           "disabled",
                           false,
                           disabledItemMap,
+                          activeResourceKey,
                           collapse.profileFolders,
                           toggleProfileFolder,
                           profileResourceMenu,
+                          (profileId, profileName, item) =>
+                            openResourceBranch({
+                              scope: "profile",
+                              profileId,
+                              profileDisplayName: profileName,
+                              resourceId: item.resourceId,
+                              resourceKind: item.kind,
+                              branchId: item.branchId,
+                              displayName: item.label
+                            }),
                           ca.dropToProfile
                         )}
                       </DropZone>
@@ -659,7 +776,7 @@ interface RowProps {
 function rowPadding(depth: number): number {
   if (depth <= 0) return 22;
   if (depth === 1) return 32;
-  return 40 + (depth - 2) * 8;
+  return 40 + (depth - 2) * 8 + (depth >= 3 ? 4 : 0);
 }
 const CHEVRON_HALF = 7;
 
@@ -699,7 +816,8 @@ function Row({
       onDragStart={(e) => {
         if (!dragPayload) return;
         dragState.value = dragPayload;
-        e.dataTransfer.effectAllowed = "copy";
+        e.dataTransfer.effectAllowed =
+          dragPayload.kind === "profile-resource" ? "move" : "copy";
         try {
           e.dataTransfer.setData("application/x-tinder-resource", "1");
         } catch {
@@ -756,6 +874,12 @@ type ProfileResourceMenuOpener = (
   currentFolder: string
 ) => void;
 
+type ProfileResourceOpener = (
+  profileId: string,
+  profileName: string,
+  item: ProfileResourceItem
+) => void;
+
 /**
  * Render one folder level: direct resources first, then nested subfolders
  * each wrapped in their own DropZone so drops land at the most specific
@@ -765,12 +889,15 @@ function renderProfileFolderContents(
   folder: ProfileResourceFolder,
   depth: number,
   profileId: string,
+  profileName: string,
   section: "active" | "disabled",
   enabled: boolean,
   itemMap: Map<string, ProfileResourceItem>,
+  activeResourceKey: string | null,
   profileFolders: Record<string, boolean>,
   toggleFolder: (id: string, section: "active" | "disabled", path: string) => void,
   openMenu: ProfileResourceMenuOpener,
+  openResource: ProfileResourceOpener,
   dropToProfile: DropToProfile
 ): ReactNode {
   const isEmpty =
@@ -788,7 +915,10 @@ function renderProfileFolderContents(
             key={item.id}
             depth={depth}
             label={item.label}
-            onClick={() => {}}
+            active={profileResourceRefKey(ref) === activeResourceKey}
+            onClick={() => openResource(profileId, profileName, item)}
+            draggable
+            dragPayload={{ kind: "profile-resource", profileId, item }}
             onContextMenu={(e) => openMenu(e, profileId, item, ref.folder ?? "")}
           />
         );
@@ -815,12 +945,15 @@ function renderProfileFolderContents(
                 child,
                 depth + 1,
                 profileId,
+                profileName,
                 section,
                 enabled,
                 itemMap,
+                activeResourceKey,
                 profileFolders,
                 toggleFolder,
                 openMenu,
+                openResource,
                 dropToProfile
               )}
           </DropZone>

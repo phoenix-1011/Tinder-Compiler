@@ -28,6 +28,7 @@ export interface DialogState {
   destructive?: boolean;
   /** When set, the dialog renders a searchable picker over these options. */
   options?: DialogPickerOption[];
+  searchable?: boolean;
   /** Initial id to highlight in the picker; first match wins. */
   initialOptionId?: string;
   /**
@@ -63,7 +64,9 @@ export interface DialogApi {
    */
   pickOne(opts: {
     title: string;
+    message?: string;
     placeholder?: string;
+    searchable?: boolean;
     options: DialogPickerOption[];
     initialOptionId?: string;
     categories?: DialogPickerCategory[];
@@ -127,7 +130,9 @@ export function useDialog(): DialogApi {
       new Promise<string | null>((resolve) => {
         setState({
           title: opts.title,
+          message: opts.message,
           inputPlaceholder: opts.placeholder,
+          searchable: opts.searchable,
           options: opts.options,
           initialOptionId: opts.initialOptionId,
           categories: opts.categories,
@@ -253,10 +258,14 @@ function PickerModal({ state }: { state: DialogState }) {
   });
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const showSearch = state.searchable !== false;
+  const showToolbar =
+    showSearch || Boolean(state.categories && state.categories.length > 0);
 
   useEffect(() => {
+    if (!showSearch) return;
     inputRef.current?.focus();
-  }, []);
+  }, [showSearch]);
 
   const filtered = (() => {
     const q = query.trim().toLowerCase();
@@ -273,11 +282,9 @@ function PickerModal({ state }: { state: DialogState }) {
     );
   })();
 
-  // Clamp selection inside the filtered window.
   const safeIdx = Math.min(selectedIdx, Math.max(0, filtered.length - 1));
 
   useEffect(() => {
-    // Keep the highlighted row scrolled into view.
     const el = listRef.current?.querySelector<HTMLElement>(
       `[data-idx="${safeIdx}"]`
     );
@@ -289,54 +296,62 @@ function PickerModal({ state }: { state: DialogState }) {
 
   return (
     <div className="modal-backdrop" onMouseDown={cancel}>
-      <div className="modal-card ca-picker-card" onMouseDown={(e) => e.stopPropagation()}>
+      <div
+        className="modal-card ca-picker-card"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
         <div className="ca-dialog-title">{state.title}</div>
-        <div className="ca-picker-toolbar">
-          {state.categories && state.categories.length > 0 && (
-            <select
-              className="ca-dialog-input ca-picker-toolbar-select"
-              value={category}
-              onChange={(e) => {
-                setCategory(e.target.value);
-                setSelectedIdx(0);
-              }}
-              title={state.categoryLabel ?? "类型"}
-            >
-              <option value="all">全部</option>
-              {state.categories.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.label}
-                </option>
-              ))}
-            </select>
-          )}
-          <input
-            ref={inputRef}
-            className="ca-dialog-input ca-picker-toolbar-search"
-            value={query}
-            placeholder={state.inputPlaceholder ?? "搜索…"}
-            onChange={(e) => {
-              setQuery(e.target.value);
-              setSelectedIdx(0);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "ArrowDown") {
-                e.preventDefault();
-                setSelectedIdx((i) => Math.min(filtered.length - 1, i + 1));
-              } else if (e.key === "ArrowUp") {
-                e.preventDefault();
-                setSelectedIdx((i) => Math.max(0, i - 1));
-              } else if (e.key === "Enter") {
-                e.preventDefault();
-                const pick = filtered[safeIdx];
-                if (pick) confirm(pick.id);
-              } else if (e.key === "Escape") {
-                e.preventDefault();
-                cancel();
-              }
-            }}
-          />
-        </div>
+        {state.message && <div className="ca-dialog-message">{state.message}</div>}
+        {showToolbar && (
+          <div className="ca-picker-toolbar">
+            {state.categories && state.categories.length > 0 && (
+              <select
+                className="ca-dialog-input ca-picker-toolbar-select"
+                value={category}
+                onChange={(e) => {
+                  setCategory(e.target.value);
+                  setSelectedIdx(0);
+                }}
+                title={state.categoryLabel ?? "类型"}
+              >
+                <option value="all">全部</option>
+                {state.categories.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.label}
+                  </option>
+                ))}
+              </select>
+            )}
+            {showSearch && (
+              <input
+                ref={inputRef}
+                className="ca-dialog-input ca-picker-toolbar-search"
+                value={query}
+                placeholder={state.inputPlaceholder ?? "搜索…"}
+                onChange={(e) => {
+                  setQuery(e.target.value);
+                  setSelectedIdx(0);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "ArrowDown") {
+                    e.preventDefault();
+                    setSelectedIdx((i) => Math.min(filtered.length - 1, i + 1));
+                  } else if (e.key === "ArrowUp") {
+                    e.preventDefault();
+                    setSelectedIdx((i) => Math.max(0, i - 1));
+                  } else if (e.key === "Enter") {
+                    e.preventDefault();
+                    const pick = filtered[safeIdx];
+                    if (pick) confirm(pick.id);
+                  } else if (e.key === "Escape") {
+                    e.preventDefault();
+                    cancel();
+                  }
+                }}
+              />
+            )}
+          </div>
+        )}
         <div className="ca-picker-list" ref={listRef}>
           {filtered.length === 0 && (
             <div className="ca-picker-empty">无匹配项</div>

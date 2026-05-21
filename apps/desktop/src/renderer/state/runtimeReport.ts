@@ -7,6 +7,7 @@ import type {
   ProfileStandardVariantRef,
   StandardComputeResource
 } from "@tinder/nextstep";
+import { profileResourceBranchId } from "@tinder/nextstep";
 import { CHAIN_CATALOG } from "../help/chain-catalog.generated";
 
 /**
@@ -44,6 +45,7 @@ export interface RuntimeReport {
 export interface RuntimeConfigV2 {
   version: 2;
   ordered_execution_list: RuntimeOrderedItem[];
+  standard_nodes: RuntimeStandardNodeExport[];
   custom_nodes: RuntimeCustomNodeExport[];
 }
 
@@ -61,6 +63,20 @@ export interface RuntimeCustomNodeExport {
   impl_kind: "python_script" | "cpp_dylib";
   location: string;
   action_index: number;
+  enabled: boolean;
+}
+
+export interface RuntimeStandardNodeExport {
+  standard_node_id: string;
+  resource_instance_id: string;
+  branch_id: string;
+  candidate_id: string;
+  display_name: string;
+  module_id: string;
+  impl_kind: "python_script" | "cpp_dylib";
+  location: string;
+  function_name?: string;
+  base_function_name?: string;
   enabled: boolean;
 }
 
@@ -94,6 +110,36 @@ function customNodeFor(
   // CustomNodeUsage stores `node_id` referencing one entry in custom_nodes[].
   // Lookup is by exact match; node_id was assigned by the editor.
   return resource.custom_nodes.find((n) => n.node_id === nodeId) ?? null;
+}
+
+function standardCandidateFor(
+  resource: StandardComputeResource,
+  nodeId: string,
+  candidateId: string
+): StandardComputeResource["compute_nodes"][number] | null {
+  const group = resource.compute_nodes.filter(
+    (candidate) => candidate.node_id === nodeId
+  );
+  return (
+    group.find((candidate, index) => {
+      const ids = [
+        candidate.candidate_id,
+        candidate.node_id,
+        `${nodeId}#${index}`
+      ].filter((id): id is string => Boolean(id));
+      return ids.includes(candidateId);
+    }) ?? null
+  );
+}
+
+function selectedStandardVariant(
+  resource: StandardComputeResource,
+  selectedVariantId: string
+): StandardComputeResource["model_variants"][number] | null {
+  return (
+    resource.model_variants.find((v) => v.variant_id === selectedVariantId) ??
+    null
+  );
 }
 
 /**
@@ -144,7 +190,8 @@ function generatedStatusIssues(
  */
 export function buildRuntimeReport(
   profile: GuiProjectFile,
-  v2Resources: ComputeResourceV2[]
+  v2Resources: ComputeResourceV2[],
+  projectResourcesForGlobalValidation: ComputeResourceV2[] = v2Resources
 ): RuntimeReport {
   const blocking: RuntimeReportItem[] = [];
   const warning: RuntimeReportItem[] = [];
@@ -166,6 +213,26 @@ export function buildRuntimeReport(
     activeCustomRefs.map((r) => r.resource_instance_id)
   );
   const validChainIds = new Set(CHAIN_CATALOG.orderedNodes.map((n) => n.nodeId));
+
+  const actionOwners = new Map<number, string>();
+  for (const resource of projectResourcesForGlobalValidation) {
+    if (resource.resource_kind !== "custom") continue;
+    for (const node of resource.custom_nodes) {
+      if (typeof node.action_index !== "number") continue;
+      const owner = `${resource.resource_instance_id}/${node.node_id}`;
+      const previous = actionOwners.get(node.action_index);
+      if (previous) {
+        blocking.push({
+          id: `duplicate-action-${node.action_index}-${resource.resource_instance_id}-${node.node_id}`,
+          title: `自定义 action_index 重复`,
+          detail: `action_index=${node.action_index} 同时被 ${previous} 和 ${owner} 使用`,
+          locator: `resource:${resource.resource_instance_id}`
+        });
+      } else {
+        actionOwners.set(node.action_index, owner);
+      }
+    }
+  }
 
   // ── Blocking: missing resources in the v2 catalog ──────────────────────
   for (const ref of activeStandardRefs) {
@@ -193,7 +260,12 @@ export function buildRuntimeReport(
   for (const ref of activeStandardRefs) {
     const resource = standardById.get(ref.resource_instance_id);
     if (!resource) continue;
-    validateResourceForExport(resource, blocking, warning, ref.variant_id);
+    validateResourceForExport(
+      resource,
+      blocking,
+      warning,
+      profileResourceBranchId(ref)
+    );
     generatedStatusIssues(resource, blocking, warning);
   }
   for (const ref of activeCustomRefs) {
@@ -313,9 +385,7 @@ function validateResourceForExport(
   }
 
   if (resource.resource_kind === "standard" && selectedVariantId) {
-    const variant = resource.model_variants.find(
-      (v) => v.variant_id === selectedVariantId
-    );
+    const variant = selectedStandardVariant(resource, selectedVariantId);
     if (!variant) {
       blocking.push({
         id: `unknown-variant-${resource.resource_instance_id}-${selectedVariantId}`,
@@ -324,15 +394,36 @@ function validateResourceForExport(
         locator: `resource:${resource.resource_instance_id}`
       });
     } else {
-      const effectiveCount = Object.keys(
+      const effectiveEntries = Object.entries(
         variant.effective_candidates ?? {}
-      ).length;
+      ).filter(([, candidateId]) => candidateId.trim().length > 0);
+      const effectiveCount = effectiveEntries.length;
       if (effectiveCount === 0) {
         warning.push({
           id: `no-effective-${resource.resource_instance_id}-${selectedVariantId}`,
           title: `资源「${resource.display_name}」的变体「${variant.display_name}」未选择任何有效候选`,
           locator: `resource:${resource.resource_instance_id}`
         });
+      }
+      for (const [nodeId, candidateId] of effectiveEntries) {
+        const candidate = standardCandidateFor(resource, nodeId, candidateId);
+        if (!candidate) {
+          blocking.push({
+            id: `missing-effective-candidate-${resource.resource_instance_id}-${selectedVariantId}-${nodeId}`,
+            title: `标准节点引用了不存在的生效候选`,
+            detail: `资源「${resource.display_name}」分支「${variant.display_name}」的 ${nodeId} -> ${candidateId} 不存在`,
+            locator: `resource:${resource.resource_instance_id}`
+          });
+          continue;
+        }
+        if (candidate.status === "disabled") {
+          blocking.push({
+            id: `disabled-effective-candidate-${resource.resource_instance_id}-${selectedVariantId}-${nodeId}`,
+            title: `标准节点选择了已停用候选`,
+            detail: `${nodeId} -> ${candidateId}`,
+            locator: `resource:${resource.resource_instance_id}`
+          });
+        }
       }
     }
   }
@@ -348,6 +439,7 @@ function validateResourceForExport(
  * `blocking.length === 0`. Disabled refs / usages are excluded.
  *
  * Uses v2 resource state to populate per-export fields:
+ * - `standard_nodes[]` ← selected branch/variant effective candidates
  * - `impl_kind` ← `resource.implementation.kind`
  * - `location` ← `resource.implementation.runtime_artifact.path`
  * - `action_index` / `description` ← the matching entry in
@@ -358,7 +450,10 @@ export function buildRuntimeConfig(
   v2Resources: ComputeResourceV2[]
 ): RuntimeConfigV2 {
   const usages = (profile.custom_node_usages ?? []).filter((u) => u.enabled);
-  const { customById } = indexResources(v2Resources);
+  const activeStandardRefs = (profile.resources ?? []).filter(
+    (r): r is ProfileStandardVariantRef => r.kind === "standard" && r.enabled
+  );
+  const { standardById, customById } = indexResources(v2Resources);
 
   // Group usages by insert_before anchor key. The same grouping logic as the
   // sidebar projection so the exported order matches what the user sees.
@@ -400,6 +495,53 @@ export function buildRuntimeConfig(
     });
   }
 
+  const standard_nodes: RuntimeStandardNodeExport[] = [];
+  for (const ref of activeStandardRefs) {
+    const resource = standardById.get(ref.resource_instance_id);
+    if (!resource) continue;
+    const branchId = profileResourceBranchId(ref);
+    const variant = selectedStandardVariant(resource, branchId);
+    if (!variant) continue;
+    for (const [nodeId, candidateId] of Object.entries(
+      variant.effective_candidates ?? {}
+    )) {
+      if (!candidateId.trim()) continue;
+      const candidate = standardCandidateFor(resource, nodeId, candidateId);
+      if (!candidate || candidate.status === "disabled") continue;
+      standard_nodes.push({
+        standard_node_id: nodeId,
+        resource_instance_id: resource.resource_instance_id,
+        branch_id: branchId,
+        candidate_id: candidateId,
+        display_name: candidate.display_name || nodeId,
+        module_id: resource.resource_instance_id,
+        impl_kind: implKindForExport(resource),
+        location: resource.implementation.runtime_artifact.path,
+        ...(candidate.function_name
+          ? { function_name: candidate.function_name }
+          : {}),
+        ...(candidate.base_function_name
+          ? { base_function_name: candidate.base_function_name }
+          : {}),
+        enabled: true
+      });
+    }
+  }
+  const chainOrder = new Map(
+    CHAIN_CATALOG.orderedNodes.map((node) => [node.nodeId, node.order] as const)
+  );
+  standard_nodes.sort((a, b) => {
+    const byOrder =
+      (chainOrder.get(a.standard_node_id) ?? Number.MAX_SAFE_INTEGER) -
+      (chainOrder.get(b.standard_node_id) ?? Number.MAX_SAFE_INTEGER);
+    if (byOrder !== 0) return byOrder;
+    const byResource = a.resource_instance_id.localeCompare(
+      b.resource_instance_id
+    );
+    if (byResource !== 0) return byResource;
+    return a.candidate_id.localeCompare(b.candidate_id);
+  });
+
   const custom_nodes: RuntimeCustomNodeExport[] = usages.map((usage) => {
     const resource = customById.get(usage.resource_instance_id);
     const node = resource ? customNodeFor(resource, usage.node_id) : null;
@@ -422,5 +564,5 @@ export function buildRuntimeConfig(
     };
   });
 
-  return { version: 2, ordered_execution_list, custom_nodes };
+  return { version: 2, ordered_execution_list, standard_nodes, custom_nodes };
 }

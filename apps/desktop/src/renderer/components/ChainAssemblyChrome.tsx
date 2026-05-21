@@ -1,4 +1,4 @@
-import { useCa } from "../state/ChainAssemblyContext";
+import { useCa, useOptionalCa } from "../state/ChainAssemblyContext";
 import { useWorkspace } from "../state/WorkspaceContext";
 
 export function ChainAssemblyHeaderActions() {
@@ -19,8 +19,9 @@ export function ChainAssemblyHeaderActions() {
 }
 
 export function ChainAssemblyPathStatus() {
-  const { dataRoot } = useCa();
+  const ca = useOptionalCa();
   const { activeView } = useWorkspace();
+  const dataRoot = ca?.dataRoot;
   if (activeView !== "chain-assembly" || !dataRoot) return null;
   return (
     <span className="statusbar-item ca-status-path" title={dataRoot}>

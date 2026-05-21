@@ -10,6 +10,8 @@ import {
 } from "react";
 import type {
   BuiltinExecutionAnchor,
+  ComputeResourceBranch,
+  ComputeResourceFamilyFile,
   ComputeResourceImplementation,
   ComputeResourceTemplate,
   ComputeResourceV2,
@@ -27,9 +29,12 @@ import type {
   StandardComputeResource
 } from "@tinder/nextstep";
 import {
+  branchKey,
   DEFAULT_PROFILE_VARIANT_ID,
   createEmptyProject,
+  familyBranchSummary,
   nextCustomActionIndex,
+  profileResourceBranchId,
   profileResourceRefKey
 } from "@tinder/nextstep";
 import { BUILT_IN_RESOURCE_TEMPLATES } from "./builtInResourceTemplates";
@@ -54,6 +59,7 @@ import {
   loadDataRoot,
   loadFromDisk,
   pathExists,
+  profileFolderKey,
   resourcePackageDir,
   saveCollapse,
   saveDataRoot,
@@ -66,6 +72,11 @@ import {
   RESOURCE_SRC_DIR,
   RESOURCE_INCLUDE_DIR,
   RESOURCE_ARTIFACT_DIR,
+  RESOURCE_BRANCHES_DIR,
+  RESOURCE_BRANCH_FILE,
+  LEGACY_BACKUP_DIR,
+  LEGACY_V2_RESOURCE_FILE,
+  RESOURCE_PACKAGE_FILE,
   RESOURCE_TEMPLATES_DIR,
   type CollapseState,
   type DiskState,
@@ -74,6 +85,7 @@ import {
   type LeafNode,
   type ProfileEntry,
   type ProfileExtras,
+  type ResourceFamilyEntry,
   type ProfileResourceItem
 } from "./chainAssemblyStorage";
 import { DialogModal, useDialog } from "../components/ChainAssemblyDialog";
@@ -166,6 +178,53 @@ export interface ChainAssemblyValue {
     item: ProfileResourceItem,
     folder: string
   ) => Promise<void>;
+  /** Switch only the selected branch on a profile resource slot. */
+  setProfileResourceBranch: (
+    profileId: string,
+    kind: "standard" | "custom",
+    resourceInstanceId: string,
+    branchId: string
+  ) => Promise<void>;
+  /**
+   * Set a profile-local effective candidate override for one standard node.
+   * `undefined` clears the override so the branch default applies; `null`
+   * explicitly disables the node for this profile slot.
+   */
+  setProfileStandardEffectiveCandidate: (
+    profileId: string,
+    resourceInstanceId: string,
+    nodeId: string,
+    candidateId: string | null | undefined
+  ) => Promise<void>;
+  /**
+   * Copy the profile slot's current branch into a new branch under the same
+   * compute resource family, then switch that profile slot to the copy.
+   */
+  createProfileBranchFromCurrent: (
+    profileId: string,
+    kind: "standard" | "custom",
+    resourceInstanceId: string
+  ) => Promise<string | null>;
+  /** Persist one branch file and update its family summary. */
+  saveResourceBranch: (
+    kind: "standard" | "custom",
+    resourceInstanceId: string,
+    branch: ComputeResourceBranch
+  ) => Promise<void>;
+  createResourceBranchFromSource: (
+    kind: "standard" | "custom",
+    resourceInstanceId: string,
+    sourceBranchId: string,
+    options?: {
+      mode?: "copy" | "blank";
+      displayName?: string;
+    }
+  ) => Promise<string | null>;
+  deleteResourceBranch: (
+    kind: "standard" | "custom",
+    resourceInstanceId: string,
+    branchId: string
+  ) => Promise<boolean>;
   /** Prompt the user for a target folder, then delegate to setProfileResourceFolder. */
   promptMoveResourceFolder: (
     profileId: string,
@@ -305,7 +364,9 @@ export interface ChainAssemblyValue {
    */
   dialogPickOne: (opts: {
     title: string;
+    message?: string;
     placeholder?: string;
+    searchable?: boolean;
     options: Array<{
       id: string;
       label: string;
@@ -480,6 +541,10 @@ export function useCa(): ChainAssemblyValue {
   return ctx;
 }
 
+export function useOptionalCa(): ChainAssemblyValue | null {
+  return useContext(ChainAssemblyContext);
+}
+
 interface CopyImplementationSummary {
   refs: ImplementationFileRef[];
   suggestedArtifact?: ComputeResourceV2["implementation"]["runtime_artifact"];
@@ -581,8 +646,136 @@ async function copyImplementationFiles(
   return { refs, suggestedArtifact, warnings };
 }
 
+async function copyManagedBranchSources(params: {
+  branch: ComputeResourceBranch;
+  sourceRoot: string;
+  branchDir: string;
+}): Promise<void> {
+  for (const ref of params.branch.implementation.source_files) {
+    if (ref.storage !== "managed") continue;
+    const srcAbs = await join(params.sourceRoot, ref.path);
+    const dstAbs = await join(params.branchDir, ref.path);
+    if (!(await pathExists(srcAbs)) || (await pathExists(dstAbs))) continue;
+    const text = await window.tinder.readText(srcAbs);
+    await window.tinder.writeText(dstAbs, text);
+  }
+}
+
+async function migrateLegacyFamilyToBranchLayout(params: {
+  paths: DiskState["paths"];
+  familyEntry: ResourceFamilyEntry;
+  overrideBranch?: ComputeResourceBranch;
+}): Promise<{
+  familyDir: string;
+  metadataPath: string;
+  branchMetadataPath: string | null;
+}> {
+  const { familyEntry, overrideBranch } = params;
+  const legacy = familyEntry.legacyV2;
+  const isSingleFile = Boolean(legacy?.sourcePath.endsWith(".json"));
+  const familyDir = isSingleFile
+    ? await resourcePackageDir(
+        params.paths,
+        familyEntry.kind,
+        familyEntry.family.resource_instance_id
+      )
+    : familyEntry.familyDir;
+  await ensureDir(familyDir);
+
+  const backupDir = await join(familyDir, LEGACY_BACKUP_DIR);
+  await ensureDir(backupDir);
+  const backupPath = await join(backupDir, LEGACY_V2_RESOURCE_FILE);
+  if (legacy && !(await pathExists(backupPath))) {
+    const legacySourcePath = isSingleFile
+      ? legacy.sourcePath
+      : await join(legacy.sourcePath, RESOURCE_PACKAGE_FILE);
+    const legacyText = await window.tinder.readText(legacySourcePath);
+    await window.tinder.writeText(backupPath, legacyText);
+  }
+
+  const branchesDir = await join(familyDir, RESOURCE_BRANCHES_DIR);
+  await ensureDir(branchesDir);
+  let branchMetadataPath: string | null = null;
+  for (const existing of familyEntry.branches) {
+    const branch =
+      overrideBranch && existing.branch.branch_id === overrideBranch.branch_id
+        ? overrideBranch
+        : existing.branch;
+    const branchDir = await join(branchesDir, branch.branch_id);
+    await ensureDir(branchDir);
+    await copyManagedBranchSources({
+      branch,
+      sourceRoot: isSingleFile ? familyEntry.familyDir : legacy?.sourcePath ?? familyDir,
+      branchDir
+    });
+    const metadataPath = await join(branchDir, RESOURCE_BRANCH_FILE);
+    await window.tinder.writeText(metadataPath, JSON.stringify(branch, null, 2));
+    if (overrideBranch?.branch_id === branch.branch_id) {
+      branchMetadataPath = metadataPath;
+    }
+  }
+
+  const metadataPath = await join(familyDir, RESOURCE_PACKAGE_FILE);
+  const family: ComputeResourceFamilyFile = {
+    ...familyEntry.family,
+    schema_version: 3,
+    branches: familyEntry.family.branches.map((summary) =>
+      overrideBranch && summary.branch_id === overrideBranch.branch_id
+        ? familyBranchSummary(overrideBranch)
+        : summary
+    )
+  };
+  await window.tinder.writeText(metadataPath, JSON.stringify(family, null, 2));
+
+  if (isSingleFile && legacy?.sourcePath !== metadataPath) {
+    try {
+      await window.tinder.trash(legacy!.sourcePath);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn("[branch-editor] failed to remove legacy resource file", err);
+    }
+  }
+
+  return { familyDir, metadataPath, branchMetadataPath };
+}
+
 async function pathExistsLocal(p: string): Promise<boolean> {
   return window.tinder.exists(p);
+}
+
+function normalizeProfileFolderPath(folder?: string | null): string | null {
+  const normalized = (folder ?? "")
+    .split("/")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join("/");
+  return normalized || null;
+}
+
+function preserveProfileFolderExtras(
+  extras: Record<string, ProfileExtras>,
+  profileKey: string,
+  folders: Array<{ enabled: boolean; folder?: string | null }>
+): Record<string, ProfileExtras> {
+  let next = extras;
+  for (const item of folders) {
+    const folderPath = normalizeProfileFolderPath(item.folder);
+    if (!folderPath) continue;
+    const section = item.enabled ? "active" : "disabled";
+    const current = next[profileKey] ?? { extraStandardIds: [] };
+    const profileFolders = current.profileFolders ?? {};
+    const list = profileFolders[section] ?? [];
+    if (list.includes(folderPath)) continue;
+    if (next === extras) next = { ...extras };
+    next[profileKey] = {
+      ...current,
+      profileFolders: {
+        ...profileFolders,
+        [section]: [...list, folderPath]
+      }
+    };
+  }
+  return next;
 }
 
 export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
@@ -915,6 +1108,7 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
 
   const moveResourceToFolder = useCallback(
     async (payload: DragPayload, targetFolderDir: string) => {
+      if (payload.kind === "profile-resource") return;
       const sourcePath = payload.sourcePath;
       if (!sourcePath) {
         await dialog.notify({
@@ -975,14 +1169,93 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
       if (!target) return;
       const folderValue = folder?.trim() || undefined;
       try {
+        if (payload.kind === "profile-resource") {
+          if (payload.profileId !== profileId) {
+            await dialog.notify({
+              title: "无法移动资源",
+              message: "暂不支持跨配置档案拖动资源。"
+            });
+            return;
+          }
+          const refs = target.project.resources ?? [];
+          const matchIdx = refs.findIndex((r) =>
+            payload.item.kind === "standard"
+              ? r.kind === "standard" &&
+                r.resource_instance_id === payload.item.resourceId
+              : r.kind === "custom" &&
+                r.resource_instance_id === payload.item.resourceId
+          );
+          if (matchIdx < 0) return;
+          const current = refs[matchIdx]!;
+          if (
+            current.enabled === enabled &&
+            (current.folder ?? undefined) === folderValue
+          ) {
+            return;
+          }
+          const nextRefs = refs.map((r, i) =>
+            i === matchIdx ? { ...r, enabled, folder: folderValue } : r
+          );
+          const updatedProject: GuiProjectFile = {
+            ...target.project,
+            resources: nextRefs,
+            custom_node_usages: target.project.custom_node_usages ?? []
+          };
+          const nextExtras = preserveProfileFolderExtras(
+            disk.extras,
+            target.extrasKey,
+            [
+              { enabled: current.enabled, folder: current.folder },
+              { enabled, folder: folderValue }
+            ]
+          );
+          if (nextExtras !== disk.extras) {
+            await writeExtras(nextExtras);
+          }
+          await window.tinder.writeText(
+            target.id,
+            JSON.stringify(updatedProject, null, 2)
+          );
+          await reload();
+          setCollapse((prev) => ({
+            ...prev,
+            profileActive: enabled
+              ? { ...prev.profileActive, [profileId]: true }
+              : prev.profileActive,
+            profileDisabled: !enabled
+              ? { ...prev.profileDisabled, [profileId]: true }
+              : prev.profileDisabled,
+            profileFolders: folderValue
+              ? {
+                  ...prev.profileFolders,
+                  [profileFolderKey(
+                    profileId,
+                    enabled ? "active" : "disabled",
+                    folderValue
+                  )]: true
+                }
+              : prev.profileFolders
+          }));
+          return;
+        }
+
         let updatedProject: GuiProjectFile = target.project;
         let newRef: ProfileResourceRef;
 
         if (payload.kind === "standard") {
+          const resourceInstanceId = payload.resource.resource_instance_id;
+          const familyEntry = disk.resourceIndex.familyByKey.get(
+            `standard:${resourceInstanceId}`
+          );
+          const branchId =
+            familyEntry?.family.default_branch_id ??
+            familyEntry?.branches[0]?.branch.branch_id ??
+            DEFAULT_PROFILE_VARIANT_ID;
           newRef = {
             kind: "standard",
-            resource_instance_id: payload.resource.resource_instance_id,
-            variant_id: DEFAULT_PROFILE_VARIANT_ID,
+            resource_instance_id: resourceInstanceId,
+            variant_id: branchId,
+            selected_branch_id: branchId,
             enabled,
             ...(folderValue ? { folder: folderValue } : {})
           };
@@ -1011,6 +1284,7 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
           newRef = {
             kind: "custom",
             resource_instance_id: customNodeId,
+            selected_branch_id: DEFAULT_PROFILE_VARIANT_ID,
             enabled,
             ...(folderValue ? { folder: folderValue } : {})
           };
@@ -1021,6 +1295,7 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
         const existingIdx = currentRefs.findIndex(
           (r) => profileResourceRefKey(r) === key
         );
+        const existingRef = existingIdx >= 0 ? currentRefs[existingIdx] : null;
         const nextRefs =
           existingIdx >= 0
             ? currentRefs.map((r, i) =>
@@ -1040,6 +1315,19 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
           resources: nextRefs,
           custom_node_usages: updatedProject.custom_node_usages ?? []
         };
+        const nextExtras = preserveProfileFolderExtras(
+          disk.extras,
+          target.extrasKey,
+          [
+            ...(existingRef
+              ? [{ enabled: existingRef.enabled, folder: existingRef.folder }]
+              : []),
+            { enabled, folder: folderValue }
+          ]
+        );
+        if (nextExtras !== disk.extras) {
+          await writeExtras(nextExtras);
+        }
 
         await window.tinder.writeText(
           target.id,
@@ -1053,13 +1341,23 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
             : prev.profileActive,
           profileDisabled: !enabled
             ? { ...prev.profileDisabled, [profileId]: true }
-            : prev.profileDisabled
+            : prev.profileDisabled,
+          profileFolders: folderValue
+            ? {
+                ...prev.profileFolders,
+                [profileFolderKey(
+                  profileId,
+                  enabled ? "active" : "disabled",
+                  folderValue
+                )]: true
+              }
+            : prev.profileFolders
         }));
       } catch (err) {
         await dialog.notify({ title: "加入档案失败", message: String(err) });
       }
     },
-    [disk, dialog, reload, setCollapse]
+    [disk, dialog, reload, setCollapse, writeExtras]
   );
 
   const setProfileResourceEnabled = useCallback(
@@ -1074,6 +1372,7 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
           : r.kind === "custom" && r.resource_instance_id === item.resourceId
       );
       if (matchIdx < 0 || refs[matchIdx]!.enabled === enabled) return;
+      const current = refs[matchIdx]!;
       const nextRefs = refs.map((r, i) =>
         i === matchIdx ? { ...r, enabled } : r
       );
@@ -1083,6 +1382,17 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
         custom_node_usages: target.project.custom_node_usages ?? []
       };
       try {
+        const nextExtras = preserveProfileFolderExtras(
+          disk.extras,
+          target.extrasKey,
+          [
+            { enabled: current.enabled, folder: current.folder },
+            { enabled, folder: current.folder }
+          ]
+        );
+        if (nextExtras !== disk.extras) {
+          await writeExtras(nextExtras);
+        }
         await window.tinder.writeText(
           target.id,
           JSON.stringify(updatedProject, null, 2)
@@ -1104,7 +1414,7 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
         });
       }
     },
-    [disk, dialog, reload, setCollapse]
+    [disk, dialog, reload, setCollapse, writeExtras]
   );
 
   const setProfileResourceFolder = useCallback(
@@ -1131,6 +1441,17 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
         custom_node_usages: target.project.custom_node_usages ?? []
       };
       try {
+        const nextExtras = preserveProfileFolderExtras(
+          disk.extras,
+          target.extrasKey,
+          [
+            { enabled: current.enabled, folder: current.folder },
+            { enabled: current.enabled, folder: folderValue }
+          ]
+        );
+        if (nextExtras !== disk.extras) {
+          await writeExtras(nextExtras);
+        }
         await window.tinder.writeText(
           target.id,
           JSON.stringify(updatedProject, null, 2)
@@ -1140,7 +1461,7 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
         await dialog.notify({ title: "移动失败", message: String(err) });
       }
     },
-    [disk, dialog, reload]
+    [disk, dialog, reload, writeExtras]
   );
 
   const promptMoveResourceFolder = useCallback(
@@ -1175,9 +1496,20 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
         // Primary v2 path: drop the matching ref from `resources[]`. Match by
         // (kind, resource_instance_id) so we hit both the active and disabled
         // variants if they ever exist for the same id.
+        const refs = target.project.resources ?? [];
+        const removedRefs = refs.filter((ref) => {
+          if (item.kind === "standard")
+            return (
+              ref.kind === "standard" &&
+              ref.resource_instance_id === item.resourceId
+            );
+          return (
+            ref.kind === "custom" && ref.resource_instance_id === item.resourceId
+          );
+        });
         let updatedProject: GuiProjectFile = {
           ...target.project,
-          resources: (target.project.resources ?? []).filter((ref) => {
+          resources: refs.filter((ref) => {
             if (item.kind === "standard")
               return !(
                 ref.kind === "standard" &&
@@ -1204,6 +1536,14 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
 
         // Legacy v1 cleanup: clear binding fields and the extras entry so a
         // future re-load doesn't migrate the ref back in.
+        let nextExtras = preserveProfileFolderExtras(
+          disk.extras,
+          target.extrasKey,
+          removedRefs.map((ref) => ({
+            enabled: ref.enabled,
+            folder: ref.folder
+          }))
+        );
         if (item.kind === "standard") {
           updatedProject = {
             ...updatedProject,
@@ -1214,12 +1554,12 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
                     return rest;
                   })()
                 : cfg
-            )
+              )
           };
-          const cur = disk.extras[target.extrasKey];
+          const cur = nextExtras[target.extrasKey];
           if (cur?.extraStandardIds.includes(item.resourceId)) {
-            const nextExtras = {
-              ...disk.extras,
+            nextExtras = {
+              ...nextExtras,
               [target.extrasKey]: {
                 ...cur,
                 extraStandardIds: cur.extraStandardIds.filter(
@@ -1227,8 +1567,10 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
                 )
               }
             };
-            await writeExtras(nextExtras);
           }
+        }
+        if (nextExtras !== disk.extras) {
+          await writeExtras(nextExtras);
         }
 
         await window.tinder.writeText(
@@ -1265,6 +1607,678 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
       }
     },
     [dialog, reload]
+  );
+
+  const setProfileResourceBranch = useCallback(
+    async (
+      profileId: string,
+      kind: "standard" | "custom",
+      resourceInstanceId: string,
+      branchId: string
+    ) => {
+      if (!disk) return;
+      const target = disk.profiles.find((p) => p.id === profileId);
+      if (!target) return;
+      const family = disk.resourceIndex.familyByKey.get(
+        `${kind}:${resourceInstanceId}`
+      );
+      const exists = family?.branches.some(
+        (entry) => entry.branch.branch_id === branchId
+      );
+      if (!exists) {
+        await dialog.notify({
+          title: "无法切换分支",
+          message: `计算实例 ${resourceInstanceId} 下不存在分支 ${branchId}。`
+        });
+        return;
+      }
+      const refs = target.project.resources ?? [];
+      const matchIdx = refs.findIndex(
+        (ref) =>
+          ref.kind === kind && ref.resource_instance_id === resourceInstanceId
+      );
+      if (matchIdx < 0) return;
+      const nextRefs = refs.map((ref, idx) => {
+        if (idx !== matchIdx) return ref;
+        if (ref.kind === "standard") {
+          const { overrides: _drop, ...rest } = ref;
+          return { ...rest, selected_branch_id: branchId, variant_id: branchId };
+        }
+        return { ...ref, selected_branch_id: branchId };
+      });
+      await writeProfile(
+        target,
+        {
+          ...target.project,
+          resources: nextRefs,
+          custom_node_usages: target.project.custom_node_usages ?? []
+        },
+        "切换分支失败"
+      );
+    },
+    [disk, dialog, writeProfile]
+  );
+
+  const setProfileStandardEffectiveCandidate = useCallback(
+    async (
+      profileId: string,
+      resourceInstanceId: string,
+      nodeId: string,
+      candidateId: string | null | undefined
+    ) => {
+      if (!disk) return;
+      const target = disk.profiles.find((p) => p.id === profileId);
+      if (!target) return;
+      const refs = target.project.resources ?? [];
+      const matchIdx = refs.findIndex(
+        (ref) =>
+          ref.kind === "standard" &&
+          ref.resource_instance_id === resourceInstanceId
+      );
+      if (matchIdx < 0) return;
+      const current = refs[matchIdx]!;
+      if (current.kind !== "standard") return;
+      const nextEffective = {
+        ...(current.overrides?.effective_candidates ?? {})
+      };
+      if (candidateId === undefined) {
+        delete nextEffective[nodeId];
+      } else {
+        nextEffective[nodeId] = candidateId;
+      }
+      const hasEffective = Object.keys(nextEffective).length > 0;
+      const nextRefs = refs.map((ref, idx) => {
+        if (idx !== matchIdx || ref.kind !== "standard") return ref;
+        if (!hasEffective) {
+          const { overrides: _drop, ...rest } = ref;
+          return rest;
+        }
+        return {
+          ...ref,
+          overrides: {
+            ...(ref.overrides ?? {}),
+            effective_candidates: nextEffective
+          }
+        };
+      });
+      await writeProfile(
+        target,
+        {
+          ...target.project,
+          resources: nextRefs,
+          custom_node_usages: target.project.custom_node_usages ?? []
+        },
+        "更新生效方法失败"
+      );
+    },
+    [disk, writeProfile]
+  );
+
+  const createProfileBranchFromCurrent = useCallback(
+    async (
+      profileId: string,
+      kind: "standard" | "custom",
+      resourceInstanceId: string
+    ): Promise<string | null> => {
+      if (!disk) return null;
+      const target = disk.profiles.find((p) => p.id === profileId);
+      if (!target) return null;
+      const ref = (target.project.resources ?? []).find(
+        (candidate) =>
+          candidate.kind === kind &&
+          candidate.resource_instance_id === resourceInstanceId
+      );
+      if (!ref) return null;
+      const familyEntry = disk.resourceIndex.familyByKey.get(
+        `${kind}:${resourceInstanceId}`
+      );
+      if (!familyEntry) {
+        await dialog.notify({
+          title: "无法创建分支",
+          message: "未找到对应的计算实例家族。"
+        });
+        return null;
+      }
+      const sourceBranchId = profileResourceBranchId(ref);
+      const sourceEntry = disk.resourceIndex.branchByKey.get(
+        branchKey(kind, resourceInstanceId, sourceBranchId)
+      );
+      if (!sourceEntry) {
+        await dialog.notify({
+          title: "无法创建分支",
+          message: `未找到当前分支 ${sourceBranchId}。`
+        });
+        return null;
+      }
+      const newName = await dialog.prompt({
+        title: "创建当前配置档案分支",
+        defaultValue: `${sourceEntry.branch.display_name} 副本`,
+        placeholder: "新分支名称"
+      });
+      if (!newName?.trim()) return null;
+
+      const taken = new Set(
+        familyEntry.branches.map((entry) => entry.branch.branch_id)
+      );
+      const base = slugify(newName.trim());
+      let newBranchId = base;
+      let n = 2;
+      while (taken.has(newBranchId)) {
+        newBranchId = `${base}-${n}`;
+        n += 1;
+      }
+      const now = new Date().toISOString();
+      let branch = JSON.parse(
+        JSON.stringify(sourceEntry.branch)
+      ) as ComputeResourceBranch;
+      branch = {
+        ...branch,
+        branch_id: newBranchId,
+        display_name: newName.trim(),
+        status: "draft",
+        created_from_branch_id: sourceBranchId,
+        created_at: now,
+        updated_at: now
+      };
+      if (
+        branch.resource_kind === "standard" &&
+        ref.kind === "standard" &&
+        ref.overrides?.effective_candidates
+      ) {
+        const effectiveCandidates = { ...branch.effective_candidates };
+        for (const [nodeId, candidateId] of Object.entries(
+          ref.overrides.effective_candidates
+        )) {
+          if (candidateId === null || candidateId === "") {
+            delete effectiveCandidates[nodeId];
+          } else {
+            effectiveCandidates[nodeId] = candidateId;
+          }
+        }
+        branch = { ...branch, effective_candidates: effectiveCandidates };
+      }
+      if (branch.resource_kind === "custom") {
+        const used = collectAllCustomActionIndexes(disk);
+        branch = {
+          ...branch,
+          custom_nodes: branch.custom_nodes.map((node) => {
+            const needsIndex =
+              typeof node.action_index === "number" ||
+              Boolean(node.description?.trim());
+            if (!needsIndex) {
+              const { action_index: _drop, ...rest } = node;
+              return rest;
+            }
+            let idx = 0;
+            while (used.has(idx)) idx += 1;
+            used.add(idx);
+            return { ...node, action_index: idx };
+          })
+        };
+      }
+
+      const migration = familyEntry.legacyV2
+        ? await migrateLegacyFamilyToBranchLayout({
+            paths: disk.paths,
+            familyEntry
+          })
+        : null;
+      const targetFamilyDir = migration?.familyDir ?? familyEntry.familyDir;
+      const targetFamilyMetadataPath =
+        migration?.metadataPath ?? familyEntry.metadataPath;
+      const branchesDir = await join(targetFamilyDir, RESOURCE_BRANCHES_DIR);
+      await ensureDir(branchesDir);
+
+      const newBranchDir = await join(branchesDir, newBranchId);
+      await ensureDir(newBranchDir);
+      const copiedSourceFiles: ImplementationFileRef[] = [];
+      for (const ref of branch.implementation.source_files) {
+        if (ref.storage !== "managed") {
+          copiedSourceFiles.push({ ...ref });
+          continue;
+        }
+        let sourceAbs = await join(sourceEntry.branchDir, ref.path);
+        if (!(await pathExists(sourceAbs))) {
+          sourceAbs = await join(familyEntry.familyDir, ref.path);
+        }
+        if (!(await pathExists(sourceAbs))) {
+          copiedSourceFiles.push({
+            ...ref,
+            generated_region_status: "unknown"
+          });
+          continue;
+        }
+        const text = await window.tinder.readText(sourceAbs);
+        await window.tinder.writeText(await join(newBranchDir, ref.path), text);
+        copiedSourceFiles.push({ ...ref });
+      }
+      branch = {
+        ...branch,
+        implementation: {
+          ...branch.implementation,
+          source_files: copiedSourceFiles,
+          runtime_artifact:
+            branch.implementation.kind === "cpp_library"
+              ? {
+                  ...branch.implementation.runtime_artifact,
+                  path: ""
+                }
+              : branch.implementation.runtime_artifact,
+          status:
+            branch.implementation.kind === "cpp_library"
+              ? { interface_status: "pending" }
+              : branch.implementation.status
+        }
+      };
+      await window.tinder.writeText(
+        await join(newBranchDir, RESOURCE_BRANCH_FILE),
+        JSON.stringify(branch, null, 2)
+      );
+
+      const nextFamily: ComputeResourceFamilyFile = {
+        ...familyEntry.family,
+        schema_version: 3,
+        updated_at: now,
+        branches: [...familyEntry.family.branches, familyBranchSummary(branch)]
+      };
+      await window.tinder.writeText(
+        targetFamilyMetadataPath,
+        JSON.stringify(nextFamily, null, 2)
+      );
+
+      const refs = target.project.resources ?? [];
+      const nextRefs = refs.map((candidate) => {
+        if (
+          candidate.kind !== kind ||
+          candidate.resource_instance_id !== resourceInstanceId
+        ) {
+          return candidate;
+        }
+        if (candidate.kind === "standard") {
+          const { overrides: _drop, ...rest } = candidate;
+          return {
+            ...rest,
+            selected_branch_id: newBranchId,
+            variant_id: newBranchId
+          };
+        }
+        return { ...candidate, selected_branch_id: newBranchId };
+      });
+      await writeProfile(
+        target,
+        {
+          ...target.project,
+          resources: nextRefs,
+          custom_node_usages: target.project.custom_node_usages ?? []
+        },
+        "创建分支失败"
+      );
+      return newBranchId;
+    },
+    [disk, dialog, writeProfile]
+  );
+
+  const saveResourceBranch = useCallback(
+    async (
+      kind: "standard" | "custom",
+      resourceInstanceId: string,
+      branch: ComputeResourceBranch
+    ) => {
+      if (!disk) return;
+      const familyEntry = disk.resourceIndex.familyByKey.get(
+        `${kind}:${resourceInstanceId}`
+      );
+      if (!familyEntry) {
+        throw new Error("未找到对应的计算实例家族。");
+      }
+      const branchEntry = disk.resourceIndex.branchByKey.get(
+        branchKey(kind, resourceInstanceId, branch.branch_id)
+      );
+      if (!branchEntry) {
+        throw new Error("未找到对应的分支文件。");
+      }
+
+      const now = new Date().toISOString();
+      let toWrite: ComputeResourceBranch = {
+        ...branch,
+        schema_version: 3,
+        resource_kind: kind,
+        resource_instance_id: resourceInstanceId,
+        updated_at: now
+      } as ComputeResourceBranch;
+
+      if (toWrite.resource_kind === "custom") {
+        const used = new Set<number>();
+        for (const customFamily of disk.resourceFamilies.custom) {
+          for (const entry of customFamily.branches) {
+            if (
+              customFamily.family.resource_instance_id === resourceInstanceId &&
+              entry.branch.branch_id === toWrite.branch_id
+            ) {
+              continue;
+            }
+            if (entry.branch.resource_kind !== "custom") continue;
+            for (const node of entry.branch.custom_nodes) {
+              if (typeof node.action_index === "number") {
+                used.add(node.action_index);
+              }
+            }
+          }
+        }
+        for (const profile of disk.profiles) {
+          for (const node of profile.project.custom_nodes) {
+            if (typeof node.action_index === "number") {
+              used.add(node.action_index);
+            }
+          }
+        }
+        for (const leaf of flattenLeaves(disk.customTree)) {
+          if (
+            leaf.resource_instance_id === resourceInstanceId ||
+            leaf.custom_node_id === resourceInstanceId
+          ) {
+            continue;
+          }
+          if (typeof leaf.action_index === "number") {
+            used.add(leaf.action_index);
+          }
+        }
+        toWrite = {
+          ...toWrite,
+          custom_nodes: toWrite.custom_nodes.map((node) => {
+            if (typeof node.action_index === "number") {
+              if (used.has(node.action_index)) {
+                let idx = 0;
+                while (used.has(idx)) idx += 1;
+                used.add(idx);
+                return { ...node, action_index: idx };
+              }
+              used.add(node.action_index);
+              return node;
+            }
+            if (!node.description?.trim()) return node;
+            let idx = 0;
+            while (used.has(idx)) idx += 1;
+            used.add(idx);
+            return { ...node, action_index: idx };
+          })
+        };
+      }
+
+      let branchMetadataPath = branchEntry.metadataPath;
+      let familyMetadataPath = familyEntry.metadataPath;
+      if (familyEntry.legacyV2) {
+        const migration = await migrateLegacyFamilyToBranchLayout({
+          paths: disk.paths,
+          familyEntry,
+          overrideBranch: toWrite
+        });
+        branchMetadataPath = migration.branchMetadataPath ?? branchMetadataPath;
+        familyMetadataPath = migration.metadataPath;
+      }
+
+      await window.tinder.writeText(
+        branchMetadataPath,
+        JSON.stringify(toWrite, null, 2)
+      );
+      const nextFamily: ComputeResourceFamilyFile = {
+        ...familyEntry.family,
+        updated_at: now,
+        branches: familyEntry.family.branches.map((summary) =>
+          summary.branch_id === toWrite.branch_id
+            ? familyBranchSummary(toWrite)
+            : summary
+        )
+      };
+      await window.tinder.writeText(
+        familyMetadataPath,
+        JSON.stringify(nextFamily, null, 2)
+      );
+      await reload();
+    },
+    [disk, reload]
+  );
+
+  const createResourceBranchFromSource = useCallback(
+    async (
+      kind: "standard" | "custom",
+      resourceInstanceId: string,
+      sourceBranchId: string,
+      options?: {
+        mode?: "copy" | "blank";
+        displayName?: string;
+      }
+    ): Promise<string | null> => {
+      if (!disk) return null;
+      const familyEntry = disk.resourceIndex.familyByKey.get(
+        `${kind}:${resourceInstanceId}`
+      );
+      const sourceEntry = disk.resourceIndex.branchByKey.get(
+        branchKey(kind, resourceInstanceId, sourceBranchId)
+      );
+      if (!familyEntry || !sourceEntry) return null;
+      const mode = options?.mode ?? "copy";
+      const newName = options?.displayName ?? (await dialog.prompt({
+        title: "复制当前分支",
+        defaultValue: `${sourceEntry.branch.display_name} 副本`,
+        placeholder: "新分支名称"
+      }));
+      if (!newName?.trim()) return null;
+
+      const taken = new Set(
+        familyEntry.branches.map((entry) => entry.branch.branch_id)
+      );
+      const base = slugify(newName.trim());
+      let newBranchId = base;
+      let n = 2;
+      while (taken.has(newBranchId)) {
+        newBranchId = `${base}-${n}`;
+        n += 1;
+      }
+      const now = new Date().toISOString();
+      let branch = JSON.parse(
+        JSON.stringify(sourceEntry.branch)
+      ) as ComputeResourceBranch;
+      branch = {
+        ...branch,
+        branch_id: newBranchId,
+        display_name: newName.trim(),
+        status: "draft",
+        created_from_branch_id: sourceBranchId,
+        created_at: now,
+        updated_at: now
+      };
+      if (mode === "blank") {
+        const implementation = {
+          ...branch.implementation,
+          source_files: [],
+          runtime_artifact: {
+            ...branch.implementation.runtime_artifact,
+            path: ""
+          },
+          status:
+            branch.implementation.kind === "cpp_library"
+              ? { interface_status: "pending" as const }
+              : { generated_region_status: "unknown" as const }
+        };
+        branch =
+          branch.resource_kind === "standard"
+            ? {
+                ...branch,
+                implementation,
+                compute_nodes: [],
+                effective_candidates: {}
+              }
+            : {
+                ...branch,
+                implementation,
+                custom_nodes: []
+              };
+      }
+      if (branch.resource_kind === "custom") {
+        const used = collectAllCustomActionIndexes(disk);
+        branch = {
+          ...branch,
+          custom_nodes: branch.custom_nodes.map((node) => {
+            if (!node.description?.trim() && typeof node.action_index !== "number") {
+              return node;
+            }
+            let idx = 0;
+            while (used.has(idx)) idx += 1;
+            used.add(idx);
+            return { ...node, action_index: idx };
+          })
+        };
+      }
+
+      const migration = familyEntry.legacyV2
+        ? await migrateLegacyFamilyToBranchLayout({
+            paths: disk.paths,
+            familyEntry
+          })
+        : null;
+      const targetFamilyDir = migration?.familyDir ?? familyEntry.familyDir;
+      const targetFamilyMetadataPath =
+        migration?.metadataPath ?? familyEntry.metadataPath;
+      const branchDir = await join(
+        targetFamilyDir,
+        RESOURCE_BRANCHES_DIR,
+        newBranchId
+      );
+      await ensureDir(branchDir);
+
+      if (mode === "copy") {
+        const copiedSourceFiles: ImplementationFileRef[] = [];
+        for (const ref of branch.implementation.source_files) {
+          if (ref.storage !== "managed") {
+            copiedSourceFiles.push({ ...ref });
+            continue;
+          }
+          let sourceAbs = await join(sourceEntry.branchDir, ref.path);
+          if (!(await pathExists(sourceAbs))) {
+            sourceAbs = await join(familyEntry.familyDir, ref.path);
+          }
+          if (!(await pathExists(sourceAbs))) {
+            copiedSourceFiles.push({
+              ...ref,
+              generated_region_status: "unknown"
+            });
+            continue;
+          }
+          const text = await window.tinder.readText(sourceAbs);
+          await window.tinder.writeText(await join(branchDir, ref.path), text);
+          copiedSourceFiles.push({ ...ref });
+        }
+        branch = {
+          ...branch,
+          implementation: {
+            ...branch.implementation,
+            source_files: copiedSourceFiles,
+            runtime_artifact:
+              branch.implementation.kind === "cpp_library"
+                ? { ...branch.implementation.runtime_artifact, path: "" }
+                : branch.implementation.runtime_artifact,
+            status:
+              branch.implementation.kind === "cpp_library"
+                ? { interface_status: "pending" }
+                : branch.implementation.status
+          }
+        };
+      }
+      await window.tinder.writeText(
+        await join(branchDir, RESOURCE_BRANCH_FILE),
+        JSON.stringify(branch, null, 2)
+      );
+      const nextFamily: ComputeResourceFamilyFile = {
+        ...familyEntry.family,
+        updated_at: now,
+        branches: [...familyEntry.family.branches, familyBranchSummary(branch)]
+      };
+      await window.tinder.writeText(
+        targetFamilyMetadataPath,
+        JSON.stringify(nextFamily, null, 2)
+      );
+      await reload();
+      return newBranchId;
+    },
+    [dialog, disk, reload]
+  );
+
+  const deleteResourceBranch = useCallback(
+    async (
+      kind: "standard" | "custom",
+      resourceInstanceId: string,
+      branchId: string
+    ): Promise<boolean> => {
+      if (!disk) return false;
+      const familyEntry = disk.resourceIndex.familyByKey.get(
+        `${kind}:${resourceInstanceId}`
+      );
+      if (!familyEntry) return false;
+      if (familyEntry.branches.length <= 1) {
+        await dialog.notify({
+          title: "无法删除分支",
+          message: "计算实例至少需要保留一个分支。"
+        });
+        return false;
+      }
+      const usages = disk.profiles.flatMap((profile) =>
+        (profile.project.resources ?? []).filter(
+          (ref) =>
+            ref.kind === kind &&
+            ref.resource_instance_id === resourceInstanceId &&
+            profileResourceBranchId(ref) === branchId
+        )
+      );
+      if (usages.length > 0) {
+        await dialog.notify({
+          title: "无法删除分支",
+          message: "该分支仍被配置档案引用，请先切换或移除引用。"
+        });
+        return false;
+      }
+      const ok = await dialog.confirm({
+        title: "删除分支",
+        message: `确认删除分支 ${branchId}？`,
+        okLabel: "删除",
+        destructive: true
+      });
+      if (!ok) return false;
+      const migration = familyEntry.legacyV2
+        ? await migrateLegacyFamilyToBranchLayout({
+            paths: disk.paths,
+            familyEntry
+          })
+        : null;
+      const targetFamilyDir = migration?.familyDir ?? familyEntry.familyDir;
+      const targetFamilyMetadataPath =
+        migration?.metadataPath ?? familyEntry.metadataPath;
+      const branchDir = await join(targetFamilyDir, RESOURCE_BRANCHES_DIR, branchId);
+      try {
+        await window.tinder.trash(branchDir);
+      } catch {
+        /* branch directory may already be gone */
+      }
+      const remaining = familyEntry.family.branches.filter(
+        (summary) => summary.branch_id !== branchId
+      );
+      const nextFamily: ComputeResourceFamilyFile = {
+        ...familyEntry.family,
+        default_branch_id:
+          familyEntry.family.default_branch_id === branchId
+            ? remaining[0]?.branch_id ?? familyEntry.family.default_branch_id
+            : familyEntry.family.default_branch_id,
+        updated_at: new Date().toISOString(),
+        branches: remaining
+      };
+      await window.tinder.writeText(
+        targetFamilyMetadataPath,
+        JSON.stringify(nextFamily, null, 2)
+      );
+      await reload();
+      return true;
+    },
+    [dialog, disk, reload]
   );
 
   const addCustomUsage = useCallback(
@@ -2114,6 +3128,12 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
       removeFromProfile,
       setProfileResourceEnabled,
       setProfileResourceFolder,
+      setProfileResourceBranch,
+      setProfileStandardEffectiveCandidate,
+      createProfileBranchFromCurrent,
+      saveResourceBranch,
+      createResourceBranchFromSource,
+      deleteResourceBranch,
       promptMoveResourceFolder,
       addCustomUsage,
       promptAddCustomUsage,
@@ -2162,6 +3182,12 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
       removeFromProfile,
       setProfileResourceEnabled,
       setProfileResourceFolder,
+      setProfileResourceBranch,
+      setProfileStandardEffectiveCandidate,
+      createProfileBranchFromCurrent,
+      saveResourceBranch,
+      createResourceBranchFromSource,
+      deleteResourceBranch,
       promptMoveResourceFolder,
       addCustomUsage,
       promptAddCustomUsage,

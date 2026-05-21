@@ -9,6 +9,7 @@ import {
 } from "react";
 import type { OpenedFolder } from "../../preload";
 import { CHAIN_CATALOG } from "../help/chain-catalog.generated";
+import { runEditorAction } from "../monaco/registry";
 
 export type EolKind = "lf" | "crlf";
 
@@ -17,7 +18,8 @@ export type DocumentKind =
   | "help-doc"
   | "chain-editor"
   | "profile-lifecycle"
-  | "resource-editor";
+  | "resource-editor"
+  | "resource-branch";
 
 export type ResourceEditorKind = "standard" | "custom";
 
@@ -69,6 +71,10 @@ export interface OpenDocument {
   resourceId?: string;
   /** Standard vs custom for resource-editor tabs. */
   resourceKind?: ResourceEditorKind;
+  /** Branch id for resource-branch tabs. */
+  resourceBranchId?: string;
+  /** Whether a resource-branch tab was opened from profile or global scope. */
+  resourceBranchScope?: "profile" | "global";
   /**
    * Disk location used to reload the resource. v2 packages point at the
    * package directory; legacy single-file resources point at the JSON path.
@@ -168,6 +174,15 @@ interface WorkspaceActions {
     resourceKind: ResourceEditorKind;
     displayName: string;
     sourcePath: string | null;
+  }): void;
+  openResourceBranch(params: {
+    scope: "profile" | "global";
+    profileId?: string;
+    profileDisplayName?: string;
+    resourceId: string;
+    resourceKind: ResourceEditorKind;
+    branchId: string;
+    displayName: string;
   }): void;
   closeFile(uri: string): void;
   closeActiveFile(): void;
@@ -422,12 +437,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       tooltip?: string;
       kind: Extract<
         DocumentKind,
-        "chain-editor" | "profile-lifecycle" | "resource-editor"
+        "chain-editor" | "profile-lifecycle" | "resource-editor" | "resource-branch"
       >;
       profileId?: string;
       profileDisplayName?: string;
       resourceId?: string;
       resourceKind?: ResourceEditorKind;
+      resourceBranchId?: string;
+      resourceBranchScope?: "profile" | "global";
       resourceSourcePath?: string | null;
       preview: boolean;
     }) => {
@@ -455,6 +472,25 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             )
           );
         }
+        if (params.kind === "resource-branch") {
+          setDocuments((prev) =>
+            prev.map((d) =>
+              d.uri === params.uri
+                ? {
+                    ...d,
+                    name: params.name,
+                    tooltip: params.tooltip,
+                    profileId: params.profileId,
+                    profileDisplayName: params.profileDisplayName,
+                    resourceId: params.resourceId,
+                    resourceKind: params.resourceKind,
+                    resourceBranchId: params.resourceBranchId,
+                    resourceBranchScope: params.resourceBranchScope
+                  }
+                : d
+            )
+          );
+        }
         return;
       }
       const doc: OpenDocument = {
@@ -472,6 +508,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         profileDisplayName: params.profileDisplayName,
         resourceId: params.resourceId,
         resourceKind: params.resourceKind,
+        resourceBranchId: params.resourceBranchId,
+        resourceBranchScope: params.resourceBranchScope,
         resourceSourcePath: params.resourceSourcePath
       };
       setDocuments((prev) => {
@@ -538,6 +576,44 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         resourceId: params.resourceId,
         resourceKind: params.resourceKind,
         resourceSourcePath: params.sourcePath,
+        preview: false
+      });
+    },
+    [openSyntheticTab]
+  );
+
+  const openResourceBranch = useCallback(
+    (params: {
+      scope: "profile" | "global";
+      profileId?: string;
+      profileDisplayName?: string;
+      resourceId: string;
+      resourceKind: ResourceEditorKind;
+      branchId: string;
+      displayName: string;
+    }) => {
+      const profilePart =
+        params.scope === "profile" && params.profileId
+          ? `/${encodeURIComponent(params.profileId)}`
+          : "";
+      const uri =
+        params.scope === "profile"
+          ? `resource-branch://profile${profilePart}/${params.resourceKind}/${params.resourceId}`
+          : `resource-branch://global/${params.resourceKind}/${params.resourceId}`;
+      openSyntheticTab({
+        uri,
+        name: params.displayName,
+        tooltip:
+          params.scope === "profile" && params.profileDisplayName
+            ? `${params.profileDisplayName} / ${params.displayName} / ${params.branchId}`
+            : `${params.displayName} / ${params.branchId}`,
+        kind: "resource-branch",
+        profileId: params.profileId,
+        profileDisplayName: params.profileDisplayName,
+        resourceId: params.resourceId,
+        resourceKind: params.resourceKind,
+        resourceBranchId: params.branchId,
+        resourceBranchScope: params.scope,
         preview: false
       });
     },
@@ -659,14 +735,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setSaveStatus((s) => ({ ...s, [uri]: { kind: "saving" } }));
     try {
       // Optional: trigger format-on-save through the registered editor before
-      // we read the latest content. We import lazily to avoid circular deps.
+      // we read the latest content.
       try {
         const formatOnSave = JSON.parse(
           localStorage.getItem("tinder.settings") ?? "{}"
         ).formatOnSave;
         if (formatOnSave) {
-          const reg = await import("../monaco/registry");
-          reg.runEditorAction("editor.action.formatDocument");
+          runEditorAction("editor.action.formatDocument");
           // Allow the formatter's edit to flush into our React state before
           // we serialize. One microtask is enough since onDidChangeModelContent
           // is synchronous from setValue.
@@ -723,6 +798,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       openChainEditor,
       openProfileLifecycle,
       openResourceEditor,
+      openResourceBranch,
       closeFile,
       closeActiveFile,
       cycleTab,
@@ -757,6 +833,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       openChainEditor,
       openProfileLifecycle,
       openResourceEditor,
+      openResourceBranch,
       closeFile,
       closeActiveFile,
       cycleTab,

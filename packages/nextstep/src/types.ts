@@ -138,6 +138,17 @@ export type ProfileResourceRef =
   | ProfileStandardVariantRef
   | ProfileCustomResourceRef;
 
+export type ProfileEffectiveCandidateOverride = string | null;
+
+export interface ProfileStandardSlotOverrides {
+  /**
+   * Profile-local effective candidate overrides keyed by standard `node_id`.
+   * A string selects that candidate for this profile slot only; `null`
+   * explicitly clears a branch default for this profile slot.
+   */
+  effective_candidates?: Record<string, ProfileEffectiveCandidateOverride>;
+}
+
 export interface ProfileStandardVariantRef {
   kind: "standard";
   resource_instance_id: string;
@@ -146,15 +157,27 @@ export interface ProfileStandardVariantRef {
    * standard resources without explicit variants migrate as `"default"`.
    */
   variant_id: string;
+  /**
+   * Branch selected by this profile slot. During the v2 -> branch transition
+   * this mirrors `variant_id`; new branch-aware writers should populate it.
+   */
+  selected_branch_id?: string;
   /** Whether the variant appears under `活跃资源` (true) or `停用资源` (false). */
   enabled: boolean;
   /** Profile-local virtual folder path, e.g. "雷达/主雷达". */
   folder?: string;
+  /** Profile-local usage overrides; does not mutate the compute branch. */
+  overrides?: ProfileStandardSlotOverrides;
 }
 
 export interface ProfileCustomResourceRef {
   kind: "custom";
   resource_instance_id: string;
+  /**
+   * Branch selected by this profile slot. Legacy custom refs omit it and
+   * normalize to `"default"`.
+   */
+  selected_branch_id?: string;
   enabled: boolean;
   folder?: string;
 }
@@ -400,6 +423,89 @@ export interface CustomComputeResource extends ComputeResourceCommonV2 {
 }
 
 export type ComputeResourceV2 = StandardComputeResource | CustomComputeResource;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Compute resource family / branch schema
+//
+// Branch-aware resources promote `计算实例` to a source-of-truth family and
+// store every editable implementation version as a branch under that family.
+// Current v2 packages are compatibility-read as a family plus one or more
+// synthetic branches until explicit migration writes the branch layout.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface ComputeResourceBranchSummary {
+  branch_id: string;
+  display_name: string;
+  status: ComputeResourceStatus;
+  updated_at?: string;
+}
+
+export interface ComputeResourceFamilyFile {
+  schema_version: 3;
+  resource_kind: ComputeResourceKind;
+  resource_instance_id: string;
+  display_name: string;
+  description?: string;
+  tags?: string[];
+  default_branch_id: string;
+  branches: ComputeResourceBranchSummary[];
+  created_at?: string;
+  updated_at?: string;
+}
+
+interface ComputeResourceBranchCommon {
+  schema_version: 3;
+  resource_kind: ComputeResourceKind;
+  resource_instance_id: string;
+  branch_id: string;
+  display_name: string;
+  description?: string;
+  status: ComputeResourceStatus;
+  implementation: ComputeResourceImplementation;
+  notes?: string;
+  created_from_branch_id?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface StandardComputeResourceBranch
+  extends ComputeResourceBranchCommon {
+  resource_kind: "standard";
+  compute_nodes: StandardComputeCandidate[];
+  /** Map from standard `node_id` to the effective candidate id. */
+  effective_candidates: Record<string, string>;
+}
+
+export interface CustomComputeResourceBranch
+  extends ComputeResourceBranchCommon {
+  resource_kind: "custom";
+  custom_nodes: CustomComputeNodeDef[];
+}
+
+export type ComputeResourceBranch =
+  | StandardComputeResourceBranch
+  | CustomComputeResourceBranch;
+
+export type ProfileResourceSlot =
+  | ProfileStandardBranchSlot
+  | ProfileCustomBranchSlot;
+
+export interface ProfileStandardBranchSlot {
+  kind: "standard";
+  resource_instance_id: string;
+  selected_branch_id: string;
+  enabled: boolean;
+  folder?: string;
+  overrides?: ProfileStandardSlotOverrides;
+}
+
+export interface ProfileCustomBranchSlot {
+  kind: "custom";
+  resource_instance_id: string;
+  selected_branch_id: string;
+  enabled: boolean;
+  folder?: string;
+}
 
 /**
  * Project template emitted by `另存为项目模板`. Implementation source files,
