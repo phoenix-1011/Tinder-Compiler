@@ -74,7 +74,8 @@ Within the canvas:
 - a directional flow line (default visible, toggleable) is a sequence of edges connecting consecutive visible nodes (slot or custom) in canonical execution order
 - a coverage filter silently hides uncovered, custom-free slots (no chip)
 - standard resources are not draggable; profile membership and branch are managed via library `pin` (one click = add + select + activate)
-- custom resources drag only onto edges of the flow line
+- custom library is a 3-level tree (family → branch → node); **only the node row is draggable**, dropped onto a flow-line edge to create one `custom_node_usages` entry
+- dragging a node from an unpinned branch auto-pins that branch first (one-step pin + placement)
 - focus has two layers: lens highlight (default) and locked focus (double-click to fold non-neighbors)
 
 ## Relationship To Existing Packages

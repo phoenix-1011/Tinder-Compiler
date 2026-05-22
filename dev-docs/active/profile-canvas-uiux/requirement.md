@@ -67,23 +67,30 @@ All opt-outs other than the primary `← 返回` button display a secondary conf
 
 ```text
 ┌─────────── library ─────────────┬─────────── canvas ─────────────────────┬──── inspector ────┐
-│ 计算实例 / 标准                  │ ← 返回  profile: production v           │ [dock ▶|▼] [×]    │
+│ 计算实例 / 标准  (2 级)          │ ← 返回  profile: production v           │ [dock ▶|▼] [×]    │
 │   ▾ 雷达 Alpha            📍     │ [coverage filter] [流程线] [批量候选]    │ 选中: slot / card  │
 │       production-a 📍 (default)  │ [+ 自定义节点]                          │                    │
 │       production-b               │                                         │ candidate dropdown │
 │       experimental               │ [▼ environment 7/14]                    │ capability tabs    │
-│   ▸ 雷达 Bravo                   │   [slot]══►[⌬custA]══►[slot]══►[slot]   │ usage info         │
+│   ▸ 雷达 Bravo                   │   [slot]══►[⌬脉冲修正]══►[slot]══►[slot]│ usage info         │
 │   ▾ 气象服务              📍     │ [▶ platform 21/40]                      │                    │
 │       default      📍 (default)  │ [▼ signal 9/15]                         │                    │
-│ 计算实例 / 自定义                │   [slot]══►[slot]┄┄►[⌬custB(off)]┄┄►...│                    │
-│   ▸ ...                          │                                         │                    │
+│ 计算实例 / 自定义  (3 级)        │   [slot]══►[slot]┄┄►[⌬增益补偿(off)]┄┄► │                    │
+│   ▾ 雷达辅助计算         📍      │                                         │                    │
+│       ▾ default 📍 (default)     │                                         │                    │
+│           脉冲修正  ⋮⋮  ·2      │                                         │                    │
+│           增益补偿  ⋮⋮  ·1      │                                         │                    │
+│           校准重置  ⋮⋮  ·0      │                                         │                    │
+│       ▸ experimental             │                                         │                    │
+│   ▸ 其他自定义资源               │                                         │                    │
 └──────────────────────────────────┴─────────────────────────────────────────┴────────────────────┘
 
 Legend:
   📍 (filled)  = pinned + active branch    [slot] = chain-node slot with standard coverage cards inside
-  📍 (outline) = pinned + disabled         ⌬     = custom usage node (lives on the flow line)
-                                           ══►   = directional flow line, active segment
-                                           ┄┄►   = dashed grey segment (adjacent to a disabled custom)
+  📍 (outline) = pinned + disabled         ⌬     = custom node usage (lives on the flow line)
+  ⋮⋮          = node-row drag handle       ══►   = directional flow line, active segment
+  ·N           = usage count in current     ┄┄►   = dashed grey segment (adjacent to a disabled custom)
+                 profile (·0 = 未放置)
 
 Inspector docked at bottom (alternative layout):
 
@@ -99,13 +106,30 @@ Inspector docked at bottom (alternative layout):
 
 ### Library Tree (canvas mode)
 
-- top level: `计算实例 / 标准`, `计算实例 / 自定义`
+The library has asymmetric depth for standard vs custom, matching the underlying data-model asymmetry (standard auto-covers; custom is user-placed).
+
+**Standard tree (2 levels):**
+
+- top level: `计算实例 / 标准`
 - second level: resource family (e.g. `雷达 Alpha`)
 - third level: branches under each family, with the `default_branch_id` flagged `(default)`
-- each branch row shows a usage chip indicating how many profiles reference it (early shared-branch heads-up)
-- standard resources are **not draggable**; adjustments go through pin (C25) + canvas right-click + inspector candidate selection (C24)
-- custom resources are draggable, but only onto edges of the directional flow line (C22 / C23)
-- right-click on family / branch reuses the existing operations (new branch, copy, rename, delete-if-unused)
+- standard resources are **not draggable** at any level — adjustments go through pin (C25) + canvas right-click + inspector candidate selection (C24)
+
+**Custom tree (3 levels, per C26):**
+
+- top level: `计算实例 / 自定义`
+- second level: resource family (e.g. `雷达辅助计算`)
+- third level: branches under each family, with the `default_branch_id` flagged `(default)`
+- **fourth level: custom nodes** under each branch (e.g. `脉冲修正`, `增益补偿`); these are the **only draggable items** in the library
+- node rows display:
+  - `⋮⋮` drag handle on the left
+  - node display name
+  - `·N` usage count in the currently selected profile; `·0` rendered muted to indicate "未放置"
+- clicking `·N` highlights all matching custom usages on the canvas
+
+Each branch row across both trees shows a usage chip indicating how many profiles reference it (early shared-branch heads-up).
+
+Right-click on family / branch / node reuses the existing operations where applicable (new branch, copy, rename, delete-if-unused).
 
 #### Pin Metaphor (C25)
 
@@ -195,12 +219,13 @@ Two coexisting layers, applied to selection:
 
 ### Drag-and-Drop Semantics
 
-Only custom resources participate in canvas drag. Standard resources have **no** drag interactions on the canvas (see C8, C24).
+Only **custom nodes** (the fourth-level rows in the custom library tree, per C26) participate in canvas drag. Standard resources, custom families, and custom branches have **no** drag interactions on the canvas (see C8, C24, C26).
 
 | Source | Drop target | Effect |
 | --- | --- | --- |
-| Library: custom resource | Edge between two visible nodes (slot or custom) | Inserts a new custom usage node into that edge position (`anchorChainId` set to the bordering slot, `arrayIndex` slotted into the interval's order). The same custom resource may have multiple usages with different positions. |
-| Canvas custom node | Different edge | Moves the custom node into the new edge position (updates `anchorChainId` and `arrayIndex`). |
+| Library: custom **node** | Edge between two visible nodes (slot or custom) | Inserts a new `custom_node_usages` entry at that edge position (`anchorChainId` set to the bordering slot, `arrayIndex` slotted into the interval's order). The same library node may be dropped multiple times — each drop creates an independent usage. |
+| Library: custom node from an **unpinned** branch | Edge between two visible nodes | First **auto-pins** the source branch (`profile.resources` gains the family slot with `selected_branch_id = source branch`, `enabled = true`), then inserts the usage. One-step pin + placement. |
+| Canvas custom node | Different edge | Moves the custom node into the new edge position (updates `anchorChainId` and `arrayIndex` on the same `custom_node_usages` entry). |
 | Canvas custom node | Adjacent edge in the same interval | Reorders within the interval (drives `shiftCustomUsage`). |
 | Canvas card | Trash zone / outside canvas | Deferred past MVP; removal is via right-click. |
 
@@ -300,8 +325,9 @@ Every edit available in list view + `ResourceBranchView` must have a correspondi
 | Runtime artifact path | inspector |
 | Source code (`src/*.*`) | C21 jump-out |
 | Shared branch edits | C13 bubble (`创建当前档案分支` or jump-out) |
-| Add resource to profile | library pin (C25) |
-| Remove resource from profile | library unpin (C25), or right-click coverage card `从档案中移除` |
+| Add resource to profile | library pin (C25), or auto-pin via custom node drag (C26) |
+| Remove resource from profile | library unpin (C25; for custom, cascades to remove placements per C26), or right-click coverage card `从档案中移除` |
+| Place / remove a specific custom node usage | drag library node → flow-line edge; right-click canvas custom card → `移出链路` (C22 / C26) |
 | Activate / deactivate resource | right-click on coverage card, or library pin context menu (C24b) |
 | Move resource folder | inspector or right-click menu |
 | Delete unused branch / family | library right-click |
@@ -366,9 +392,47 @@ These are deliberate defaults chosen during Phase 0 to avoid stalling Phase 1. T
 ### Pin Behavior
 
 - **Pinning a disabled-status branch** is allowed. `status: "disabled"` on a branch is informational, not a hard constraint. The library row shows a `状态: 已停用` chip; pinning does not change branch status.
-- **Pinning when the family is already in profile with another branch**: the pin is transferred (B8 radio). `enabled` is preserved.
+- **Pinning when the family is already in profile with another branch**: the pin is transferred (B8 radio). `enabled` is preserved. For custom families this triggers the **branch transfer soft-orphan flow** — see below.
 - **Pinning when the family is in profile but `enabled = false`**: pin re-enables the family (`enabled = true`) and switches branch. The "pin = active" intent wins.
-- **Unpin** removes the family slot entirely from `profile.resources`. To temporarily disable without removing, use the canvas right-click `停用` (which sets `enabled = false` while preserving the pin).
+- **Unpin a standard family**: removes the family slot from `profile.resources`. No further side effects.
+- **Unpin a custom family**: removes the family slot from `profile.resources` **and cascades to remove all `custom_node_usages` whose `resource_instance_id` matches the unpinned family**. A confirm dialog appears beforehand, listing the affected placements:
+
+  ```text
+  Unpin 雷达辅助计算 将同时删除以下 3 个节点放置：
+    · 脉冲修正  @ 平台.对准 之后
+    · 脉冲修正  @ 平台.脉冲 之后
+    · 增益补偿  @ 信号.滤波 之后
+  [继续 Unpin]   [取消]
+  ```
+
+- To temporarily disable a family without removing it, use the canvas right-click `停用` on a coverage card (standard) or custom usage card (custom), which sets `enabled = false` while preserving the pin.
+
+### Auto-Pin On First Custom Node Drag (C26)
+
+- Dragging a custom node from an **unpinned** branch onto the canvas auto-pins the source branch first, then creates the `custom_node_usages` entry.
+- No confirmation; the action is reversible (unpin will surface the cascade confirm if usages exist).
+- If the source branch's family already has a different branch pinned in this profile, the auto-pin triggers a **branch transfer** (B8 radio) — which in turn runs the soft-orphan flow below before committing.
+
+### Custom Branch Transfer (Soft-Orphan Flow, C26)
+
+When a same-family pin transfers from branch `Bold` to branch `Bnew`:
+
+- Usages whose `node_id` exists in `Bnew.custom_nodes[]` are preserved as-is.
+- Usages whose `node_id` does **not** exist in `Bnew` become **orphan usages**.
+- Before committing the transfer, a confirm dialog lists the soon-to-be orphans:
+
+  ```text
+  切换分支 雷达辅助计算: default → experimental
+  以下放置在 experimental 中找不到对应节点，将被标记为孤立：
+    · 增益补偿  @ 信号.滤波 之后   (experimental 没有 node_id "增益补偿")
+  [继续切换]   [取消]
+  ```
+
+- After commit:
+  - non-orphan usages continue to render normally
+  - orphan usages render on the canvas with red border + `⚠ 在分支 experimental 中不存在` chip
+  - inspector for an orphan usage shows two CTAs: `删除此 usage` and `将分支切回 default`
+- Orphan usages are not silently removed because they may represent intentional state the user wants to preserve while iterating.
 
 ### Locked Focus Geometry
 
