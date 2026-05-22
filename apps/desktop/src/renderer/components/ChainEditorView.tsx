@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import type { ChainContractRow, ChainNodeEntry } from "@tinder/nextstep";
+import { branchKey } from "@tinder/nextstep";
 import { ContextMenu, useContextMenu, type ContextMenuItem } from "./ContextMenu";
 import { useCa } from "../state/ChainAssemblyContext";
 import { useWorkspace } from "../state/WorkspaceContext";
@@ -36,9 +37,14 @@ interface ChainEditorViewProps {
   tabUri: string;
 }
 
+type ChainEditorMode = "full" | "execution";
+
+const chainEditorModeByUri = new Map<string, ChainEditorMode>();
+const CUSTOM_GROUP_FILTER = "__custom__";
+
 export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
   const ca = useCa();
-  const { openHelpDoc, closeFile } = useWorkspace();
+  const { openHelpDoc, openResourceBranch, closeFile } = useWorkspace();
   const cm = useContextMenu();
   const [reportState, setReportState] = useState<{
     report: RuntimeReport;
@@ -48,6 +54,7 @@ export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
     nodeId: string;
     kind: ChainNodeInfoKind;
   } | null>(null);
+  const [methodInfo, setMethodInfo] = useState<MethodInfoState | null>(null);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
   /**
    * Two distinct views:
@@ -60,7 +67,9 @@ export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
    *   two rows; one with no coverage gets none. There's no `缺失`
    *   concept by construction.
    */
-  const [chainMode, setChainMode] = useState<"full" | "execution">("full");
+  const [chainMode, setChainMode] = useState<ChainEditorMode>(
+    () => chainEditorModeByUri.get(tabUri) ?? "execution"
+  );
   /**
    * Optional chain-doc group filter. `all` shows everything; otherwise
    * the value is a chain doc slug (e.g. `10-platform-chain`) and only
@@ -113,15 +122,28 @@ export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
   );
 
   const visibleFull = useMemo(() => {
+    if (groupFilter === CUSTOM_GROUP_FILTER) {
+      return fullProjection.filter((row) => row.kind === "custom");
+    }
+    const visibleChainIds = new Set<string>();
+    for (const row of fullProjection) {
+      if (row.kind !== "chain-node") continue;
+      if (groupFilter !== "all" && row.docSlug !== groupFilter) continue;
+      visibleChainIds.add(row.nodeId);
+    }
     return fullProjection.filter((row) => {
       if (row.kind === "chain-node") {
         return groupFilter === "all" || row.docSlug === groupFilter;
       }
-      return false;
+      if (groupFilter === "all") return true;
+      return row.anchorChainId ? visibleChainIds.has(row.anchorChainId) : false;
     });
   }, [fullProjection, groupFilter]);
 
   const visibleExecution = useMemo(() => {
+    if (groupFilter === CUSTOM_GROUP_FILTER) {
+      return executionProjection.filter((row) => row.kind === "custom");
+    }
     const visibleChainIds = new Set<string>();
     for (const row of executionProjection) {
       if (row.kind !== "exec-standard") continue;
@@ -139,6 +161,8 @@ export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
       return true;
     });
   }, [executionProjection, groupFilter]);
+  const [draggedCustomIndex, setDraggedCustomIndex] = useState<number | null>(null);
+  const [fullDropTarget, setFullDropTarget] = useState<FullDropTarget | null>(null);
 
   if (!profile) {
     return (
@@ -193,6 +217,42 @@ export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
     ];
     cm.open(e, items);
   };
+  const fullDragEnabled = chainMode === "full" && groupFilter === "all";
+  const finishFullDrop = (target: FullDropTarget): void => {
+    if (draggedCustomIndex === null) return;
+    if (target.kind === "custom" && target.arrayIndex === draggedCustomIndex) {
+      setDraggedCustomIndex(null);
+      setFullDropTarget(null);
+      return;
+    }
+    const next =
+      target.kind === "custom"
+        ? { anchorChainId: null, beforeCustomArrayIndex: target.arrayIndex }
+        : { anchorChainId: target.kind === "chain" ? target.chainId : null };
+    void ca.moveCustomUsage(profile.id, draggedCustomIndex, next);
+    setDraggedCustomIndex(null);
+    setFullDropTarget(null);
+  };
+  const fullDrag: FullDragConfig = {
+    enabled: fullDragEnabled,
+    draggedCustomIndex,
+    dropTarget: fullDropTarget,
+    onDragStart: (arrayIndex) => {
+      setDraggedCustomIndex(arrayIndex);
+      setFullDropTarget(null);
+    },
+    onDragOver: (target, e) => {
+      if (!fullDragEnabled || draggedCustomIndex === null) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      setFullDropTarget(target);
+    },
+    onDrop: finishFullDrop,
+    onDragEnd: () => {
+      setDraggedCustomIndex(null);
+      setFullDropTarget(null);
+    }
+  };
 
   /**
    * Default runtime export path: sibling of the profile JSON with a
@@ -238,13 +298,58 @@ export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
     setReportState(null);
   };
 
+  const setPersistedChainMode = (next: ChainEditorMode) => {
+    chainEditorModeByUri.set(tabUri, next);
+    setChainMode(next);
+  };
+
+  const openMethodCode = async (
+    row: Extract<ExecutionRow, { kind: "exec-standard" }>
+  ) => {
+    const base = {
+      kind: "code" as const,
+      title: row.activeCandidateDisplayName,
+      functionName: row.activeCandidateFunctionName,
+      resourceId: row.resourceId,
+      branchId: row.variantId
+    };
+    setMethodInfo(base);
+    const result = await loadMethodSource({
+      disk: ca.disk,
+      resourceId: row.resourceId,
+      branchId: row.variantId,
+      functionName: row.activeCandidateFunctionName
+    });
+    setMethodInfo({ ...base, ...result });
+  };
+
+  const openCustomMethodCode = async (
+    row: Extract<ExecutionRow, { kind: "custom" }>
+  ) => {
+    const branchId = row.branchId ?? "default";
+    const base = {
+      kind: "code" as const,
+      title: row.displayName,
+      functionName: row.handlerFunction,
+      resourceId: row.usage.resource_instance_id,
+      branchId
+    };
+    setMethodInfo(base);
+    const result = await loadCustomMethodSource({
+      disk: ca.disk,
+      resourceId: row.usage.resource_instance_id,
+      branchId
+    });
+    setMethodInfo({ ...base, ...result });
+  };
+
   return (
     <div className="chain-editor" title={profile.id}>
       <div className="chain-editor-toolbar">
         <select
           className="chain-editor-mode-select"
           value={chainMode}
-          onChange={(e) => setChainMode(e.target.value as "full" | "execution")}
+          onChange={(e) => setPersistedChainMode(e.target.value as ChainEditorMode)}
           title="切换视图"
           aria-label="视图模式"
         >
@@ -259,6 +364,7 @@ export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
           aria-label="按分类筛选"
         >
           <option value="all">全部分类</option>
+          <option value={CUSTOM_GROUP_FILTER}>自定义</option>
           {CHAIN_CATALOG.groups.map((g) => (
             <option key={g.docSlug} value={g.docSlug}>
               {g.title}
@@ -293,18 +399,18 @@ export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
           {chainMode === "full" ? (
             <>
               <span>#</span>
-              <span>节点</span>
-              <span>类型</span>
-              <span>分类</span>
+              <span>链路节点</span>
+              <span>节点类型</span>
+              <span>计算节点数量</span>
               <span>信息</span>
             </>
           ) : (
             <>
               <span>#</span>
+              <span>计算方法</span>
+              <span>所属资源</span>
               <span>链路节点</span>
-              <span>计算实例</span>
-              <span>类型</span>
-              <span>分类</span>
+              <span>节点类型</span>
               <span>信息</span>
             </>
           )}
@@ -316,7 +422,7 @@ export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
             </div>
           ) : (
             visibleFull.map((row, idx) =>
-              renderFullRow(row, idx, setNodeInfo, openHelpDoc, customMenu)
+              renderFullRow(row, idx, setNodeInfo, openHelpDoc, customMenu, fullDrag)
             )
           )
         ) : visibleExecution.length === 0 ? (
@@ -325,8 +431,45 @@ export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
           </div>
         ) : (
           visibleExecution.map((row, idx) =>
-            renderExecutionRow(row, idx, setNodeInfo, openHelpDoc, customMenu)
+            renderExecutionRow(
+              row,
+              idx,
+              setNodeInfo,
+              setMethodInfo,
+              openMethodCode,
+              openCustomMethodCode,
+              openHelpDoc,
+              (candidate) =>
+                void ca.setProfileStandardEffectiveCandidate(
+                  profile.id,
+                  candidate.resourceId,
+                  candidate.nodeId,
+                  candidate.candidateId
+                ),
+              (resource) =>
+                openResourceBranch({
+                  scope: "profile",
+                  profileId: profile.id,
+                  profileDisplayName: profile.name,
+                  resourceId: resource.resourceId,
+                  resourceKind: resource.resourceKind,
+                  branchId: resource.branchId,
+                  displayName: resource.displayName
+                }),
+              customMenu
+            )
           )
+        )}
+        {chainMode === "full" && fullDragEnabled && draggedCustomIndex !== null && (
+          <div
+            className={`chain-editor-tail-drop${
+              fullDropTarget?.kind === "tail" ? " is-over" : ""
+            }`}
+            onDragOver={(e) => fullDrag.onDragOver({ kind: "tail" }, e)}
+            onDrop={() => fullDrag.onDrop({ kind: "tail" })}
+          >
+            移到链路末尾
+          </div>
         )}
       </div>
 
@@ -349,6 +492,9 @@ export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
           onClose={() => setNodeInfo(null)}
         />
       )}
+      {methodInfo && (
+        <MethodInfoModal info={methodInfo} onClose={() => setMethodInfo(null)} />
+      )}
     </div>
   );
 }
@@ -358,9 +504,66 @@ type CustomMenuOpener = (
   row: ChainProjectionRow & { kind: "custom" }
 ) => void;
 
+type FullDropTarget =
+  | { kind: "chain"; chainId: string }
+  | { kind: "custom"; arrayIndex: number }
+  | { kind: "tail" };
+
+type FullDragConfig = {
+  enabled: boolean;
+  draggedCustomIndex: number | null;
+  dropTarget: FullDropTarget | null;
+  onDragStart: (arrayIndex: number) => void;
+  onDragOver: (target: FullDropTarget, e: React.DragEvent<HTMLElement>) => void;
+  onDrop: (target: FullDropTarget) => void;
+  onDragEnd: () => void;
+};
+
 type ChainNodeInfoKind = "summary" | "responsibility" | "io";
 
 type NodeInfoOpener = (next: { nodeId: string; kind: ChainNodeInfoKind }) => void;
+
+type MethodInfoState =
+  | {
+      kind: "notes";
+      title: string;
+      body?: string;
+    }
+  | {
+      kind: "code";
+      title: string;
+      functionName?: string;
+      resourceId: string;
+      branchId: string;
+      filePath?: string;
+      language?: string;
+      source?: string;
+      startLine?: number;
+      error?: string;
+    };
+
+type MethodInfoOpener = (next: MethodInfoState) => void;
+
+type MethodCodeOpener = (
+  row: Extract<ExecutionRow, { kind: "exec-standard" }>
+) => void;
+
+type CustomMethodCodeOpener = (
+  row: Extract<ExecutionRow, { kind: "custom" }>
+) => void;
+
+type EffectiveCandidateSetter = (next: {
+  resourceId: string;
+  nodeId: string;
+  candidateId: string;
+}) => void;
+
+type ActiveResourceOpener = (resource: {
+  resourceId: string;
+  resourceKind: "standard" | "custom";
+  branchId: string;
+  displayName: string;
+}) => void;
 
 /**
  * `完整链路节点` row layout. Columns: order/doc · 名称 · 类型 · 分类 · 状态.
@@ -370,13 +573,33 @@ function renderFullRow(
   idx: number,
   openNodeInfo: NodeInfoOpener,
   openHelpDoc: (nodeId: string) => void,
-  customMenu: CustomMenuOpener
+  customMenu: CustomMenuOpener,
+  drag: FullDragConfig
 ) {
   if (row.kind === "custom") {
+    const isDragging = drag.draggedCustomIndex === row.arrayIndex;
+    const isDropTarget =
+      drag.dropTarget?.kind === "custom" &&
+      drag.dropTarget.arrayIndex === row.arrayIndex &&
+      !isDragging;
     return (
       <div
         key={`custom-${idx}-${row.arrayIndex}`}
-        className={`chain-editor-row is-custom${row.usage.enabled ? "" : " is-disabled"}`}
+        className={`chain-editor-row is-custom${row.usage.enabled ? "" : " is-disabled"}${
+          isDragging ? " is-dragging" : ""
+        }${isDropTarget ? " is-drop-target" : ""}`}
+        draggable={drag.enabled}
+        onDragStart={(e) => {
+          if (!drag.enabled) return;
+          e.dataTransfer.effectAllowed = "move";
+          e.dataTransfer.setData("text/plain", String(row.arrayIndex));
+          drag.onDragStart(row.arrayIndex);
+        }}
+        onDragOver={(e) =>
+          drag.onDragOver({ kind: "custom", arrayIndex: row.arrayIndex }, e)
+        }
+        onDrop={() => drag.onDrop({ kind: "custom", arrayIndex: row.arrayIndex })}
+        onDragEnd={drag.onDragEnd}
         onContextMenu={(e) => customMenu(e, row)}
         title={
           row.usage.enabled
@@ -384,10 +607,19 @@ function renderFullRow(
             : `${row.usage.resource_instance_id}/${row.usage.node_id} · 停用`
         }
       >
-        <span className="chain-editor-row-marker">⌬</span>
+        <div className="chain-editor-row-order-cell">
+          <span
+            className="chain-editor-row-drag-handle"
+            title={drag.enabled ? "拖动调整调用时机" : undefined}
+          >
+            ⋮⋮
+          </span>
+        </div>
         <span className="chain-editor-row-label">{row.displayName}</span>
+        <span className="chain-editor-row-label" title={row.anchorChainId ?? undefined}>
+          自定义节点
+        </span>
         <span className="chain-editor-row-type is-custom">自定义</span>
-        <span className="chain-editor-row-category is-custom">自定义</span>
         <span className="chain-editor-row-info-actions" />
       </div>
     );
@@ -395,7 +627,13 @@ function renderFullRow(
   return (
     <div
       key={`chain-${row.nodeId}`}
-      className={`chain-editor-row is-chain is-${row.coverage.status}`}
+      className={`chain-editor-row is-chain is-${row.coverage.status}${
+        drag.dropTarget?.kind === "chain" && drag.dropTarget.chainId === row.nodeId
+          ? " is-drop-target"
+          : ""
+      }`}
+      onDragOver={(e) => drag.onDragOver({ kind: "chain", chainId: row.nodeId }, e)}
+      onDrop={() => drag.onDrop({ kind: "chain", chainId: row.nodeId })}
       title={
         row.coverage.status === "multi"
           ? `${row.nodeId} · 多实现 ×${row.coverage.count}`
@@ -417,10 +655,10 @@ function renderFullRow(
         </button>
       </div>
       <span className="chain-editor-row-label">{row.displayName}</span>
-      <span className="chain-editor-row-type">标准</span>
-      <span className="chain-editor-row-category" title={row.docSlug}>
+      <span className="chain-editor-row-type" title={row.docSlug}>
         {row.docTitle}
       </span>
+      <span className="chain-editor-row-count">{row.coverage.count}</span>
       {renderNodeInfoButtons(row.nodeId, openNodeInfo)}
     </div>
   );
@@ -436,10 +674,17 @@ function renderExecutionRow(
   row: ExecutionRow,
   idx: number,
   openNodeInfo: NodeInfoOpener,
+  openMethodInfo: MethodInfoOpener,
+  openMethodCode: MethodCodeOpener,
+  openCustomMethodCode: CustomMethodCodeOpener,
   openHelpDoc: (nodeId: string) => void,
+  setEffectiveCandidate: EffectiveCandidateSetter,
+  openActiveResource: ActiveResourceOpener,
   customMenu: CustomMenuOpener
 ) {
+  const executionOrder = idx + 1;
   if (row.kind === "custom") {
+    const branchId = row.branchId ?? "default";
     return (
       <div
         key={`exec-custom-${idx}-${row.arrayIndex}`}
@@ -447,14 +692,23 @@ function renderExecutionRow(
         onContextMenu={(e) => customMenu(e, row)}
         title={`${row.usage.resource_instance_id}/${row.usage.node_id}`}
       >
-        <span className="chain-editor-row-marker">⌬</span>
+        <div className="chain-editor-row-order-cell">
+          <span className="chain-editor-row-order">{executionOrder}</span>
+        </div>
         <span className="chain-editor-row-label">{row.displayName}</span>
-        <span className="chain-editor-row-resource">
-          {row.usage.resource_instance_id}
+        {renderActiveResourceButton({
+          resourceId: row.usage.resource_instance_id,
+          resourceKind: "custom",
+          branchId,
+          resourceDisplayName: row.resourceDisplayName ?? row.usage.resource_instance_id,
+          branchDisplayName: row.branchDisplayName ?? branchId,
+          openActiveResource
+        })}
+        <span className="chain-editor-row-label" title={row.anchorChainId ?? undefined}>
+          自定义节点
         </span>
         <span className="chain-editor-row-type is-custom">自定义</span>
-        <span className="chain-editor-row-category is-custom">自定义</span>
-        <span className="chain-editor-row-info-actions" />
+        {renderCustomExecutionInfoButtons(row, openMethodInfo, openCustomMethodCode)}
       </div>
     );
   }
@@ -465,32 +719,175 @@ function renderExecutionRow(
       title={row.chainNodeId}
     >
       <div className="chain-editor-row-order-cell">
-        <span className="chain-editor-row-order">{row.order}</span>
-        <button
-          type="button"
-          className="chain-editor-row-doc"
-          title="在新建标签页中查看链路文档"
-          onClick={(e) => {
-            e.stopPropagation();
-            openHelpDoc(row.chainNodeId);
-          }}
-        >
-          查看文档
-        </button>
+        <span className="chain-editor-row-order">{executionOrder}</span>
       </div>
-      <span className="chain-editor-row-label">{row.chainDisplayName}</span>
-      <span
-        className="chain-editor-row-resource"
-        title={`${row.resourceId} · ${row.variantId}`}
-      >
-        {row.resourceDisplayName}
+      {renderEffectiveMethodControl(row, setEffectiveCandidate)}
+      {renderActiveResourceButton({
+        resourceId: row.resourceId,
+        resourceKind: "standard",
+        branchId: row.variantId,
+        resourceDisplayName: row.resourceDisplayName,
+        branchDisplayName: row.branchDisplayName,
+        openActiveResource
+      })}
+      <span className="chain-editor-row-label" title={row.chainNodeId}>
+        {row.chainDisplayName}
       </span>
-      <span className="chain-editor-row-type">标准</span>
-      <span className="chain-editor-row-category" title={row.docSlug}>
+      <span className="chain-editor-row-type" title={row.docSlug}>
         {row.docTitle}
       </span>
-      {renderNodeInfoButtons(row.chainNodeId, openNodeInfo)}
+      {renderExecutionInfoButtons(row, openMethodInfo, openMethodCode, openNodeInfo)}
     </div>
+  );
+}
+
+function renderEffectiveMethodControl(
+  row: Extract<ExecutionRow, { kind: "exec-standard" }>,
+  setEffectiveCandidate: EffectiveCandidateSetter
+) {
+  if (row.candidates.length <= 1) {
+    return (
+      <span className="chain-editor-row-method" title={row.activeCandidateId}>
+        {row.activeCandidateDisplayName}
+      </span>
+    );
+  }
+  return (
+    <select
+      className="chain-editor-row-method-select"
+      value={row.activeCandidateId}
+      title={row.activeCandidateFunctionName ?? row.activeCandidateId}
+      onChange={(e) =>
+        setEffectiveCandidate({
+          resourceId: row.resourceId,
+          nodeId: row.chainNodeId,
+          candidateId: e.target.value
+        })
+      }
+    >
+      {row.candidates.map((candidate) => (
+        <option key={candidate.candidateId} value={candidate.candidateId}>
+          {candidate.displayName}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function renderExecutionInfoButtons(
+  row: Extract<ExecutionRow, { kind: "exec-standard" }>,
+  openMethodInfo: MethodInfoOpener,
+  openMethodCode: MethodCodeOpener,
+  openNodeInfo: NodeInfoOpener
+) {
+  return (
+    <span className="chain-editor-row-info-actions">
+      <button
+        type="button"
+        className="chain-editor-row-info-btn"
+        onClick={(e) => {
+          e.stopPropagation();
+          openMethodInfo({
+            kind: "notes",
+            title: row.activeCandidateDisplayName,
+            body: row.activeCandidateNotes
+          });
+        }}
+      >
+        方法说明
+      </button>
+      <button
+        type="button"
+        className="chain-editor-row-info-btn"
+        onClick={(e) => {
+          e.stopPropagation();
+          openMethodCode(row);
+        }}
+      >
+        代码
+      </button>
+      <button
+        type="button"
+        className="chain-editor-row-info-btn"
+        onClick={(e) => {
+          e.stopPropagation();
+          openNodeInfo({ nodeId: row.chainNodeId, kind: "io" });
+        }}
+      >
+        输入输出
+      </button>
+    </span>
+  );
+}
+
+function renderCustomExecutionInfoButtons(
+  row: Extract<ExecutionRow, { kind: "custom" }>,
+  openMethodInfo: MethodInfoOpener,
+  openCustomMethodCode: CustomMethodCodeOpener
+) {
+  return (
+    <span className="chain-editor-row-info-actions">
+      <button
+        type="button"
+        className="chain-editor-row-info-btn"
+        onClick={(e) => {
+          e.stopPropagation();
+          openMethodInfo({
+            kind: "notes",
+            title: row.displayName,
+            body: row.nodeNotes
+          });
+        }}
+      >
+        方法说明
+      </button>
+      <button
+        type="button"
+        className="chain-editor-row-info-btn"
+        onClick={(e) => {
+          e.stopPropagation();
+          openCustomMethodCode(row);
+        }}
+      >
+        代码
+      </button>
+    </span>
+  );
+}
+
+function renderActiveResourceButton({
+  resourceId,
+  resourceKind,
+  branchId,
+  resourceDisplayName,
+  branchDisplayName,
+  openActiveResource
+}: {
+  resourceId: string;
+  resourceKind: "standard" | "custom";
+  branchId: string;
+  resourceDisplayName: string;
+  branchDisplayName: string;
+  openActiveResource: ActiveResourceOpener;
+}) {
+  return (
+    <button
+      type="button"
+      className="chain-editor-row-resource is-link"
+      title={`${resourceId} / ${branchId}`}
+      onClick={(e) => {
+        e.stopPropagation();
+        openActiveResource({
+          resourceId,
+          resourceKind,
+          branchId,
+          displayName: resourceDisplayName
+        });
+      }}
+    >
+      <span>{resourceDisplayName}</span>
+      <code>{branchDisplayName}</code>
+    </button>
   );
 }
 
@@ -518,6 +915,153 @@ function renderNodeInfoButtons(nodeId: string, openNodeInfo: NodeInfoOpener) {
   );
 }
 
+async function loadMethodSource({
+  disk,
+  resourceId,
+  branchId,
+  functionName
+}: {
+  disk: ReturnType<typeof useCa>["disk"];
+  resourceId: string;
+  branchId: string;
+  functionName?: string;
+}): Promise<Pick<Extract<MethodInfoState, { kind: "code" }>, "filePath" | "language" | "source" | "startLine" | "error">> {
+  const trimmed = functionName?.trim();
+  if (!trimmed) {
+    return { error: "当前生效方法没有配置 function_name，无法定位源码。" };
+  }
+  if (!disk) return { error: "当前没有加载链路数据。" };
+  const family = disk.resourceIndex.familyByKey.get(`standard:${resourceId}`);
+  const branch = disk.resourceIndex.branchByKey.get(
+    branchKey("standard", resourceId, branchId)
+  );
+  if (!family || !branch) {
+    return { error: `未找到资源分支：${resourceId} / ${branchId}` };
+  }
+
+  for (const ref of branch.branch.implementation.source_files) {
+    const abs =
+      ref.storage === "managed"
+        ? await window.tinder.joinPath(branch.branchDir, ref.path)
+        : ref.path;
+    let text: string;
+    try {
+      text = await window.tinder.readText(abs);
+    } catch {
+      continue;
+    }
+    const hit = findFunctionInSource(text, trimmed);
+    if (!hit) continue;
+    return {
+      filePath: abs,
+      language: ref.language,
+      source: hit.source,
+      startLine: hit.startLine
+    };
+  }
+
+  return {
+    error: `在 ${family.family.display_name} / ${branch.branch.display_name} 的源码文件中未找到函数 ${trimmed}。`
+  };
+}
+
+async function loadCustomMethodSource({
+  disk,
+  resourceId,
+  branchId
+}: {
+  disk: ReturnType<typeof useCa>["disk"];
+  resourceId: string;
+  branchId: string;
+}): Promise<Pick<Extract<MethodInfoState, { kind: "code" }>, "filePath" | "language" | "source" | "startLine" | "error">> {
+  if (!disk) return { error: "当前没有加载链路数据。" };
+  const family = disk.resourceIndex.familyByKey.get(`custom:${resourceId}`);
+  const branch = disk.resourceIndex.branchByKey.get(
+    branchKey("custom", resourceId, branchId)
+  );
+  if (!family || !branch) {
+    return { error: `未找到自定义资源分支：${resourceId} / ${branchId}` };
+  }
+  const refs = branch.branch.implementation.source_files;
+  if (refs.length === 0) {
+    return { error: "当前自定义资源没有关联源码文件。" };
+  }
+
+  const chunks: string[] = [];
+  let firstPath: string | undefined;
+  let firstLanguage: string | undefined;
+  for (const ref of refs) {
+    const abs =
+      ref.storage === "managed"
+        ? await window.tinder.joinPath(branch.branchDir, ref.path)
+        : ref.path;
+    let text: string;
+    try {
+      text = await window.tinder.readText(abs);
+    } catch {
+      continue;
+    }
+    firstPath ??= abs;
+    firstLanguage ??= ref.language;
+    chunks.push(
+      refs.length > 1 ? `# ${abs}\n${text}` : text
+    );
+  }
+
+  if (chunks.length === 0) {
+    return { error: "无法读取当前自定义资源关联的源码文件。" };
+  }
+  return {
+    filePath: firstPath,
+    language: firstLanguage,
+    source: chunks.join("\n\n"),
+    startLine: 1
+  };
+}
+
+function findFunctionInSource(
+  text: string,
+  functionName: string
+): { source: string; startLine: number } | null {
+  const esc = functionName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pyRe = new RegExp(
+    `^([ \\t]*)(?:async[ \\t]+)?def[ \\t]+${esc}[ \\t]*\\(`,
+    "m"
+  );
+  const genericRe = new RegExp(`(?:^|[\\s*&:])${esc}\\s*\\(`, "m");
+  const pyMatch = pyRe.exec(text);
+  const genericMatch = pyMatch ? null : genericRe.exec(text);
+  const match = pyMatch ?? genericMatch;
+  if (!match) return null;
+
+  const lineStart = text.lastIndexOf("\n", match.index) + 1;
+  const startLine = text.slice(0, lineStart).split(/\r?\n/).length;
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  const startIdx = Math.max(0, startLine - 1);
+
+  if (pyMatch) {
+    const indent = pyMatch[1]?.length ?? 0;
+    let endIdx = lines.length;
+    for (let i = startIdx + 1; i < lines.length; i++) {
+      const line = lines[i]!;
+      if (!line.trim()) continue;
+      const currentIndent = line.match(/^[ \t]*/)?.[0].length ?? 0;
+      if (
+        currentIndent <= indent &&
+        /^(?:async\s+def|def|class)\s+/.test(line.trim())
+      ) {
+        endIdx = i;
+        break;
+      }
+    }
+    return { source: lines.slice(startIdx, endIdx).join("\n"), startLine };
+  }
+
+  const from = Math.max(0, startIdx - 8);
+  const to = Math.min(lines.length, startIdx + 80);
+  return { source: lines.slice(from, to).join("\n"), startLine: from + 1 };
+}
+
 function ChainNodeInfoModal({
   nodeId,
   kind,
@@ -542,7 +1086,6 @@ function ChainNodeInfoModal({
       >
         <header className="chain-node-info-header">
           <div>
-            <div className="chain-node-info-kicker">{title}</div>
             <h2>{node?.displayName ?? nodeId}</h2>
             <code>{nodeId}</code>
           </div>
@@ -555,6 +1098,59 @@ function ChainNodeInfoModal({
         </div>
         <div className="chain-node-info-body">
           {node ? <ChainNodeInfoContent node={node} kind={kind} /> : <p>未找到该节点的文档信息。</p>}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function MethodInfoModal({
+  info,
+  onClose
+}: {
+  info: MethodInfoState;
+  onClose(): void;
+}) {
+  return (
+    <div className="chain-node-info-backdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className="chain-node-info-modal chain-node-method-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={info.title}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <button
+          type="button"
+          className="chain-node-info-icon-close"
+          onClick={onClose}
+          aria-label="关闭"
+          title="关闭"
+        >
+          <span className="codicon codicon-close" aria-hidden="true" />
+        </button>
+        <div className="chain-node-info-body">
+          {info.kind === "notes" ? (
+            info.body?.trim() ? (
+              <p className="chain-node-info-readonly-text">{info.body}</p>
+            ) : (
+              <div className="chain-node-info-empty">当前生效方法暂无备注。</div>
+            )
+          ) : (
+            <div className="chain-node-info-stack">
+              {info.error ? (
+                <div className="chain-node-info-empty">{info.error}</div>
+              ) : info.source ? (
+                <section className="chain-node-info-code-section">
+                  <pre className="chain-node-info-code" data-lang={info.language}>
+                    <code>{info.source}</code>
+                  </pre>
+                </section>
+              ) : (
+                <div className="chain-node-info-empty">正在读取源码...</div>
+              )}
+            </div>
+          )}
         </div>
       </section>
     </div>

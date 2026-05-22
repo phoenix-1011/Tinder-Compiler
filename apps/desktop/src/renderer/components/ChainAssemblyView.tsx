@@ -127,6 +127,7 @@ export function ChainAssemblyView() {
   const cm = useContextMenu();
   const {
     activeUri,
+    openProfileOverview,
     openChainEditor,
     openProfileLifecycle,
     openResourceEditor,
@@ -204,6 +205,14 @@ export function ChainAssemblyView() {
       profiles: { ...(prev.profiles ?? {}), [id]: !prev.profiles?.[id] }
     }));
     ca.setActiveProfileId(id);
+  };
+  const openProfileRoot = (profile: ProfileEntry) => {
+    setCollapse((prev) => ({
+      ...prev,
+      profiles: { ...(prev.profiles ?? {}), [profile.id]: true }
+    }));
+    ca.setActiveProfileId(profile.id);
+    openProfileOverview(profile.id, profile.name);
   };
   const toggleProfileActive = (id: string) =>
     setCollapse((prev) => ({
@@ -502,7 +511,8 @@ export function ChainAssemblyView() {
                     expandable
                     expanded={expanded}
                     active={isActive}
-                    onClick={() => toggleProfile(profile.id)}
+                    onClick={() => openProfileRoot(profile)}
+                    onChevronClick={() => toggleProfile(profile.id)}
                     onContextMenu={(e) => profileMenu(e, profile)}
                   />
                   {expanded && (
@@ -763,10 +773,13 @@ interface RowProps {
   onClick(): void;
   expandable?: boolean;
   expanded?: boolean;
+  onChevronClick?: () => void;
   active?: boolean;
   muted?: boolean;
   /** Native tooltip; useful for long file paths and other overflow content. */
   hint?: string;
+  prefix?: ReactNode;
+  suffix?: ReactNode;
   actions?: RowAction[];
   draggable?: boolean;
   dragPayload?: DragPayload;
@@ -786,9 +799,12 @@ function Row({
   onClick,
   expandable,
   expanded,
+  onChevronClick,
   active,
   muted,
   hint,
+  prefix,
+  suffix,
   actions,
   draggable,
   dragPayload,
@@ -831,8 +847,18 @@ function Row({
       <span
         className={`codicon explorer-chevron${chevronIcon ? ` codicon-${chevronIcon}` : ""}`}
         aria-hidden="true"
+        onClick={
+          onChevronClick
+            ? (event) => {
+                event.stopPropagation();
+                onChevronClick();
+              }
+            : undefined
+        }
       />
+      {prefix}
       <span className="explorer-name">{label}</span>
+      {suffix}
       {actions && actions.length > 0 && (
         <div className="ca-row-actions">
           {actions.map((action) => (
@@ -915,6 +941,17 @@ function renderProfileFolderContents(
             key={item.id}
             depth={depth}
             label={item.label}
+            suffix={
+              item.kind === "custom" ? (
+                <span
+                  className="profile-resource-kind-mark"
+                  title="自定义资源"
+                  aria-label="自定义资源"
+                >
+                  ◇
+                </span>
+              ) : undefined
+            }
             active={profileResourceRefKey(ref) === activeResourceKey}
             onClick={() => openResource(profileId, profileName, item)}
             draggable

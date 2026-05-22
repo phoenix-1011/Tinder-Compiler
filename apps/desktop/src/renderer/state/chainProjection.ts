@@ -5,6 +5,7 @@ import type {
   CustomNodeUsage,
   GuiProjectFile,
   ProfileStandardVariantRef,
+  StandardComputeCandidate,
   StandardComputeResource
 } from "@tinder/nextstep";
 import { profileResourceBranchId } from "@tinder/nextstep";
@@ -42,6 +43,11 @@ export interface CustomUsageRow {
   displayName: string;
   /** Position relative to its anchor: anchor's node id, or `null` for tail. */
   anchorChainId: string | null;
+  resourceDisplayName?: string;
+  branchId?: string;
+  branchDisplayName?: string;
+  nodeNotes?: string;
+  handlerFunction?: string;
 }
 
 export interface ChainCoverage {
@@ -82,6 +88,17 @@ export interface ExecutionStandardRow {
   resourceId: string;
   resourceDisplayName: string;
   variantId: string;
+  branchDisplayName: string;
+  activeCandidateId: string;
+  activeCandidateDisplayName: string;
+  activeCandidateFunctionName?: string;
+  activeCandidateNotes?: string;
+  candidates: Array<{
+    candidateId: string;
+    displayName: string;
+    functionName?: string;
+    notes?: string;
+  }>;
 }
 
 export type ExecutionRow = ExecutionStandardRow | CustomUsageRow;
@@ -178,7 +195,7 @@ export function buildChainProjection(
         kind: "custom",
         usage,
         arrayIndex,
-        displayName: customDisplayName(usage),
+        ...customUsageFields(usage, customDisplayName, profileResources, profile),
         anchorChainId: node.nodeId
       });
     }
@@ -204,7 +221,7 @@ export function buildChainProjection(
       kind: "custom",
       usage,
       arrayIndex,
-      displayName: customDisplayName(usage),
+      ...customUsageFields(usage, customDisplayName, profileResources, profile),
       anchorChainId: null
     });
   }
@@ -302,7 +319,7 @@ export function buildExecutionProjection(
         kind: "custom",
         usage,
         arrayIndex,
-        displayName: customDisplayName(usage),
+        ...customUsageFields(usage, customDisplayName, profileResources, profile),
         anchorChainId: node.nodeId
       });
     }
@@ -310,6 +327,12 @@ export function buildExecutionProjection(
     if (!covers || covers.length === 0) continue;
     const group = groupBySlug.get(node.docSlug);
     for (const { ref, resource, variantId } of covers) {
+      const variant = resource.model_variants.find((v) => v.variant_id === variantId);
+      const activeCandidateId = variant?.effective_candidates?.[node.nodeId] ?? "";
+      const activeCandidate = activeCandidateId
+        ? standardCandidateFor(resource, node.nodeId, activeCandidateId)
+        : null;
+      const candidates = standardCandidatesForNode(resource, node.nodeId);
       rows.push({
         kind: "exec-standard",
         chainNodeId: node.nodeId,
@@ -319,7 +342,19 @@ export function buildExecutionProjection(
         docTitle: group?.title ?? node.docSlug,
         resourceId: ref.resource_instance_id,
         resourceDisplayName: resource.display_name,
-        variantId
+        variantId,
+        branchDisplayName: variant?.display_name ?? variantId,
+        activeCandidateId,
+        activeCandidateDisplayName:
+          activeCandidate?.display_name ?? (activeCandidateId || node.displayName),
+        activeCandidateFunctionName: activeCandidate?.function_name,
+        activeCandidateNotes: activeCandidate?.notes,
+        candidates: candidates.map((candidate, index) => ({
+          candidateId: candidateIdentity(candidate, node.nodeId, index),
+          displayName: candidate.display_name,
+          functionName: candidate.function_name,
+          notes: candidate.notes
+        }))
       });
     }
   }
@@ -328,11 +363,47 @@ export function buildExecutionProjection(
       kind: "custom",
       usage,
       arrayIndex,
-      displayName: customDisplayName(usage),
+      ...customUsageFields(usage, customDisplayName, profileResources, profile),
       anchorChainId: null
     });
   }
   return rows;
+}
+
+function customUsageFields(
+  usage: CustomNodeUsage,
+  customDisplayName: (usage: CustomNodeUsage) => string,
+  profileResources: ComputeResourceV2[],
+  profile: GuiProjectFile
+): Pick<
+  CustomUsageRow,
+  "displayName" | "resourceDisplayName" | "branchId" | "branchDisplayName"
+  | "nodeNotes" | "handlerFunction"
+> {
+  const resource = profileResources.find(
+    (r) =>
+      r.resource_kind === "custom" &&
+      r.resource_instance_id === usage.resource_instance_id
+  );
+  const ref = (profile.resources ?? []).find(
+    (r) =>
+      r.kind === "custom" &&
+      r.enabled &&
+      r.resource_instance_id === usage.resource_instance_id
+  );
+  const branchId = ref ? profileResourceBranchId(ref) : undefined;
+  const node =
+    resource?.resource_kind === "custom"
+      ? resource.custom_nodes.find((n) => n.node_id === usage.node_id)
+      : undefined;
+  return {
+    displayName: customDisplayName(usage),
+    resourceDisplayName: resource?.display_name ?? usage.resource_instance_id,
+    branchId,
+    branchDisplayName: branchId,
+    nodeNotes: node?.notes,
+    handlerFunction: node?.handler_function
+  };
 }
 
 function standardResourceIndex(
@@ -365,6 +436,24 @@ function standardCandidateFor(
       return ids.includes(candidateId);
     }) ?? null
   );
+}
+
+function standardCandidatesForNode(
+  resource: StandardComputeResource,
+  nodeId: string
+): StandardComputeCandidate[] {
+  return resource.compute_nodes.filter(
+    (candidate) =>
+      candidate.node_id === nodeId && candidate.status !== "disabled"
+  );
+}
+
+function candidateIdentity(
+  candidate: StandardComputeCandidate,
+  nodeId: string,
+  index: number
+): string {
+  return candidate.candidate_id ?? candidate.node_id ?? `${nodeId}#${index}`;
 }
 
 function effectiveStandardCandidates(

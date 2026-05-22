@@ -38,7 +38,7 @@ export interface OpenDocument {
   /**
    * Classifies what kind of content this tab holds. `file` uses Monaco;
    * `help-doc` renders a chain catalog node section as Markdown;
-   * `chain-editor` and `profile-lifecycle` host the chain-assembly main
+   * `chain-editor` and `profile-lifecycle` host chain-assembly profile
    * views inside the regular tab strip; `resource-editor` hosts the
    * compute resource editor.
    */
@@ -93,6 +93,11 @@ export type ActivityView =
 
 export type MainView = "editor" | "settings";
 
+export interface ProfileTabGroup {
+  profileId: string;
+  displayName: string;
+}
+
 export interface EditorPosition {
   line: number;
   column: number;
@@ -111,6 +116,8 @@ interface WorkspaceState {
   activeView: ActivityView;
   documents: OpenDocument[];
   activeUri: string | null;
+  profileGroups: ProfileTabGroup[];
+  activeProfileHome: ProfileTabGroup | null;
   /** uri → last save status. */
   saveStatus: Record<string, SaveStatus>;
   revealRequest: RevealRequest | null;
@@ -156,6 +163,11 @@ interface WorkspaceActions {
    */
   openHelpDoc(nodeId: string, options?: OpenHelpDocOptions): void;
   /**
+   * Focus the configuration profile group home. The overview belongs to the
+   * profile group label rather than an independent child tab.
+   */
+  openProfileOverview(profileId: string, displayName: string): void;
+  /**
    * Open the chain editor for a configuration profile as a tab.
    * Synthetic uri `chain-editor://<profileId>` — re-opening focuses the
    * existing tab.
@@ -185,6 +197,7 @@ interface WorkspaceActions {
     displayName: string;
   }): void;
   closeFile(uri: string): void;
+  closeProfileGroup(profileId: string): void;
   closeActiveFile(): void;
   cycleTab(direction: 1 | -1): void;
   setActive(uri: string): void;
@@ -192,9 +205,9 @@ interface WorkspaceActions {
   pinDocument(uri: string): void;
   updateContent(uri: string, content: string): void;
   /**
-   * Drive the dirty dot on a synthetic tab (chain-editor / profile-lifecycle
-   * / resource-editor) without going through Monaco. Lets non-Monaco editors
-   * surface unsaved-changes state to the tab strip.
+   * Drive the dirty dot on a synthetic tab (chain-editor /
+   * profile-lifecycle / resource-editor) without going through Monaco. Lets
+   * non-Monaco editors surface unsaved-changes state to the tab strip.
    */
   setSyntheticDirty(uri: string, dirty: boolean): void;
   /**
@@ -295,6 +308,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   const [documents, setDocuments] = useState<OpenDocument[]>([]);
   const [activeUri, setActiveUri] = useState<string | null>(null);
+  const [profileGroups, setProfileGroups] = useState<ProfileTabGroup[]>([]);
+  const [activeProfileHome, setActiveProfileHome] =
+    useState<ProfileTabGroup | null>(null);
   const [saveStatus, setSaveStatus] = useState<Record<string, SaveStatus>>({});
   const [revealRequest, setRevealRequest] = useState<RevealRequest | null>(null);
   const revealTokenRef = useRef<number>(0);
@@ -304,6 +320,22 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   docsRef.current = documents;
   const activeUriRef = useRef<string | null>(activeUri);
   activeUriRef.current = activeUri;
+
+  const ensureProfileGroup = useCallback(
+    (profileId: string, displayName: string) => {
+      const group = { profileId, displayName };
+      setProfileGroups((prev) => {
+        const existing = prev.find((item) => item.profileId === profileId);
+        if (!existing) return [...prev, group];
+        if (existing.displayName === displayName) return prev;
+        return prev.map((item) =>
+          item.profileId === profileId ? group : item
+        );
+      });
+      return group;
+    },
+    []
+  );
 
   const openFolder = useCallback(async () => {
     const next = await window.tinder.openFolder();
@@ -437,7 +469,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       tooltip?: string;
       kind: Extract<
         DocumentKind,
-        "chain-editor" | "profile-lifecycle" | "resource-editor" | "resource-branch"
+        | "chain-editor"
+        | "profile-lifecycle"
+        | "resource-editor"
+        | "resource-branch"
       >;
       profileId?: string;
       profileDisplayName?: string;
@@ -525,8 +560,18 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     []
   );
 
+  const openProfileOverview = useCallback(
+    (profileId: string, displayName: string) => {
+      const group = ensureProfileGroup(profileId, displayName);
+      setActiveProfileHome(group);
+      setActiveUri(null);
+    },
+    [ensureProfileGroup]
+  );
+
   const openChainEditor = useCallback(
     (profileId: string, displayName: string) => {
+      ensureProfileGroup(profileId, displayName);
       // Chain-editor tabs default to pinned so they survive subsequent
       // preview opens; the user opens the editor with intent, not as a
       // throwaway look. Short label is "链路" — the profile prefix is
@@ -541,11 +586,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         preview: false
       });
     },
-    [openSyntheticTab]
+    [ensureProfileGroup, openSyntheticTab]
   );
 
   const openProfileLifecycle = useCallback(
     (profileId: string, displayName: string) => {
+      ensureProfileGroup(profileId, displayName);
       openSyntheticTab({
         uri: `profile-lifecycle://${profileId}`,
         name: "使用与版本",
@@ -556,7 +602,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         preview: false
       });
     },
-    [openSyntheticTab]
+    [ensureProfileGroup, openSyntheticTab]
   );
 
   const openResourceEditor = useCallback(
@@ -592,6 +638,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       branchId: string;
       displayName: string;
     }) => {
+      if (
+        params.scope === "profile" &&
+        params.profileId &&
+        params.profileDisplayName
+      ) {
+        ensureProfileGroup(params.profileId, params.profileDisplayName);
+      }
       const profilePart =
         params.scope === "profile" && params.profileId
           ? `/${encodeURIComponent(params.profileId)}`
@@ -617,8 +670,38 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         preview: false
       });
     },
-    [openSyntheticTab]
+    [ensureProfileGroup, openSyntheticTab]
   );
+
+  const closeProfileGroup = useCallback((profileId: string) => {
+    const closingUris = docsRef.current
+      .filter((d) => d.profileId === profileId)
+      .map((d) => d.uri);
+    const closingSet = new Set(closingUris);
+    setProfileGroups((prev) =>
+      prev.filter((item) => item.profileId !== profileId)
+    );
+    setActiveProfileHome((current) =>
+      current?.profileId === profileId ? null : current
+    );
+    setDocuments((prev) => prev.filter((d) => d.profileId !== profileId));
+    setActiveUri((current) => {
+      if (!current || !closingSet.has(current)) return current;
+      const remaining = docsRef.current.filter((d) => d.profileId !== profileId);
+      return remaining.length > 0 ? remaining[remaining.length - 1]!.uri : null;
+    });
+    setSaveStatus((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const uri of closingUris) {
+        if (uri in next) {
+          delete next[uri];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, []);
 
   const closeFile = useCallback((uri: string) => {
     setDocuments((prev) => prev.filter((d) => d.uri !== uri));
@@ -784,6 +867,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       activeView,
       documents,
       activeUri,
+      profileGroups,
+      activeProfileHome,
       saveStatus,
       revealRequest,
       canGoBack,
@@ -795,11 +880,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       goForward,
       openFile,
       openHelpDoc,
+      openProfileOverview,
       openChainEditor,
       openProfileLifecycle,
       openResourceEditor,
       openResourceBranch,
       closeFile,
+      closeProfileGroup,
       closeActiveFile,
       cycleTab,
       setActive,
@@ -819,6 +906,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       activeView,
       documents,
       activeUri,
+      profileGroups,
+      activeProfileHome,
       saveStatus,
       revealRequest,
       canGoBack,
@@ -830,11 +919,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       goForward,
       openFile,
       openHelpDoc,
+      openProfileOverview,
       openChainEditor,
       openProfileLifecycle,
       openResourceEditor,
       openResourceBranch,
       closeFile,
+      closeProfileGroup,
       closeActiveFile,
       cycleTab,
       setActive,

@@ -594,6 +594,19 @@ button:focus-visible {
   text-overflow: ellipsis;
 }
 
+.profile-resource-kind-mark {
+  flex: 0 0 auto;
+  margin-left: 4px;
+  color: #d7ba7d;
+  font-size: 11px;
+  line-height: 1;
+  transform: translateY(-0.5px);
+}
+
+.explorer-row.is-active .profile-resource-kind-mark {
+  color: #ffe6a3;
+}
+
 .explorer-row.is-muted {
   color: var(--tc-fg-muted);
   font-style: italic;
@@ -1005,6 +1018,33 @@ button:focus-visible {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+.profile-overview-json-block {
+  margin: 0 0 10px;
+  border: 1px solid var(--tc-border-popup);
+  border-radius: 5px;
+  background: var(--tc-bg-sidebar);
+}
+.profile-overview-json-block:last-child {
+  margin-bottom: 0;
+}
+.profile-overview-json-block summary {
+  cursor: pointer;
+  padding: 8px 10px;
+  color: var(--tc-fg-default);
+  font-size: 12.5px;
+}
+.profile-overview-json-block pre {
+  margin: 0;
+  padding: 10px;
+  border-top: 1px solid var(--tc-border-popup);
+  color: var(--tc-fg-default);
+  font-family: var(--tc-font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre;
+  overflow: auto;
+  max-height: 360px;
 }
 
 .chain-editor-action-btn.is-danger {
@@ -2019,22 +2059,23 @@ textarea.resource-editor-input {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 8px 0 24px;
+  padding: 0 0 24px;
 }
 
 .chain-editor-list-header {
   display: grid;
   align-items: center;
   gap: 12px;
-  padding: 4px 24px 8px;
+  padding: 8px 24px;
   border-left: 3px solid transparent;
   color: var(--tc-fg-muted);
   font-size: 11.5px;
   border-bottom: 1px solid var(--tc-border-soft);
   position: sticky;
   top: 0;
-  z-index: 1;
+  z-index: 5;
   background: var(--tc-bg-editor);
+  box-shadow: 0 1px 0 var(--tc-border-soft);
 }
 
 .chain-editor-row {
@@ -2051,13 +2092,13 @@ textarea.resource-editor-input {
 /* Mode 1: 完整链路节点 — order · 名称 · 类型 · 分类 · 状态. */
 .chain-editor-list.is-mode-full .chain-editor-list-header,
 .chain-editor-list.is-mode-full .chain-editor-row {
-  grid-template-columns: 76px minmax(160px, 240px) 64px minmax(180px, 1fr) 212px;
+  grid-template-columns: 76px minmax(180px, 260px) minmax(180px, 1fr) 120px 212px;
 }
 
 /* Mode 2: 实际执行链路 — order · 链路节点 · 计算实例 · 类型 · 分类. */
 .chain-editor-list.is-mode-execution .chain-editor-list-header,
 .chain-editor-list.is-mode-execution .chain-editor-row {
-  grid-template-columns: 76px minmax(150px, 220px) minmax(180px, 1fr) 64px minmax(150px, 220px) 212px;
+  grid-template-columns: 56px minmax(132px, 180px) minmax(210px, 1.35fr) minmax(160px, 1fr) minmax(120px, 168px) 198px;
 }
 
 .chain-editor-list-header > span:first-child {
@@ -2068,9 +2109,11 @@ textarea.resource-editor-input {
   font-size: 11.5px;
   color: var(--tc-fg-muted);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .chain-editor-row-type.is-custom {
-  color: var(--tc-fg-link);
+  color: var(--tc-fg-muted);
 }
 
 .chain-editor-row-category {
@@ -2082,7 +2125,13 @@ textarea.resource-editor-input {
 }
 .chain-editor-row-category.is-custom,
 .chain-editor-row.is-custom .chain-editor-row-category {
-  color: var(--tc-fg-link);
+  color: var(--tc-fg-muted);
+}
+
+.chain-editor-row-count {
+  color: var(--tc-fg-default);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
 }
 
 .chain-editor-row-resource {
@@ -2092,8 +2141,66 @@ textarea.resource-editor-input {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.chain-editor-row-resource.is-link {
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.chain-editor-row-resource.is-link:hover span {
+  text-decoration: underline;
+}
+.chain-editor-row-resource.is-link code {
+  color: var(--tc-fg-muted);
+  font-size: 11.5px;
+  font-family: var(--tc-font-mono, ui-monospace, "Cascadia Code", Consolas, monospace);
+}
+.chain-editor-row-resource.is-link span,
+.chain-editor-row-resource.is-link code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .chain-editor-row.is-custom .chain-editor-row-resource {
-  color: var(--tc-fg-link);
+  color: var(--tc-fg-default);
+}
+.chain-editor-row.is-custom .chain-editor-row-resource.is-link {
+  color: var(--tc-fg-default);
+}
+
+.chain-editor-row-method,
+.chain-editor-row-method-select {
+  min-width: 0;
+  width: 100%;
+  color: var(--tc-fg-default);
+  font-size: 12.5px;
+}
+
+.chain-editor-row-method {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chain-editor-row-method-select {
+  height: 24px;
+  max-width: 180px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--tc-fg-default);
+  cursor: pointer;
+}
+
+.chain-editor-row-method-select:hover,
+.chain-editor-row-method-select:focus {
+  border-color: var(--tc-border-popup);
+  background: rgba(255, 255, 255, 0.04);
+  outline: none;
 }
 
 .chain-editor-row.is-chain:hover {
@@ -2111,6 +2218,33 @@ textarea.resource-editor-input {
   display: inline-block;
   width: 100%;
   text-align: center;
+}
+.chain-editor-row-drag-handle {
+  display: inline-flex;
+  width: 24px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  color: var(--tc-fg-muted);
+  cursor: grab;
+  letter-spacing: 1px;
+  user-select: none;
+}
+.chain-editor-row[draggable="true"] .chain-editor-row-drag-handle:hover {
+  color: var(--tc-fg-strong);
+}
+.chain-editor-row.is-dragging {
+  opacity: 0.55;
+}
+.chain-editor-row.is-drop-target::after {
+  content: "";
+  position: absolute;
+  left: 18px;
+  right: 18px;
+  top: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: rgba(200, 200, 200, 0.78);
 }
 .chain-editor-row-doc {
   position: absolute;
@@ -2143,14 +2277,26 @@ textarea.resource-editor-input {
   border-left-color: rgba(55, 148, 255, 0.55);
 }
 .chain-editor-row.is-custom {
-  background: rgba(55, 148, 255, 0.05);
-  border-left-color: rgba(55, 148, 255, 0.55);
+  background: rgba(255, 255, 255, 0.025);
+  border-left-color: transparent;
+}
+.chain-editor-row.is-custom::before {
+  content: "";
+  position: absolute;
+  left: -3px;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 2px;
+  background: rgba(200, 200, 200, 0.55);
 }
 .chain-editor-row.is-custom.is-disabled {
   color: var(--tc-fg-muted);
   background: transparent;
-  border-left-color: var(--tc-border-soft);
   font-style: italic;
+}
+.chain-editor-row.is-custom.is-disabled::before {
+  background: var(--tc-border-soft);
 }
 
 .chain-editor-row-order {
@@ -2160,7 +2306,7 @@ textarea.resource-editor-input {
 }
 .chain-editor-row-marker {
   text-align: right;
-  color: var(--tc-fg-link);
+  color: var(--tc-fg-muted);
   font-size: 14px;
 }
 .chain-editor-row-label {
@@ -2170,7 +2316,7 @@ textarea.resource-editor-input {
   white-space: nowrap;
 }
 .chain-editor-row.is-missing .chain-editor-row-label {
-  color: var(--tc-fg-default);
+  color: var(--tc-fg-muted);
 }
 .chain-editor-row.is-custom.is-disabled .chain-editor-row-label {
   color: var(--tc-fg-muted);
@@ -2199,6 +2345,19 @@ textarea.resource-editor-input {
   background: rgba(255, 255, 255, 0.06);
   border-color: rgba(200, 200, 200, 0.22);
   color: #f0f0f0;
+}
+
+.chain-editor-tail-drop {
+  margin: 6px 24px 12px;
+  padding: 8px 0;
+  border-top: 1px dashed var(--tc-border-popup);
+  color: var(--tc-fg-muted);
+  font-size: 12px;
+  text-align: center;
+}
+.chain-editor-tail-drop.is-over {
+  color: var(--tc-fg-strong);
+  border-top-color: rgba(200, 200, 200, 0.85);
 }
 
 .chain-node-info-backdrop {
@@ -2266,6 +2425,27 @@ textarea.resource-editor-input {
   border-color: var(--tc-accent);
 }
 
+.chain-node-info-icon-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--tc-fg-muted);
+  cursor: pointer;
+}
+
+.chain-node-info-icon-close:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--tc-fg-strong);
+}
+
 .chain-node-info-source {
   padding: 10px 24px;
   color: var(--tc-fg-muted);
@@ -2277,6 +2457,14 @@ textarea.resource-editor-input {
   min-height: 0;
   overflow: auto;
   padding: 20px 24px 24px;
+}
+
+.chain-node-method-modal {
+  position: relative;
+}
+
+.chain-node-method-modal .chain-node-info-body {
+  padding: 16px 44px 16px 16px;
 }
 
 .chain-node-info-stack,
@@ -2356,6 +2544,46 @@ textarea.resource-editor-input {
 .chain-node-info-empty {
   color: var(--tc-fg-muted);
   font-size: 12.5px;
+}
+
+.chain-node-info-readonly-text {
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.7;
+}
+
+.chain-node-info-code-section {
+  min-width: 0;
+}
+
+.chain-node-info-code-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 8px;
+  color: var(--tc-fg-muted);
+  font-size: 12px;
+}
+
+.chain-node-info-code-meta span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chain-node-info-code {
+  margin: 0;
+  max-height: 460px;
+  overflow: auto;
+  padding: 12px 14px;
+  border: 1px solid var(--tc-border-soft);
+  border-radius: 4px;
+  background: #151515;
+  color: var(--tc-fg-default);
+  font-family: var(--tc-font-mono, ui-monospace, "Cascadia Code", Consolas, monospace);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre;
 }
 /* Picker dialog --------------------------------------------- */
 .ca-picker-card {
@@ -2526,8 +2754,12 @@ textarea.resource-editor-input {
   background: transparent;
   font-size: 12px;
   font-weight: 600;
-  cursor: default;
+  cursor: pointer;
   user-select: none;
+}
+.editor-tab-group-label.is-active {
+  color: var(--tc-fg-active);
+  background: var(--tc-bg-tab-active);
 }
 .editor-tab-group-name {
   letter-spacing: 0.02em;

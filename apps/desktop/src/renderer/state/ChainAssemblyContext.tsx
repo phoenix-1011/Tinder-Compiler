@@ -184,7 +184,7 @@ export interface ChainAssemblyValue {
     kind: "standard" | "custom",
     resourceInstanceId: string,
     branchId: string
-  ) => Promise<void>;
+  ) => Promise<boolean>;
   /**
    * Set a profile-local effective candidate override for one standard node.
    * `undefined` clears the override so the branch default applies; `null`
@@ -195,7 +195,7 @@ export interface ChainAssemblyValue {
     resourceInstanceId: string,
     nodeId: string,
     candidateId: string | null | undefined
-  ) => Promise<void>;
+  ) => Promise<boolean>;
   /**
    * Copy the profile slot's current branch into a new branch under the same
    * compute resource family, then switch that profile slot to the copy.
@@ -255,6 +255,15 @@ export interface ChainAssemblyValue {
   promptMoveCustomUsage: (
     profileId: string,
     arrayIndex: number
+  ) => Promise<void>;
+  /** Move a usage to a deterministic position for drag-and-drop editing. */
+  moveCustomUsage: (
+    profileId: string,
+    arrayIndex: number,
+    target: {
+      anchorChainId: string | null;
+      beforeCustomArrayIndex?: number;
+    }
   ) => Promise<void>;
   /** Shift a usage up/down within its anchor by swapping the order field with a neighbour. */
   shiftCustomUsage: (
@@ -1615,10 +1624,10 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
       kind: "standard" | "custom",
       resourceInstanceId: string,
       branchId: string
-    ) => {
-      if (!disk) return;
+    ): Promise<boolean> => {
+      if (!disk) return false;
       const target = disk.profiles.find((p) => p.id === profileId);
-      if (!target) return;
+      if (!target) return false;
       const family = disk.resourceIndex.familyByKey.get(
         `${kind}:${resourceInstanceId}`
       );
@@ -1630,14 +1639,14 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
           title: "无法切换分支",
           message: `计算实例 ${resourceInstanceId} 下不存在分支 ${branchId}。`
         });
-        return;
+        return false;
       }
       const refs = target.project.resources ?? [];
       const matchIdx = refs.findIndex(
         (ref) =>
           ref.kind === kind && ref.resource_instance_id === resourceInstanceId
       );
-      if (matchIdx < 0) return;
+      if (matchIdx < 0) return false;
       const nextRefs = refs.map((ref, idx) => {
         if (idx !== matchIdx) return ref;
         if (ref.kind === "standard") {
@@ -1646,7 +1655,7 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
         }
         return { ...ref, selected_branch_id: branchId };
       });
-      await writeProfile(
+      return writeProfile(
         target,
         {
           ...target.project,
@@ -1665,19 +1674,19 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
       resourceInstanceId: string,
       nodeId: string,
       candidateId: string | null | undefined
-    ) => {
-      if (!disk) return;
+    ): Promise<boolean> => {
+      if (!disk) return false;
       const target = disk.profiles.find((p) => p.id === profileId);
-      if (!target) return;
+      if (!target) return false;
       const refs = target.project.resources ?? [];
       const matchIdx = refs.findIndex(
         (ref) =>
           ref.kind === "standard" &&
           ref.resource_instance_id === resourceInstanceId
       );
-      if (matchIdx < 0) return;
+      if (matchIdx < 0) return false;
       const current = refs[matchIdx]!;
-      if (current.kind !== "standard") return;
+      if (current.kind !== "standard") return false;
       const nextEffective = {
         ...(current.overrides?.effective_candidates ?? {})
       };
@@ -1701,7 +1710,7 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
           }
         };
       });
-      await writeProfile(
+      return writeProfile(
         target,
         {
           ...target.project,
@@ -1904,7 +1913,7 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
         }
         return { ...candidate, selected_branch_id: newBranchId };
       });
-      await writeProfile(
+      const saved = await writeProfile(
         target,
         {
           ...target.project,
@@ -1913,7 +1922,7 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
         },
         "创建分支失败"
       );
-      return newBranchId;
+      return saved ? newBranchId : null;
     },
     [disk, dialog, writeProfile]
   );
@@ -2367,6 +2376,91 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
       await writeProfile(target, updated, "移动失败");
     },
     [dialog, disk, writeProfile]
+  );
+
+  const moveCustomUsage = useCallback(
+    async (
+      profileId: string,
+      arrayIndex: number,
+      targetPosition: {
+        anchorChainId: string | null;
+        beforeCustomArrayIndex?: number;
+      }
+    ) => {
+      if (!disk) return;
+      const target = disk.profiles.find((p) => p.id === profileId);
+      if (!target) return;
+      const usages = target.project.custom_node_usages ?? [];
+      const usage = usages[arrayIndex];
+      if (!usage) return;
+
+      const beforeIndex = targetPosition.beforeCustomArrayIndex;
+      const beforeUsage =
+        beforeIndex === undefined ? undefined : usages[beforeIndex];
+      const targetAnchor: BuiltinExecutionAnchor | null = beforeUsage
+        ? beforeUsage.insert_before ?? null
+        : targetPosition.anchorChainId
+          ? {
+              kind: "builtin_core_chain",
+              chain_id: targetPosition.anchorChainId
+            }
+          : null;
+      const sourceKey = serializeAnchor(usage.insert_before ?? null);
+      const targetKey = serializeAnchor(targetAnchor);
+      const sortedByOrder = (
+        left: { usage: CustomNodeUsage; index: number },
+        right: { usage: CustomNodeUsage; index: number }
+      ) => left.usage.order - right.usage.order || left.index - right.index;
+      const updates = new Map<number, CustomNodeUsage>();
+
+      if (sourceKey !== targetKey) {
+        usages
+          .map((current, index) => ({ usage: current, index }))
+          .filter(
+            ({ usage: current, index }) =>
+              index !== arrayIndex &&
+              serializeAnchor(current.insert_before ?? null) === sourceKey
+          )
+          .sort(sortedByOrder)
+          .forEach(({ usage: current, index }, order) => {
+            updates.set(index, { ...current, order });
+          });
+      }
+
+      const targetSiblings = usages
+        .map((current, index) => ({ usage: current, index }))
+        .filter(
+          ({ usage: current, index }) =>
+            index !== arrayIndex &&
+            serializeAnchor(current.insert_before ?? null) === targetKey
+        )
+        .sort(sortedByOrder);
+      const beforeSiblingIndex =
+        beforeIndex === undefined
+          ? -1
+          : targetSiblings.findIndex(({ index }) => index === beforeIndex);
+      const insertIndex =
+        beforeSiblingIndex >= 0 ? beforeSiblingIndex : targetSiblings.length;
+      const nextTargetSiblings = [...targetSiblings];
+      nextTargetSiblings.splice(insertIndex, 0, {
+        usage: { ...usage, insert_before: targetAnchor },
+        index: arrayIndex
+      });
+      nextTargetSiblings.forEach(({ usage: current, index }, order) => {
+        updates.set(index, { ...current, order });
+      });
+
+      const updatedUsages = usages.map((current, index) => {
+        return updates.get(index) ?? current;
+      });
+      const updated: GuiProjectFile = {
+        ...target.project,
+        resources: target.project.resources ?? [],
+        custom_node_usages: updatedUsages
+      };
+      await writeProfile(target, updated, "调整调用时机失败");
+    },
+    [disk, writeProfile]
   );
 
   const shiftCustomUsage = useCallback(
@@ -3138,6 +3232,7 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
       addCustomUsage,
       promptAddCustomUsage,
       promptMoveCustomUsage,
+      moveCustomUsage,
       shiftCustomUsage,
       setCustomUsageEnabled,
       removeCustomUsage,
@@ -3192,6 +3287,7 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
       addCustomUsage,
       promptAddCustomUsage,
       promptMoveCustomUsage,
+      moveCustomUsage,
       shiftCustomUsage,
       setCustomUsageEnabled,
       removeCustomUsage,

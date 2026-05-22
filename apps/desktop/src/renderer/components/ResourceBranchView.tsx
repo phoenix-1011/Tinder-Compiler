@@ -51,6 +51,32 @@ const STATUS_OPTIONS: Array<{ value: ComputeResourceStatus; label: string }> = [
   { value: "disabled", label: "已停用" }
 ];
 
+interface ResourceBranchUiState {
+  activeTab: EditorTab;
+  profileEditMode: boolean;
+}
+
+const resourceBranchUiState = new Map<string, ResourceBranchUiState>();
+
+function getResourceBranchUiState(tabUri: string): ResourceBranchUiState {
+  return (
+    resourceBranchUiState.get(tabUri) ?? {
+      activeTab: "summary",
+      profileEditMode: false
+    }
+  );
+}
+
+function updateResourceBranchUiState(
+  tabUri: string,
+  patch: Partial<ResourceBranchUiState>
+) {
+  resourceBranchUiState.set(tabUri, {
+    ...getResourceBranchUiState(tabUri),
+    ...patch
+  });
+}
+
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
@@ -103,7 +129,16 @@ export function ResourceBranchView({
     setSyntheticDirty
   } = useWorkspace();
   const disk = ca.disk;
-  const [activeTab, setActiveTab] = useState<EditorTab>("summary");
+  const [activeTab, setActiveTabState] = useState<EditorTab>(
+    () => getResourceBranchUiState(tabUri).activeTab
+  );
+  const setActiveTab = useCallback(
+    (next: EditorTab) => {
+      updateResourceBranchUiState(tabUri, { activeTab: next });
+      setActiveTabState(next);
+    },
+    [tabUri]
+  );
   const [globalBranchId, setGlobalBranchId] = useState(initialBranchId);
   const [draft, setDraft] = useState<ComputeResourceBranch | null>(null);
   const [baseline, setBaseline] = useState<ComputeResourceBranch | null>(null);
@@ -111,7 +146,17 @@ export function ResourceBranchView({
     null
   );
   const [save, setSave] = useState<SaveState>({ kind: "idle" });
-  const [profileEditMode, setProfileEditMode] = useState(false);
+  const [profileSave, setProfileSave] = useState<SaveState>({ kind: "idle" });
+  const [profileEditMode, setProfileEditModeState] = useState(
+    () => getResourceBranchUiState(tabUri).profileEditMode
+  );
+  const setProfileEditMode = useCallback(
+    (next: boolean) => {
+      updateResourceBranchUiState(tabUri, { profileEditMode: next });
+      setProfileEditModeState(next);
+    },
+    [tabUri]
+  );
   const [sharedEditDialogOpen, setSharedEditDialogOpen] = useState(false);
   const [newBranchDialogOpen, setNewBranchDialogOpen] = useState(false);
   const [newBranchName, setNewBranchName] = useState("");
@@ -183,16 +228,23 @@ export function ResourceBranchView({
     !!profileId &&
     usage.length === 1 &&
     usage[0]?.profileId === profileId;
-  const canEditCurrentBranch = scope === "global" || isExclusiveToThisProfile;
   const isEditable =
     scope === "global" || (profileEditMode && isExclusiveToThisProfile);
   const isShared = scope === "profile" && !isExclusiveToThisProfile;
 
   useEffect(() => {
-    if (scope === "profile" && profileEditMode && isShared) {
+    if (scope === "profile" && profileEditMode && isShared && branchEntry) {
       setProfileEditMode(false);
+      setActiveTab("summary");
     }
-  }, [isShared, profileEditMode, scope]);
+  }, [
+    branchEntry,
+    isShared,
+    profileEditMode,
+    scope,
+    setActiveTab,
+    setProfileEditMode
+  ]);
 
   useEffect(() => {
     if (scope === "profile" && activeTab === "usage") {
@@ -218,6 +270,14 @@ export function ResourceBranchView({
     return () => clearTimeout(timer);
   }, [save]);
 
+  useEffect(() => {
+    if (profileSave.kind !== "saved") return;
+    const timer = setTimeout(() => {
+      setProfileSave((cur) => (cur.kind === "saved" ? { kind: "idle" } : cur));
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, [profileSave]);
+
   const handleSave = useCallback(async (): Promise<boolean> => {
     if (!draft || !isEditable) return false;
     setSave({ kind: "saving" });
@@ -231,6 +291,41 @@ export function ResourceBranchView({
       return false;
     }
   }, [ca, draft, isEditable, resourceId, resourceKind]);
+
+  const saveProfileProjection = useCallback(async (): Promise<boolean> => {
+    if (scope !== "profile" || !profile) return false;
+    setProfileSave({ kind: "saving" });
+    try {
+      await window.tinder.writeText(
+        profile.id,
+        JSON.stringify(profile.project, null, 2)
+      );
+      setProfileSave({ kind: "saved", at: Date.now() });
+      return true;
+    } catch (err) {
+      setProfileSave({ kind: "error", message: String(err) });
+      return false;
+    }
+  }, [profile, scope]);
+
+  const runProfileProjectionWrite = useCallback(
+    async (write: () => Promise<boolean>): Promise<boolean> => {
+      setProfileSave({ kind: "saving" });
+      try {
+        const ok = await write();
+        setProfileSave(
+          ok
+            ? { kind: "saved", at: Date.now() }
+            : { kind: "error", message: "保存配置档案失败" }
+        );
+        return ok;
+      } catch (err) {
+        setProfileSave({ kind: "error", message: String(err) });
+        return false;
+      }
+    },
+    []
+  );
 
   const requestBranchSwitch = useCallback(
     async (branchId: string) => {
@@ -253,11 +348,13 @@ export function ResourceBranchView({
         }
       }
       if (scope === "profile") {
-        await ca.setProfileResourceBranch(
-          profileId ?? "",
-          resourceKind,
-          resourceId,
-          branchId
+        await runProfileProjectionWrite(() =>
+          ca.setProfileResourceBranch(
+            profileId ?? "",
+            resourceKind,
+            resourceId,
+            branchId
+          )
         );
       } else {
         setGlobalBranchId(branchId);
@@ -270,6 +367,7 @@ export function ResourceBranchView({
       profileId,
       resourceId,
       resourceKind,
+      runProfileProjectionWrite,
       scope,
       selectedBranchId
     ]
@@ -283,8 +381,19 @@ export function ResourceBranchView({
   }, [initialBranchId, requestBranchSwitch, scope]);
 
   useEffect(() => {
-    return registerSyntheticSave(tabUri, handleSave);
-  }, [handleSave, registerSyntheticSave, tabUri]);
+    const saveCurrentView = () =>
+      scope === "profile" && !profileEditMode
+        ? saveProfileProjection()
+        : handleSave();
+    return registerSyntheticSave(tabUri, saveCurrentView);
+  }, [
+    handleSave,
+    profileEditMode,
+    registerSyntheticSave,
+    saveProfileProjection,
+    scope,
+    tabUri
+  ]);
 
   const openGlobal = () => {
     if (!familyEntry) return;
@@ -297,14 +406,14 @@ export function ResourceBranchView({
     });
   };
 
-  const requestProfileEdit = async () => {
+  const requestProfileEdit = () => {
     if (scope !== "profile") return;
-    if (canEditCurrentBranch) {
-      setProfileEditMode(true);
-      setActiveTab("summary");
+    if (isShared) {
+      setSharedEditDialogOpen(true);
       return;
     }
-    setSharedEditDialogOpen(true);
+    setProfileEditMode(true);
+    setActiveTab("summary");
   };
 
   const createProfileBranchAndEdit = async () => {
@@ -390,12 +499,15 @@ export function ResourceBranchView({
     if (!newBranchId) return;
     setNewBranchDialogOpen(false);
     if (scope === "profile") {
-      await ca.setProfileResourceBranch(
-        profileId ?? "",
-        resourceKind,
-        resourceId,
-        newBranchId
+      const ok = await runProfileProjectionWrite(() =>
+        ca.setProfileResourceBranch(
+          profileId ?? "",
+          resourceKind,
+          resourceId,
+          newBranchId
+        )
       );
+      if (!ok) return;
       setProfileEditMode(true);
       setActiveTab("summary");
     } else {
@@ -408,6 +520,26 @@ export function ResourceBranchView({
     setNewBranchName(`${draft?.display_name ?? "新分支"} 副本`);
     setNewBranchDialogOpen(true);
   };
+
+  const setProfileEffectiveCandidate = useCallback(
+    (
+      nodeId: string,
+      candidateId: string | null | undefined
+    ) => {
+      void runProfileProjectionWrite(() =>
+        ca.setProfileStandardEffectiveCandidate(
+          profileId ?? "",
+          resourceId,
+          nodeId,
+          candidateId
+        )
+      );
+    },
+    [ca, profileId, resourceId, runProfileProjectionWrite]
+  );
+
+  const visibleSaveStatus: SaveState =
+    scope === "profile" && !profileEditMode ? { kind: "idle" } : save;
 
   if (!disk || !familyEntry || !draft || !branchEntry) {
     return (
@@ -517,19 +649,45 @@ export function ResourceBranchView({
           </>
         )}
         <div className="resource-editor-tabs-spacer" />
-        <SaveStatusBadge status={save} />
+        <SaveStatusBadge status={visibleSaveStatus} />
         {scope === "profile" && (
           <>
+            {!profileEditMode && (
+              <button
+                type="button"
+                className="chain-editor-action-btn"
+                onClick={() => void saveProfileProjection()}
+                disabled={profileSave.kind === "saving"}
+                title={
+                  profileSave.kind === "error"
+                    ? profileSave.message
+                    : "保存当前配置档案投影设置"
+                }
+              >
+                {profileSave.kind === "saving"
+                  ? "保存中"
+                  : profileSave.kind === "saved"
+                    ? "已保存"
+                    : profileSave.kind === "error"
+                      ? "保存失败"
+                    : "保存档案"}
+              </button>
+            )}
             <button
               type="button"
               className="chain-editor-action-btn"
               onClick={() =>
                 profileEditMode
                   ? void exitProfileEdit()
-                  : void requestProfileEdit()
+                  : requestProfileEdit()
+              }
+              title={
+                profileEditMode
+                  ? "退出分支内容编辑"
+                  : "编辑分支内容、实现代码或计算节点定义"
               }
             >
-              {profileEditMode ? "退出编辑" : "编辑"}
+              {profileEditMode ? "退出编辑" : "编辑分支"}
             </button>
             <button
               type="button"
@@ -570,26 +728,16 @@ export function ResourceBranchView({
           {scope === "profile" && !profileEditMode && (
             <ProfileReadonlySummary
               profileName={profile?.name ?? null}
-              familyName={familyEntry.family.display_name}
               resourceId={resourceId}
               resourceKind={resourceKind}
               draft={draft}
               branchSourcePath={branchSourcePath}
-              usageCount={usage.length}
-              isShared={isShared}
               effectiveCandidateOverrides={
                 slotRef?.kind === "standard"
                   ? slotRef.overrides?.effective_candidates
                   : undefined
               }
-              onSetEffectiveCandidate={(nodeId, candidateId) =>
-                void ca.setProfileStandardEffectiveCandidate(
-                  profileId ?? "",
-                  resourceId,
-                  nodeId,
-                  candidateId
-                )
-              }
+              onSetEffectiveCandidate={setProfileEffectiveCandidate}
             />
           )}
           {(scope !== "profile" || profileEditMode) && activeTab === "summary" && (
@@ -603,20 +751,11 @@ export function ResourceBranchView({
               branchSourcePath={branchSourcePath}
               usageCount={usage.length}
               isEditable={isEditable}
-              isShared={isShared}
               dirty={dirty}
               scopeIsGlobal={scope === "global"}
               showUsageCount={scope === "global"}
               onPatch={patchBranch}
               onPatchImpl={patchImpl}
-              onCreateProfileBranch={() =>
-                void ca.createProfileBranchFromCurrent(
-                  profileId ?? "",
-                  resourceKind,
-                  resourceId
-                )
-              }
-              onOpenGlobal={openGlobal}
               onCopyGlobalBranch={() => void copyCurrentBranch()}
               onDeleteGlobalBranch={() => void deleteCurrentBranch()}
             />
@@ -688,24 +827,18 @@ export function ResourceBranchView({
 
 function ProfileReadonlySummary({
   profileName,
-  familyName,
   resourceId,
   resourceKind,
   draft,
   branchSourcePath,
-  usageCount,
-  isShared,
   effectiveCandidateOverrides,
   onSetEffectiveCandidate
 }: {
   profileName: string | null;
-  familyName: string;
   resourceId: string;
   resourceKind: "standard" | "custom";
   draft: ComputeResourceBranch;
   branchSourcePath: string;
-  usageCount: number;
-  isShared: boolean;
   effectiveCandidateOverrides?: Record<string, string | null>;
   onSetEffectiveCandidate: (
     nodeId: string,
@@ -886,14 +1019,11 @@ function SummaryTab({
   branchSourcePath,
   usageCount,
   isEditable,
-  isShared,
   dirty,
   scopeIsGlobal,
   showUsageCount,
   onPatch,
   onPatchImpl,
-  onCreateProfileBranch,
-  onOpenGlobal,
   onCopyGlobalBranch,
   onDeleteGlobalBranch
 }: {
@@ -906,14 +1036,11 @@ function SummaryTab({
   branchSourcePath: string;
   usageCount: number;
   isEditable: boolean;
-  isShared: boolean;
   dirty: boolean;
   scopeIsGlobal: boolean;
   showUsageCount: boolean;
   onPatch: (next: ComputeResourceBranch) => void;
   onPatchImpl: (patch: Partial<ComputeResourceBranch["implementation"]>) => void;
-  onCreateProfileBranch: () => void;
-  onOpenGlobal: () => void;
   onCopyGlobalBranch: () => void;
   onDeleteGlobalBranch: () => void;
 }) {
@@ -1028,33 +1155,6 @@ function SummaryTab({
           </div>
         </section>
       )}
-
-      {isShared && (
-        <section className="profile-lifecycle-section">
-          <h2>编辑保护</h2>
-          <div className="profile-lifecycle-section-body">
-            <p className="sidebar-hint">
-              当前分支还被其他配置档案或 slot 使用。配置档案只是计算实例的投影层，直接编辑会影响所有引用者。
-            </p>
-            <div className="resource-editor-summary-actions">
-              <button
-                type="button"
-                className="chain-editor-action-btn"
-                onClick={onCreateProfileBranch}
-              >
-                创建当前配置档案分支
-              </button>
-              <button
-                type="button"
-                className="chain-editor-action-btn"
-                onClick={onOpenGlobal}
-              >
-                跳转至计算实例
-              </button>
-            </div>
-          </div>
-        </section>
-      )}
     </div>
   );
 }
@@ -1136,9 +1236,9 @@ function SharedBranchEditDialog({
         className="modal-card shared-branch-edit-dialog"
         onMouseDown={(event) => event.stopPropagation()}
       >
-        <div className="shared-branch-edit-title">编辑当前资源</div>
+        <div className="shared-branch-edit-title">编辑当前分支</div>
         <p className="shared-branch-edit-message">
-          当前分支正在被多个配置档案使用。请选择是为当前配置创建独立分支，还是前往计算实例中修改共享分支。
+          当前分支还被其他配置档案或 slot 使用。配置档案只是计算实例的投影层，直接编辑会影响所有引用者。
         </p>
         <div className="shared-branch-edit-options">
           <button
@@ -1148,10 +1248,10 @@ function SharedBranchEditDialog({
           >
             <span className="shared-branch-edit-badge">推荐</span>
             <span className="shared-branch-edit-option-title">
-              创建新分支并编辑
+              创建当前配置档案分支
             </span>
             <span className="shared-branch-edit-option-desc">
-              复制当前分支，只切换当前 slot 到新分支。
+              复制当前分支，只切换当前配置档案 slot 到新分支后再编辑。
             </span>
           </button>
           <button

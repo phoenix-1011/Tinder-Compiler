@@ -6,6 +6,7 @@ import { ContextMenu, useContextMenu, type ContextMenuItem } from "./ContextMenu
 import { Breadcrumbs } from "./Breadcrumbs";
 import { HelpDocTab } from "./HelpDocTab";
 import { ChainEditorView } from "./ChainEditorView";
+import { ProfileOverviewView } from "./ProfileOverviewView";
 import { ProfileLifecycleView } from "./ProfileLifecycleView";
 import { ResourceEditorView } from "./ResourceEditorView";
 import { ResourceBranchView } from "./ResourceBranchView";
@@ -38,8 +39,12 @@ export function EditorArea() {
   const {
     documents,
     activeUri,
+    profileGroups,
+    activeProfileHome,
     setActive,
     closeFile,
+    closeProfileGroup,
+    openProfileOverview,
     pinDocument,
     updateContent,
     saveDocument,
@@ -113,6 +118,8 @@ export function EditorArea() {
   // tabs (files, help docs, resource-editor, …) flow through unchanged.
   const stripItems = useMemo<TabStripItem[]>(() => {
     const consumed = new Set<string>();
+    const groupedProfiles = new Set<string>();
+    const groupMeta = new Map(profileGroups.map((item) => [item.profileId, item]));
     const items: TabStripItem[] = [];
     for (const doc of documents) {
       if (consumed.has(doc.uri)) continue;
@@ -122,19 +129,30 @@ export function EditorArea() {
           (d) => isProfileChild(d) && d.profileId === profileId
         );
         siblings.forEach((s) => consumed.add(s.uri));
+        groupedProfiles.add(profileId);
+        const home = groupMeta.get(profileId);
         items.push({
           kind: "group",
           profileId,
           profileDisplayName:
-            doc.profileDisplayName ?? profileId,
+            home?.displayName ?? doc.profileDisplayName ?? profileId,
           docs: siblings
         });
       } else {
         items.push({ kind: "standalone", doc });
       }
     }
+    for (const home of profileGroups) {
+      if (groupedProfiles.has(home.profileId)) continue;
+      items.push({
+        kind: "group",
+        profileId: home.profileId,
+        profileDisplayName: home.displayName,
+        docs: []
+      });
+    }
     return items;
-  }, [documents]);
+  }, [documents, profileGroups]);
 
   const renderTab = (doc: OpenDocument, isInGroup: boolean) => (
     <div
@@ -213,8 +231,15 @@ export function EditorArea() {
               aria-label={`配置档案 ${item.profileDisplayName}`}
             >
               <div
-                className="editor-tab-group-label"
+                className={`editor-tab-group-label${
+                  !activeUri && activeProfileHome?.profileId === item.profileId
+                    ? " is-active"
+                    : ""
+                }`}
                 title={`配置档案 ${item.profileDisplayName}`}
+                onClick={() =>
+                  openProfileOverview(item.profileId, item.profileDisplayName)
+                }
               >
                 <span className="editor-tab-group-name">
                   {item.profileDisplayName}
@@ -225,7 +250,7 @@ export function EditorArea() {
                   aria-label={`关闭 ${item.profileDisplayName} 分组的所有 tab`}
                   onClick={(e) => {
                     e.stopPropagation();
-                    for (const d of item.docs) closeFile(d.uri);
+                    closeProfileGroup(item.profileId);
                   }}
                   title="关闭整个分组"
                 >
@@ -241,7 +266,12 @@ export function EditorArea() {
         <Breadcrumbs workspacePath={folder?.path ?? null} filePath={active.uri} />
       )}
       <div className="editor-host">
-        {!active ? (
+        {!active && activeProfileHome ? (
+          <ProfileOverviewView
+            key={activeProfileHome.profileId}
+            profileId={activeProfileHome.profileId}
+          />
+        ) : !active ? (
           <WelcomeView />
         ) : active.kind === "help-doc" ? (
           <HelpDocTab key={active.uri} nodeId={active.helpNodeId ?? ""} />
