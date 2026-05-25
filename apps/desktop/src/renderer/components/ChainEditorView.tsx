@@ -40,6 +40,7 @@ interface ChainEditorViewProps {
 type ChainEditorMode = "full" | "execution";
 
 const chainEditorModeByUri = new Map<string, ChainEditorMode>();
+const customPoolOpenByUri = new Map<string, boolean>();
 const CUSTOM_GROUP_FILTER = "__custom__";
 
 export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
@@ -70,6 +71,9 @@ export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
    */
   const [chainMode, setChainMode] = useState<ChainEditorMode>(
     () => chainEditorModeByUri.get(tabUri) ?? "execution"
+  );
+  const [customPoolOpen, setCustomPoolOpen] = useState<boolean>(
+    () => customPoolOpenByUri.get(tabUri) ?? true
   );
   /**
    * Optional chain-doc group filter. `all` shows everything; otherwise
@@ -121,6 +125,21 @@ export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
         : [],
     [profile, v2Resources, flatCustom]
   );
+  const customPoolRows = useMemo(
+    () =>
+      fullProjection.filter(
+        (row): row is ChainProjectionRow & { kind: "custom" } =>
+          row.kind === "custom"
+      ),
+    [fullProjection]
+  );
+  const chainNodeNameById = useMemo(() => {
+    const next = new Map<string, string>();
+    for (const row of fullProjection) {
+      if (row.kind === "chain-node") next.set(row.nodeId, row.displayName);
+    }
+    return next;
+  }, [fullProjection]);
 
   const visibleFull = useMemo(() => {
     if (groupFilter === CUSTOM_GROUP_FILTER) {
@@ -253,6 +272,20 @@ export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
       setDraggedCustomIndex(null);
       setFullDropTarget(null);
     }
+  };
+  const setPersistedCustomPoolOpen = (next: boolean) => {
+    customPoolOpenByUri.set(tabUri, next);
+    setCustomPoolOpen(next);
+  };
+  const locateCustomUsage = (arrayIndex: number): void => {
+    setGroupFilter("all");
+    window.setTimeout(() => {
+      document
+        .querySelector(
+          `[data-chain-custom-row="full"][data-chain-custom-index="${arrayIndex}"]`
+        )
+        ?.scrollIntoView({ block: "center" });
+    }, 0);
   };
 
   /**
@@ -404,6 +437,20 @@ export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
       <div
         className={`chain-editor-list is-mode-${chainMode}`}
       >
+        {chainMode === "full" && (
+          <CustomNodePool
+            rows={customPoolRows}
+            open={customPoolOpen}
+            drag={fullDrag}
+            chainNodeNameById={chainNodeNameById}
+            onToggle={() => setPersistedCustomPoolOpen(!customPoolOpen)}
+            onLocate={locateCustomUsage}
+            onToggleEnabled={(row, enabled) =>
+              void ca.setCustomUsageEnabled(profile.id, row.arrayIndex, enabled)
+            }
+            onRemove={(row) => void ca.removeCustomUsage(profile.id, row.arrayIndex)}
+          />
+        )}
         <div className="chain-editor-list-header">
           {chainMode === "full" ? (
             <>
@@ -577,6 +624,145 @@ type ActiveResourceOpener = (resource: {
 /**
  * `完整链路节点` row layout. Columns: order/doc · 名称 · 类型 · 分类 · 状态.
  */
+function CustomNodePool({
+  rows,
+  open,
+  drag,
+  chainNodeNameById,
+  onToggle,
+  onLocate,
+  onToggleEnabled,
+  onRemove
+}: {
+  rows: Array<ChainProjectionRow & { kind: "custom" }>;
+  open: boolean;
+  drag: FullDragConfig;
+  chainNodeNameById: Map<string, string>;
+  onToggle: () => void;
+  onLocate: (arrayIndex: number) => void;
+  onToggleEnabled: (
+    row: ChainProjectionRow & { kind: "custom" },
+    enabled: boolean
+  ) => void;
+  onRemove: (row: ChainProjectionRow & { kind: "custom" }) => void;
+}) {
+  return (
+    <section className={`chain-editor-custom-pool${open ? " is-open" : ""}`}>
+      <button
+        type="button"
+        className="chain-editor-custom-pool-toggle"
+        onClick={onToggle}
+        aria-expanded={open}
+      >
+        <span className={`codicon codicon-chevron-${open ? "down" : "right"}`} />
+        <span>自定义节点</span>
+        <code>{rows.length}</code>
+      </button>
+      {open && (
+        <div className="chain-editor-custom-pool-table">
+          <div className="chain-editor-custom-pool-header">
+            <span />
+            <span>节点</span>
+            <span>所属资源</span>
+            <span>当前位置</span>
+            <span>状态</span>
+            <span>操作</span>
+          </div>
+          {rows.length === 0 ? (
+            <div className="chain-editor-custom-pool-empty">
+              当前链路没有自定义节点。
+            </div>
+          ) : (
+            rows.map((row) => (
+              <CustomNodePoolRow
+                key={`custom-pool-${row.arrayIndex}`}
+                row={row}
+                drag={drag}
+                chainNodeNameById={chainNodeNameById}
+                onLocate={onLocate}
+                onToggleEnabled={onToggleEnabled}
+                onRemove={onRemove}
+              />
+            ))
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function CustomNodePoolRow({
+  row,
+  drag,
+  chainNodeNameById,
+  onLocate,
+  onToggleEnabled,
+  onRemove
+}: {
+  row: ChainProjectionRow & { kind: "custom" };
+  drag: FullDragConfig;
+  chainNodeNameById: Map<string, string>;
+  onLocate: (arrayIndex: number) => void;
+  onToggleEnabled: (
+    row: ChainProjectionRow & { kind: "custom" },
+    enabled: boolean
+  ) => void;
+  onRemove: (row: ChainProjectionRow & { kind: "custom" }) => void;
+}) {
+  const location = row.anchorChainId
+    ? `${chainNodeNameById.get(row.anchorChainId) ?? row.anchorChainId} 前`
+    : "链路末尾";
+  const branchId = row.branchDisplayName ?? row.branchId ?? "default";
+  const isDragging = drag.draggedCustomIndex === row.arrayIndex;
+  return (
+    <div
+      className={`chain-editor-custom-pool-row${
+        row.usage.enabled ? "" : " is-disabled"
+      }${isDragging ? " is-dragging" : ""}`}
+      draggable={drag.enabled}
+      onDragStart={(e) => {
+        if (!drag.enabled) return;
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", String(row.arrayIndex));
+        drag.onDragStart(row.arrayIndex);
+      }}
+      onDragEnd={drag.onDragEnd}
+      title={
+        drag.enabled
+          ? "拖到下方完整链路中调整调用时机"
+          : "切换到全部分类后可拖拽调整调用时机"
+      }
+    >
+      <span className="chain-editor-row-drag-handle">⋮⋮</span>
+      <span className="chain-editor-custom-pool-name">{row.displayName}</span>
+      <span className="chain-editor-custom-pool-resource">
+        <span>{row.resourceDisplayName ?? row.usage.resource_instance_id}</span>
+        <code>{branchId}</code>
+      </span>
+      <span className="chain-editor-custom-pool-location" title={row.anchorChainId ?? undefined}>
+        {location}
+      </span>
+      <span className="chain-editor-custom-pool-status">
+        {row.usage.enabled ? "启用" : "停用"}
+      </span>
+      <span className="chain-editor-custom-pool-actions">
+        <button type="button" onClick={() => onLocate(row.arrayIndex)}>
+          定位
+        </button>
+        <button
+          type="button"
+          onClick={() => onToggleEnabled(row, !row.usage.enabled)}
+        >
+          {row.usage.enabled ? "停用" : "启用"}
+        </button>
+        <button type="button" onClick={() => onRemove(row)}>
+          移除
+        </button>
+      </span>
+    </div>
+  );
+}
+
 function renderFullRow(
   row: ChainProjectionRow,
   idx: number,
@@ -597,6 +783,8 @@ function renderFullRow(
         className={`chain-editor-row is-custom${row.usage.enabled ? "" : " is-disabled"}${
           isDragging ? " is-dragging" : ""
         }${isDropTarget ? " is-drop-target" : ""}`}
+        data-chain-custom-row="full"
+        data-chain-custom-index={row.arrayIndex}
         draggable={drag.enabled}
         onDragStart={(e) => {
           if (!drag.enabled) return;

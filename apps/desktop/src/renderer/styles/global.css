@@ -2062,6 +2062,133 @@ textarea.resource-editor-input {
   padding: 0 0 24px;
 }
 
+.chain-editor-custom-pool {
+  border-bottom: 1px solid var(--tc-border-soft);
+}
+.chain-editor-custom-pool-toggle {
+  width: 100%;
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 24px;
+  border: none;
+  background: transparent;
+  color: var(--tc-fg-strong);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.chain-editor-custom-pool-toggle:hover {
+  background: var(--tc-bg-hover);
+}
+.chain-editor-custom-pool-toggle code {
+  color: var(--tc-fg-muted);
+  font-family: var(--tc-font-mono, ui-monospace, "Cascadia Code", Consolas, monospace);
+  font-size: 11.5px;
+}
+.chain-editor-custom-pool-table {
+  max-height: 214px;
+  overflow-y: auto;
+  border-top: 1px solid var(--tc-border-soft);
+}
+.chain-editor-custom-pool-header,
+.chain-editor-custom-pool-row {
+  display: grid;
+  grid-template-columns: 56px minmax(140px, 1fr) minmax(180px, 1.15fr) minmax(160px, 1fr) 64px 150px;
+  align-items: center;
+  gap: 12px;
+  padding: 5px 24px;
+}
+.chain-editor-custom-pool-header {
+  color: var(--tc-fg-muted);
+  font-size: 11.5px;
+  border-bottom: 1px solid var(--tc-border-soft);
+}
+.chain-editor-custom-pool-row {
+  min-height: 32px;
+  position: relative;
+  font-size: 12.5px;
+  border-left: 3px solid transparent;
+}
+.chain-editor-custom-pool-row::before {
+  content: "";
+  position: absolute;
+  left: -3px;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 2px;
+  background: rgba(200, 200, 200, 0.55);
+}
+.chain-editor-custom-pool-row:hover {
+  background: var(--tc-bg-hover);
+}
+.chain-editor-custom-pool-row.is-disabled {
+  color: var(--tc-fg-muted);
+  font-style: italic;
+}
+.chain-editor-custom-pool-row.is-disabled::before {
+  background: var(--tc-border-soft);
+}
+.chain-editor-custom-pool-name,
+.chain-editor-custom-pool-location,
+.chain-editor-custom-pool-status {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chain-editor-custom-pool-name {
+  color: var(--tc-fg-strong);
+}
+.chain-editor-custom-pool-resource {
+  min-width: 0;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--tc-fg-default);
+}
+.chain-editor-custom-pool-resource span,
+.chain-editor-custom-pool-resource code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chain-editor-custom-pool-resource code {
+  color: var(--tc-fg-muted);
+  font-family: var(--tc-font-mono, ui-monospace, "Cascadia Code", Consolas, monospace);
+  font-size: 11.5px;
+}
+.chain-editor-custom-pool-location,
+.chain-editor-custom-pool-status {
+  color: var(--tc-fg-muted);
+}
+.chain-editor-custom-pool-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.chain-editor-custom-pool-actions button {
+  height: 24px;
+  padding: 0 5px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: #c8c8c8;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.chain-editor-custom-pool-actions button:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(200, 200, 200, 0.22);
+  color: #f0f0f0;
+}
+.chain-editor-custom-pool-empty {
+  padding: 18px 24px;
+  color: var(--tc-fg-muted);
+  font-size: 12.5px;
+}
+
 .chain-editor-list-header {
   display: grid;
   align-items: center;
@@ -4939,6 +5066,9 @@ kbd {
 .canvas-edge.is-dashed {
   color: rgba(160, 160, 160, 0.6);
   letter-spacing: 1.5px;
+  /* dashed-ish: replace the solid double-arrow with dotted segments
+     via background gradient — but simpler is to lower opacity and
+     italicize. Phase 4 may swap this for proper SVG dashing. */
   font-style: italic;
 }
 .canvas-edge-spacer {
