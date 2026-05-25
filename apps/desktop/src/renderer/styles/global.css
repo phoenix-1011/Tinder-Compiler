@@ -4726,13 +4726,29 @@ kbd {
 /* Canvas View (Phase 1 shell) -------------------------------- */
 /* Layout: topbar (back + label + actions) / body (main | inspector rail) */
 .canvas-view {
-  position: absolute;
-  inset: 0;
+  /*
+   * Canvas mounts directly inside `.workbench-main` (a grid container
+   * without `position: relative`). Earlier this CSS used
+   * `position: absolute; inset: 0` like the chain editor does — but
+   * the chain editor lives inside `.editor-host { position: relative }`
+   * whereas canvas does not, so absolute positioning escaped to the
+   * viewport and overlaid the title bar. With the OS-drawn window
+   * controls (Electron titleBarOverlay) and the title bar's
+   * `-webkit-app-region: drag` both sitting in the top 32px, the
+   * canvas top bar's right-side buttons ended up under either the
+   * controls or the drag region and became unclickable.
+   *
+   * Letting canvas stretch as a normal grid item fixes both issues:
+   * the canvas occupies row 1 of workbench-main (which is `1fr` or
+   * `1fr 0 panelHeight`) and never crosses into the title bar.
+   */
   display: flex;
   flex-direction: column;
   background: var(--tc-bg-editor);
   color: var(--tc-fg-default);
   overflow: hidden;
+  min-height: 0;
+  min-width: 0;
 }
 .canvas-view-topbar {
   display: flex;
