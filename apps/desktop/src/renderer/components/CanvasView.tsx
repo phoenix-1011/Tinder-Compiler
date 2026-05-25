@@ -16,7 +16,11 @@ import {
   useCanvasPersistedState,
   type CanvasSelection
 } from "../state/canvasState";
+import { canvasDragState } from "../state/canvasDrag";
+import { profileResourceBranchId } from "@tinder/nextstep";
 import { CanvasInspector } from "./CanvasInspector";
+import { CanvasBatchCandidatePanel } from "./CanvasBatchCandidatePanel";
+import { CanvasSharedBranchDialog } from "./CanvasSharedBranchDialog";
 import { ContextMenu, useContextMenu, type ContextMenuItem } from "./ContextMenu";
 
 /**
@@ -35,6 +39,18 @@ export function CanvasView() {
   const ca = useCa();
   const { disk } = ca;
   const cm = useContextMenu();
+  const [batchOpen, setBatchOpen] = useState(false);
+  // Shared-branch guard pending state — non-null while the dialog
+  // is open. Carries the requested jump target so accepting either
+  // action knows what was originally requested.
+  const [sharedGuard, setSharedGuard] = useState<{
+    target: {
+      resourceKind: "standard" | "custom";
+      resourceInstanceId: string;
+      branchId: string;
+    };
+    usageCount: number;
+  } | null>(null);
 
   const profile = useMemo(() => {
     if (!canvasProfileId || !disk) return null;
@@ -96,20 +112,43 @@ export function CanvasView() {
   );
 
   /**
-   * C21 (and C13-jump variant) jump-out from inspector to a full
-   * ResourceBranchView tab. Currently issues a window.confirm because
-   * a styled secondary-confirm modal isn't built yet — Phase 3.5
-   * polish can replace it. On confirm we exit canvas mode then open
-   * the tab in the global ResourceBranchView; canvas.json was already
-   * persisted via the debounced writer so re-entry restores state.
+   * Count how many profile slots (across all profiles) currently
+   * reference (kind, resourceInstanceId, branchId). >1 means the
+   * branch is shared and the C13 guard must intercept the jump.
    */
-  const onOpenFullEditor = useCallback(
+  const countBranchUsage = useCallback(
+    (
+      kind: "standard" | "custom",
+      resourceInstanceId: string,
+      branchId: string
+    ): number => {
+      if (!disk) return 0;
+      let count = 0;
+      for (const p of disk.profiles) {
+        for (const ref of p.project.resources ?? []) {
+          if (ref.kind !== kind) continue;
+          if (ref.resource_instance_id !== resourceInstanceId) continue;
+          if (profileResourceBranchId(ref) !== branchId) continue;
+          count += 1;
+        }
+      }
+      return count;
+    },
+    [disk]
+  );
+
+  /**
+   * Execute the actual C21 jump-out: secondary confirmation, exit
+   * canvas, open the ResourceBranchView tab. Shared branches go
+   * through `onOpenFullEditor` first which routes them through the
+   * C13 dialog before invoking this directly.
+   */
+  const proceedJumpToFullEditor = useCallback(
     (target: {
       resourceKind: "standard" | "custom";
       resourceInstanceId: string;
       branchId: string;
     }) => {
-      if (!profile) return;
       const ok = window.confirm(
         `切换到「配置档案编辑」并打开 ${target.resourceInstanceId} / ${target.branchId} 的完整编辑器？\n` +
           `画布将退出，UI 状态 (聚焦 / 折叠 / scroll / inspector dock) 已保存，可下次回到画布恢复。`
@@ -124,8 +163,59 @@ export function CanvasView() {
         displayName: target.resourceInstanceId
       });
     },
-    [profile, exitCanvasMode, openResourceBranch]
+    [exitCanvasMode, openResourceBranch]
   );
+
+  /**
+   * C21 jump entry point invoked from the inspector. Wraps the
+   * actual jump with the C13 shared-branch guard: if the branch is
+   * referenced by more than one profile slot, the dialog opens so
+   * the user can either create a profile-local branch or proceed
+   * with the global edit.
+   */
+  const onOpenFullEditor = useCallback(
+    (target: {
+      resourceKind: "standard" | "custom";
+      resourceInstanceId: string;
+      branchId: string;
+    }) => {
+      if (!profile) return;
+      const usageCount = countBranchUsage(
+        target.resourceKind,
+        target.resourceInstanceId,
+        target.branchId
+      );
+      if (usageCount > 1) {
+        setSharedGuard({ target, usageCount });
+        return;
+      }
+      proceedJumpToFullEditor(target);
+    },
+    [profile, countBranchUsage, proceedJumpToFullEditor]
+  );
+
+  const onCreateProfileBranchFromGuard = useCallback(async () => {
+    if (!profile || !sharedGuard) return;
+    const newBranchId = await ca.createProfileBranchFromCurrent(
+      profile.id,
+      sharedGuard.target.resourceKind,
+      sharedGuard.target.resourceInstanceId
+    );
+    setSharedGuard(null);
+    if (!newBranchId) return;
+    // No jump — the user wanted to keep editing in canvas. Just
+    // selecting the new coverage card on the canvas keeps the UX
+    // coherent: future edits target the new branch automatically
+    // via the pin transfer that createProfileBranchFromCurrent
+    // performed internally.
+  }, [profile, sharedGuard, ca]);
+
+  const onJumpFromGuard = useCallback(() => {
+    if (!sharedGuard) return;
+    const target = sharedGuard.target;
+    setSharedGuard(null);
+    proceedJumpToFullEditor(target);
+  }, [sharedGuard, proceedJumpToFullEditor]);
 
   // Profile not loaded: render the same minimal apologetic shell as
   // earlier phases so the back button is always reachable.
@@ -197,9 +287,9 @@ export function CanvasView() {
           </button>
           <button
             type="button"
-            className="canvas-view-action-btn is-placeholder"
-            disabled
-            title="Phase 4: 批量候选面板"
+            className="canvas-view-action-btn"
+            onClick={() => setBatchOpen(true)}
+            title="批量调整每个 chain node 的实现函数（C24c）"
           >
             批量候选
           </button>
@@ -271,6 +361,22 @@ export function CanvasView() {
           onClose={cm.close}
         />
       )}
+
+      <CanvasBatchCandidatePanel
+        profile={profile}
+        open={batchOpen}
+        onClose={() => setBatchOpen(false)}
+      />
+
+      <CanvasSharedBranchDialog
+        open={!!sharedGuard}
+        usageCount={sharedGuard?.usageCount ?? 0}
+        resourceInstanceId={sharedGuard?.target.resourceInstanceId ?? ""}
+        branchId={sharedGuard?.target.branchId ?? ""}
+        onCreateProfileBranch={() => void onCreateProfileBranchFromGuard()}
+        onJumpToGlobalEditor={onJumpFromGuard}
+        onCancel={() => setSharedGuard(null)}
+      />
     </div>
   );
 }
@@ -418,26 +524,118 @@ function FlowTrack({
   onCardContextMenu: (event: React.MouseEvent, items: ContextMenuItem[]) => void;
   profileId: string;
 }) {
+  const ca = useCa();
+  const [dragOverEdgeIdx, setDragOverEdgeIdx] = useState<number | null>(null);
+
   if (nodes.length === 0) {
     return <div className="canvas-flow-empty">（空）</div>;
   }
+
+  /**
+   * Resolve the drop position from an "edge index" — the edge BETWEEN
+   * nodes[idx-1] and nodes[idx]. The anchor is the chain id of the
+   * first slot at or after nodes[idx] (or null when there's no
+   * trailing slot in this group). The before-custom hint is set when
+   * nodes[idx] is a custom in the same anchor bucket — preserves
+   * precise within-bucket positioning for reorder.
+   */
+  const positionForEdge = (
+    edgeIdx: number
+  ): {
+    anchorChainId: string | null;
+    beforeCustomArrayIndex?: number;
+  } => {
+    let anchorChainId: string | null = null;
+    for (let i = edgeIdx; i < nodes.length; i++) {
+      const n = nodes[i]!;
+      if (n.kind === "slot") {
+        anchorChainId = n.nodeId;
+        break;
+      }
+      if (n.kind === "custom" && n.anchorChainId) {
+        anchorChainId = n.anchorChainId;
+        break;
+      }
+    }
+    const nextNode = nodes[edgeIdx];
+    if (nextNode?.kind === "custom") {
+      return {
+        anchorChainId,
+        beforeCustomArrayIndex: nextNode.arrayIndex
+      };
+    }
+    return { anchorChainId };
+  };
+
+  const onEdgeDragOver = (edgeIdx: number) => (e: React.DragEvent) => {
+    if (!canvasDragState.value) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect =
+      canvasDragState.value.kind === "library-custom-node" ? "copy" : "move";
+    setDragOverEdgeIdx(edgeIdx);
+  };
+  const onEdgeDragLeave = () => {
+    setDragOverEdgeIdx((cur) => (cur != null ? null : cur));
+  };
+  const onEdgeDrop = (edgeIdx: number) => async (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOverEdgeIdx(null);
+    const payload = canvasDragState.value;
+    canvasDragState.value = null;
+    if (!payload) return;
+    const position = positionForEdge(edgeIdx);
+    const anchor = position.anchorChainId
+      ? ({
+          kind: "builtin_core_chain" as const,
+          chain_id: position.anchorChainId
+        })
+      : null;
+    if (payload.kind === "library-custom-node") {
+      // Auto-pin (no-op if already pinned) then append the new
+      // usage to the target anchor's bucket. Precise within-bucket
+      // positioning is a Phase 4+ follow-up.
+      const pinned = await ca.pinBranch(
+        profileId,
+        "custom",
+        payload.resourceInstanceId,
+        payload.branchId
+      );
+      if (!pinned) return;
+      await ca.addCustomUsage(
+        profileId,
+        payload.resourceInstanceId,
+        payload.nodeId,
+        anchor
+      );
+      return;
+    }
+    // canvas-custom: re-anchor / reorder.
+    await ca.moveCustomUsage(profileId, payload.arrayIndex, {
+      anchorChainId: position.anchorChainId,
+      beforeCustomArrayIndex: position.beforeCustomArrayIndex
+    });
+  };
+
   return (
     <div className="canvas-flow-track">
       {nodes.map((node, idx) => {
         const prev = idx > 0 ? nodes[idx - 1] : null;
         const edgeDashed = !!prev && (isDisabledCustom(prev) || isDisabledCustom(node));
+        const isDragOver = dragOverEdgeIdx === idx;
         return (
           <Fragment key={canvasNodeKey(node, idx)}>
-            {prev && flowLineVisible && (
+            {prev && (
               <span
-                className={`canvas-edge${edgeDashed ? " is-dashed" : ""}`}
+                className={`canvas-edge${edgeDashed ? " is-dashed" : ""}${
+                  isDragOver ? " is-drop-over" : ""
+                }${!flowLineVisible && !isDragOver ? " is-line-hidden" : ""}`}
                 aria-hidden="true"
+                onDragOver={onEdgeDragOver(idx)}
+                onDragLeave={onEdgeDragLeave}
+                onDrop={onEdgeDrop(idx)}
               >
-                ══►
+                {flowLineVisible || isDragOver ? "══►" : ""}
               </span>
-            )}
-            {prev && !flowLineVisible && (
-              <span className="canvas-edge-spacer" aria-hidden="true" />
             )}
             {node.kind === "slot" ? (
               <SlotCard
@@ -654,6 +852,25 @@ function CustomCard({
       usageArrayIndex: node.arrayIndex
     });
   };
+  const onDragStart = (e: React.DragEvent) => {
+    e.stopPropagation();
+    canvasDragState.value = {
+      kind: "canvas-custom",
+      arrayIndex: node.arrayIndex
+    };
+    e.dataTransfer.effectAllowed = "move";
+    try {
+      e.dataTransfer.setData(
+        "application/x-tinder-canvas-custom",
+        String(node.arrayIndex)
+      );
+    } catch {
+      /* ignore */
+    }
+  };
+  const onDragEnd = () => {
+    canvasDragState.value = null;
+  };
   const onContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -684,11 +901,14 @@ function CustomCard({
       className={cls}
       onClick={onClick}
       onContextMenu={onContextMenu}
+      draggable
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
       role="button"
       tabIndex={0}
       title={
         node.enabled
-          ? `${node.resourceDisplayName ?? ""} / ${node.usage.node_id}`
+          ? `${node.resourceDisplayName ?? ""} / ${node.usage.node_id} · 拖动以重新定位`
           : `${node.resourceDisplayName ?? ""} / ${node.usage.node_id} · 停用`
       }
     >

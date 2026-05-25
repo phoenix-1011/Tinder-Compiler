@@ -11,6 +11,7 @@ import type {
   ComputeResourceBranchEntry,
   ResourceFamilyEntry
 } from "../state/chainAssemblyStorage";
+import { canvasDragState } from "../state/canvasDrag";
 import { ContextMenu, useContextMenu, type ContextMenuItem } from "./ContextMenu";
 
 /**
@@ -367,6 +368,7 @@ function BranchRow({
           <CustomBranchNodes
             branch={entry.branch as CustomComputeResourceBranch}
             resourceInstanceId={familyId}
+            branchId={branchId}
             profile={profile}
           />
         </div>
@@ -378,10 +380,12 @@ function BranchRow({
 function CustomBranchNodes({
   branch,
   resourceInstanceId,
+  branchId,
   profile
 }: {
   branch: CustomComputeResourceBranch;
   resourceInstanceId: string;
+  branchId: string;
   profile: GuiProjectFile | null;
 }) {
   const usageCountByNodeId = useMemo(
@@ -400,19 +404,44 @@ function CustomBranchNodes({
           "canvas-library-node-row",
           count > 0 ? "is-placed" : "is-unplaced"
         ].join(" ");
+        // Phase 4: each node row is a drag source. The whole row is
+        // draggable (not just the ⋮⋮ handle) so users don't have to
+        // aim precisely; the handle is the visual affordance.
+        const onDragStart = (e: React.DragEvent) => {
+          canvasDragState.value = {
+            kind: "library-custom-node",
+            resourceInstanceId,
+            nodeId: node.node_id,
+            branchId
+          };
+          e.dataTransfer.effectAllowed = "copyMove";
+          // Set a string payload too — some browsers refuse to start
+          // the drag unless dataTransfer has at least one MIME type.
+          try {
+            e.dataTransfer.setData(
+              "application/x-tinder-canvas-library-node",
+              `${resourceInstanceId}/${node.node_id}@${branchId}`
+            );
+          } catch {
+            /* ignore */
+          }
+        };
+        const onDragEnd = () => {
+          canvasDragState.value = null;
+        };
         return (
           <div
             key={node.node_id}
             className={rowClass}
-            title={`${node.node_id} · ${count} 次放置`}
+            title={`${node.node_id} · ${count} 次放置 · 拖到画布以添加`}
+            draggable
+            onDragStart={onDragStart}
+            onDragEnd={onDragEnd}
           >
-            {/* Phase 4 wires drag from this handle (C26). For Phase 2
-                the handle is purely visual to validate the row
-                layout footprint. */}
             <span
               className="canvas-library-drag-handle"
               aria-hidden="true"
-              title="拖把手（Phase 4 启用）"
+              title="拖到画布以添加（C26）"
             >
               ⋮⋮
             </span>

@@ -1790,6 +1790,58 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
           ref.kind === kind && ref.resource_instance_id === resourceInstanceId
       );
 
+      // C26 soft-orphan check: when a custom family is already in the
+      // profile and the pin targets a different branch, compare the
+      // current usages' node_ids against the new branch's
+      // custom_nodes. Any usage whose node_id is missing from the
+      // new branch becomes a soft orphan after the transfer — surface
+      // a confirm dialog listing them before committing the write.
+      if (matchIdx >= 0 && kind === "custom") {
+        const currentRef = refs[matchIdx]!;
+        const currentBranchId = profileResourceBranchId(currentRef);
+        if (currentBranchId !== branchId) {
+          const newBranchEntry = family?.branches.find(
+            (b) => b.branch.branch_id === branchId
+          );
+          if (
+            newBranchEntry &&
+            newBranchEntry.branch.resource_kind === "custom"
+          ) {
+            const newNodeIdSet = new Set(
+              newBranchEntry.branch.custom_nodes.map((n) => n.node_id)
+            );
+            const usages = target.project.custom_node_usages ?? [];
+            const orphans = usages.filter(
+              (u) =>
+                u.resource_instance_id === resourceInstanceId &&
+                !newNodeIdSet.has(u.node_id)
+            );
+            if (orphans.length > 0) {
+              const lines = orphans
+                .slice(0, 8)
+                .map((u) => `  · ${u.node_id}`)
+                .join("\n");
+              const overflow =
+                orphans.length - Math.min(8, orphans.length);
+              const message =
+                `切换分支 ${resourceInstanceId}: ${currentBranchId} → ${branchId}\n` +
+                `以下放置在 ${branchId} 中找不到对应节点，切换后将被标记为孤立 (soft orphan)：\n` +
+                lines +
+                (overflow > 0
+                  ? `\n  · …及另外 ${overflow} 个`
+                  : "") +
+                `\n\n继续后孤立放置仍保留在档案里，可在画布中删除或切回原分支。`;
+              const ok = await dialog.confirm({
+                title: "分支切换：会产生孤立放置",
+                message,
+                destructive: false
+              });
+              if (!ok) return false;
+            }
+          }
+        }
+      }
+
       let nextRefs: ProfileResourceRef[];
       if (matchIdx >= 0) {
         // Family already in profile — switch branch and re-enable.
