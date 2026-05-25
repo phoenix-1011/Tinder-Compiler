@@ -271,7 +271,12 @@ function FamilyRow({
   onDeleteBranch,
   openMenu
 }: FamilyRowProps) {
-  const [open, setOpen] = useState(false);
+  // UX1: families default to expanded so users see branches /
+  // nodes immediately on entering canvas mode. Previously
+  // defaulted to false, which left the library looking near-empty
+  // until the user clicked each family — the "默认应该是有资源实例的"
+  // complaint.
+  const [open, setOpen] = useState(true);
   const familyId = family.family.resource_instance_id;
   // Pin scope is "any branch of this family is pinned" — the header
   // mirrors the most-active branch so the user can see at a glance
@@ -369,9 +374,12 @@ function BranchRow({
 }: BranchRowProps) {
   // Custom branches expand to show their nodes; standard branches are
   // leaves in the canvas library (C8 — standard nodes are never
-  // draggable, no need to expose them).
+  // draggable, no need to expose them). UX1: custom branches
+  // default to expanded so the draggable nodes are visible from
+  // the start; standard branches' open state is moot (no children
+  // to show).
   const isCustomBranch = entry.branch.resource_kind === "custom";
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true);
 
   const familyId = family.family.resource_instance_id;
   const branchId = entry.branch.branch_id;

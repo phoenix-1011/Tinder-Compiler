@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { useCa } from "../state/ChainAssemblyContext";
+import { useUI } from "../state/UIContext";
 import { useWorkspace } from "../state/WorkspaceContext";
 import {
   collectProfileV2Resources,
@@ -40,6 +41,7 @@ import { ContextMenu, useContextMenu, type ContextMenuItem } from "./ContextMenu
  */
 export function CanvasView() {
   const { canvasProfileId, exitCanvasMode, openResourceBranch } = useWorkspace();
+  const { sidebarVisible, toggleSidebar } = useUI();
   const ca = useCa();
   const { disk } = ca;
   const cm = useContextMenu();
@@ -367,6 +369,14 @@ export function CanvasView() {
           title="返回配置档案编辑（C3）"
         >
           ← 返回配置档案编辑
+        </button>
+        <button
+          type="button"
+          className={`canvas-view-action-btn${sidebarVisible ? " is-active" : ""}`}
+          onClick={toggleSidebar}
+          title={sidebarVisible ? "隐藏计算实例库（更多画布空间）" : "显示计算实例库"}
+        >
+          {sidebarVisible ? "侧栏: 显" : "侧栏: 隐"}
         </button>
         <span className="canvas-view-profile-label" title={profile.id}>
           画布编辑 · {profile.name}

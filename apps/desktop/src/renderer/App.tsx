@@ -53,8 +53,18 @@ function Workbench() {
   // are absolute-positioned overlays (`.splitter-hit` extends ±3px from
   // the cell origin) so the panels themselves stay flush — no parent-
   // colored seam shows between them.
+  //
+  // UX3: canvas mode enforces a 240px minimum sidebar width so the
+  // user can't accidentally drag the splitter so far left that the
+  // library disappears (the "where did my library go?" foot-gun).
+  // List view modes can still shrink the sidebar arbitrarily.
+  const CANVAS_MIN_SIDEBAR_WIDTH = 240;
+  const effectiveSidebarWidth =
+    appMode === "canvas"
+      ? Math.max(sidebarWidth, CANVAS_MIN_SIDEBAR_WIDTH)
+      : sidebarWidth;
   const cols: string[] = ["var(--tc-activitybar-w)"];
-  if (sidebarVisible) cols.push(`${sidebarWidth}px`, "0");
+  if (sidebarVisible) cols.push(`${effectiveSidebarWidth}px`, "0");
   cols.push("1fr");
   if (aiPanelVisible) cols.push("0", `${aiPanelWidth}px`);
   const bodyTemplate = cols.join(" ");
@@ -72,8 +82,14 @@ function Workbench() {
         {sidebarVisible && (
           <Splitter
             orientation="vertical"
-            value={sidebarWidth}
-            onChange={setSidebarWidth}
+            value={effectiveSidebarWidth}
+            onChange={(next) =>
+              setSidebarWidth(
+                appMode === "canvas"
+                  ? Math.max(next, CANVAS_MIN_SIDEBAR_WIDTH)
+                  : next
+              )
+            }
           />
         )}
         <div className="workbench-main" style={{ gridTemplateRows: mainTemplate }}>
