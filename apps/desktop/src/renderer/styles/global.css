@@ -5738,3 +5738,162 @@ kbd {
   font-size: 11px;
 }
 
+/* ─── Top-bar redesign: icon buttons + profile select + save pill + */
+/*     iOS toggle + primary/destructive button states ────────────── */
+
+/* Adjust topbar layout — flex gap, allow wrapping for narrow windows */
+.canvas-view-topbar {
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+
+/* Icon-only square button (28x28) for ← 返回 / 侧栏. */
+.canvas-view-icon-btn {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid var(--tc-border-popup);
+  color: var(--tc-fg-muted);
+  border-radius: 3px;
+  cursor: pointer;
+  padding: 0;
+  flex: 0 0 auto;
+}
+.canvas-view-icon-btn:hover {
+  background: var(--tc-bg-hover);
+  color: var(--tc-fg-strong);
+}
+.canvas-view-icon-btn.is-active {
+  color: var(--tc-fg-strong);
+  border-color: var(--tc-fg-muted);
+  background: rgba(255, 255, 255, 0.04);
+}
+.canvas-view-icon-btn .codicon {
+  font-size: 14px;
+}
+
+/* Profile dropdown — looks like the chain editor's mode-select */
+.canvas-view-profile-select {
+  background: transparent;
+  border: 1px solid var(--tc-border-popup);
+  color: var(--tc-fg-strong);
+  border-radius: 3px;
+  padding: 4px 22px 4px 10px;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--tc-fg-muted) 50%),
+    linear-gradient(135deg, var(--tc-fg-muted) 50%, transparent 50%);
+  background-position: calc(100% - 12px) 50%, calc(100% - 7px) 50%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  margin-left: 4px;
+}
+.canvas-view-profile-select:hover {
+  background-color: var(--tc-bg-hover);
+}
+
+/* Save status pill — green/orange dot + text. Read-only indicator. */
+.canvas-view-save-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  color: var(--tc-fg-muted);
+  margin-left: 6px;
+  padding: 0 4px;
+  user-select: none;
+}
+.canvas-view-save-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #4ec07a;     /* clean / saved (green) */
+}
+.canvas-view-save-pill.is-dirty .canvas-view-save-dot {
+  background: #e0a82e;     /* dirty (amber) */
+}
+.canvas-view-save-pill.is-dirty {
+  color: #d49a25;
+}
+
+/* iOS-style toggle. Button wraps a label + a pill track with a
+   sliding knob. Knob translates between the two ends based on the
+   `is-on` class on the parent button. */
+.canvas-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--tc-fg-muted);
+  border-radius: 16px;
+  padding: 3px 8px 3px 10px;
+  cursor: pointer;
+  font-size: 12px;
+  user-select: none;
+}
+.canvas-toggle:hover {
+  background: var(--tc-bg-hover);
+  color: var(--tc-fg-default);
+}
+.canvas-toggle.is-on {
+  color: var(--tc-fg-strong);
+}
+.canvas-toggle-label {
+  line-height: 1;
+}
+.canvas-toggle-track {
+  position: relative;
+  display: inline-block;
+  width: 28px;
+  height: 16px;
+  border-radius: 8px;
+  background: rgba(160, 160, 160, 0.45);
+  transition: background 140ms ease-out;
+  flex: 0 0 auto;
+}
+.canvas-toggle.is-on .canvas-toggle-track {
+  background: var(--tc-accent, #007acc);
+}
+.canvas-toggle-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  transition: transform 140ms ease-out;
+}
+.canvas-toggle.is-on .canvas-toggle-knob {
+  transform: translateX(12px);
+}
+
+/* Action button primary / destructive variants for 保存 / 重置 */
+.canvas-view-action-btn.is-primary {
+  background: var(--tc-accent, #007acc);
+  border-color: var(--tc-accent, #007acc);
+  color: #fff;
+}
+.canvas-view-action-btn.is-primary:hover:not(:disabled) {
+  background: var(--tc-accent-hover, #1e8ad6);
+}
+.canvas-view-action-btn.is-destructive {
+  border-color: rgba(214, 90, 90, 0.6);
+  color: #d65a5a;
+}
+.canvas-view-action-btn.is-destructive:hover:not(:disabled) {
+  background: rgba(214, 90, 90, 0.12);
+  color: #e07070;
+}
+.canvas-view-action-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}

@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useCa } from "../state/ChainAssemblyContext";
 import { useUI } from "../state/UIContext";
 import { useWorkspace } from "../state/WorkspaceContext";
@@ -40,7 +40,8 @@ import { ContextMenu, useContextMenu, type ContextMenuItem } from "./ContextMenu
  * stays focused on canvas-area rendering + inspector orchestration.
  */
 export function CanvasView() {
-  const { canvasProfileId, exitCanvasMode, openResourceBranch } = useWorkspace();
+  const { canvasProfileId, enterCanvasMode, exitCanvasMode, openResourceBranch } =
+    useWorkspace();
   const { sidebarVisible, toggleSidebar } = useUI();
   const ca = useCa();
   const { disk } = ca;
@@ -91,6 +92,128 @@ export function CanvasView() {
     if (!canvasProfileId || !disk) return null;
     return disk.profiles.find((p) => p.id === canvasProfileId) ?? null;
   }, [canvasProfileId, disk]);
+
+  // ────────── Checkpoint model (UX4) ──────────────────────────────
+  // Architectural note: canvas writes are LIVE — every action
+  // already hits profile JSON on disk (C1). The checkpoint model
+  // sits on top: a baseline snapshot (in-memory, serialized JSON)
+  // marks the user's last "保存" point. 保存 advances the baseline
+  // to current; 重置 writes the baseline back to disk to undo all
+  // changes since the last 保存. The `dirty` flag is derived from
+  // comparing the live profile.project to the baseline.
+  const baselineRef = useRef<string | null>(null);
+  // savedAt drives the status pill's "已保存 N 秒前" text and acts
+  // as the re-render hook when 保存 / canvas-enter advances the
+  // baseline (mutations to a ref alone don't re-render).
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+
+  // Re-snapshot baseline on canvas-enter or profile-switch. The
+  // dep is profile?.id so switching profiles via the top-bar
+  // dropdown also resets the baseline cleanly.
+  useEffect(() => {
+    if (!profile) {
+      baselineRef.current = null;
+      setSavedAt(null);
+      return;
+    }
+    baselineRef.current = JSON.stringify(profile.project);
+    setSavedAt(Date.now());
+  }, [profile?.id]);
+
+  // Live serialization of profile.project. We compute this regardless
+  // of `dirty` because it's reused by the save / reset handlers below.
+  const liveSerialized = useMemo(
+    () => (profile ? JSON.stringify(profile.project) : null),
+    [profile?.project]
+  );
+  const dirty = useMemo(
+    () =>
+      profile != null &&
+      baselineRef.current != null &&
+      liveSerialized != null &&
+      liveSerialized !== baselineRef.current,
+    // savedAt forces a recompute when 保存 advances the baseline,
+    // since baselineRef is a ref and doesn't trigger renders.
+    [profile, liveSerialized, savedAt]
+  );
+
+  const onSave = useCallback(() => {
+    if (!profile || !liveSerialized) return;
+    baselineRef.current = liveSerialized;
+    setSavedAt(Date.now());
+  }, [profile, liveSerialized]);
+
+  const onReset = useCallback(async () => {
+    if (!profile || baselineRef.current === null) return;
+    const ok = await ca.dialogConfirm({
+      title: "重置画布到上次保存",
+      message:
+        "自上次保存以来的所有改动将被撤销，profile JSON 会被覆盖回到上次保存的状态。继续？",
+      destructive: true,
+      okLabel: "重置"
+    });
+    if (!ok) return;
+    try {
+      await window.tinder.writeText(profile.id, baselineRef.current);
+      await ca.reload();
+      // baselineRef stays where it was; after reload the new
+      // profile.project will match the baseline and `dirty` clears.
+    } catch (err) {
+      await ca.dialogNotify({
+        title: "重置失败",
+        message: String(err)
+      });
+    }
+  }, [profile, ca]);
+
+  /**
+   * Exit guard for all canvas-mode exit paths (← 返回, C13 jump,
+   * C21 jump, double-click full-editor, profile-dropdown switch,
+   * `+ 新建档案`). When dirty, present a save/discard/cancel
+   * dialog before calling `proceed`. Save commits the checkpoint
+   * but leaves disk content alone (already current). Discard
+   * writes the baseline back to disk first (undo). Cancel keeps
+   * the user in canvas with their changes intact.
+   */
+  const guardedExit = useCallback(
+    async (proceed: () => void | Promise<void>) => {
+      if (!dirty || !profile || baselineRef.current === null) {
+        await proceed();
+        return;
+      }
+      const choice = await ca.dialogPickOne({
+        title: "未保存的改动",
+        message:
+          "当前画布有未保存的改动。继续之前要怎么处理？",
+        options: [
+          { id: "save", label: "保存改动并继续（标记当前为新检查点）" },
+          {
+            id: "discard",
+            label: "放弃改动并继续（恢复到上次保存）"
+          }
+        ]
+      });
+      if (choice === null) return; // cancel → stay in canvas
+      if (choice === "save") {
+        onSave();
+        await proceed();
+        return;
+      }
+      // discard → revert disk, then proceed
+      try {
+        await window.tinder.writeText(profile.id, baselineRef.current);
+        await ca.reload();
+      } catch (err) {
+        await ca.dialogNotify({
+          title: "回滚失败",
+          message: String(err)
+        });
+        return;
+      }
+      await proceed();
+    },
+    [dirty, profile, ca, onSave]
+  );
 
   const tinderDir = disk?.paths.tinderDir ?? null;
   const { state, setState, loaded } = useCanvasPersistedState(
@@ -265,16 +388,20 @@ export function CanvasView() {
         okLabel: "继续"
       });
       if (!ok) return;
-      exitCanvasMode();
-      openResourceBranch({
-        scope: "global",
-        resourceId: target.resourceInstanceId,
-        resourceKind: target.resourceKind,
-        branchId: target.branchId,
-        displayName: target.resourceInstanceId
+      // Route through guardedExit so any unsaved checkpoint state
+      // triggers the save/discard/cancel prompt before the jump.
+      void guardedExit(() => {
+        exitCanvasMode();
+        openResourceBranch({
+          scope: "global",
+          resourceId: target.resourceInstanceId,
+          resourceKind: target.resourceKind,
+          branchId: target.branchId,
+          displayName: target.resourceInstanceId
+        });
       });
     },
-    [ca, exitCanvasMode, openResourceBranch]
+    [ca, guardedExit, exitCanvasMode, openResourceBranch]
   );
 
   /**
@@ -328,6 +455,31 @@ export function CanvasView() {
     void proceedJumpToFullEditor(target);
   }, [sharedGuard, proceedJumpToFullEditor]);
 
+  // Profile-dropdown change: route through guardedExit so any
+  // unsaved checkpoint state for the *current* profile triggers
+  // the save/discard prompt before switching.
+  const onProfileDropdownChange = useCallback(
+    (nextValue: string) => {
+      if (nextValue === "__new__") {
+        void guardedExit(async () => {
+          const newPath = await ca.newProfile();
+          if (newPath) enterCanvasMode(newPath);
+        });
+        return;
+      }
+      if (!profile || nextValue === profile.id) return;
+      void guardedExit(() => {
+        enterCanvasMode(nextValue);
+      });
+    },
+    [profile, guardedExit, ca, enterCanvasMode]
+  );
+
+  // ← 返回 button — same exit guard.
+  const onBackClick = useCallback(() => {
+    void guardedExit(() => exitCanvasMode());
+  }, [guardedExit, exitCanvasMode]);
+
   // Profile not loaded: render the same minimal apologetic shell as
   // earlier phases so the back button is always reachable.
   if (!profile) {
@@ -362,48 +514,87 @@ export function CanvasView() {
   return (
     <div className="canvas-view" onKeyDown={onCanvasKeyDown} tabIndex={-1}>
       <div className="canvas-view-topbar">
+        {/* ─── Left: icon-only navigation ─────────────────────── */}
         <button
           type="button"
-          className="canvas-view-back-btn"
-          onClick={exitCanvasMode}
+          className="canvas-view-icon-btn"
+          onClick={onBackClick}
           title="返回配置档案编辑（C3）"
+          aria-label="返回配置档案编辑"
         >
-          ← 返回配置档案编辑
+          <span className="codicon codicon-arrow-left" aria-hidden="true" />
         </button>
         <button
           type="button"
-          className={`canvas-view-action-btn${sidebarVisible ? " is-active" : ""}`}
+          className={`canvas-view-icon-btn${sidebarVisible ? " is-active" : ""}`}
           onClick={toggleSidebar}
           title={sidebarVisible ? "隐藏计算实例库（更多画布空间）" : "显示计算实例库"}
+          aria-label={sidebarVisible ? "隐藏侧栏" : "显示侧栏"}
         >
-          {sidebarVisible ? "侧栏: 显" : "侧栏: 隐"}
+          <span
+            className="codicon codicon-layout-sidebar-left"
+            aria-hidden="true"
+          />
         </button>
-        <span className="canvas-view-profile-label" title={profile.id}>
-          画布编辑 · {profile.name}
+
+        {/* ─── Profile dropdown (replaces the static label) ──── */}
+        <select
+          className="canvas-view-profile-select"
+          value={profile.id}
+          onChange={(e) => onProfileDropdownChange(e.target.value)}
+          title={profile.id}
+        >
+          {disk?.profiles.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+          <option value="__new__">＋ 新建档案…</option>
+        </select>
+
+        {/* ─── Save status pill ─── */}
+        <span
+          className={`canvas-view-save-pill${dirty ? " is-dirty" : " is-clean"}`}
+          title={
+            dirty
+              ? "自上次保存以来有未保存的改动"
+              : savedAt
+                ? `已保存 · ${new Date(savedAt).toLocaleTimeString()}`
+                : "未变更"
+          }
+        >
+          <span className="canvas-view-save-dot" aria-hidden="true" />
+          {dirty ? "未保存" : "已保存"}
         </span>
+
+        {/* ─── Right: toggles + actions + save/reset ─────────── */}
         <div className="canvas-view-topbar-actions">
-          <button
-            type="button"
-            className={`canvas-view-action-btn${
-              state.coverageFilter ? " is-active" : ""
-            }`}
-            onClick={() => setState({ coverageFilter: !state.coverageFilter })}
+          {state.focus.locked && (
+            <button
+              type="button"
+              className="canvas-view-action-btn is-active"
+              onClick={exitLockedFocus}
+              title="退出聚焦（Esc / F）"
+            >
+              聚焦中：± {state.focus.radius} ×
+            </button>
+          )}
+
+          {/* iOS-style toggles for view-state flags */}
+          <ToggleSwitch
+            label="未配置过滤"
+            on={state.coverageFilter}
+            onChange={(next) => setState({ coverageFilter: next })}
             title="切换未覆盖槽位的显示（C6 默认隐藏）"
-          >
-            {state.coverageFilter ? "未配置过滤: 开" : "未配置过滤: 关"}
-          </button>
-          <button
-            type="button"
-            className={`canvas-view-action-btn${
-              state.flowLineVisible ? " is-active" : ""
-            }`}
-            onClick={() =>
-              setState({ flowLineVisible: !state.flowLineVisible })
-            }
+          />
+          <ToggleSwitch
+            label="流程线"
+            on={state.flowLineVisible}
+            onChange={(next) => setState({ flowLineVisible: next })}
             title="切换有向流程线的显示（C23 默认显示）"
-          >
-            {state.flowLineVisible ? "流程线: 开" : "流程线: 关"}
-          </button>
+          />
+
+          {/* Action buttons */}
           <button
             type="button"
             className="canvas-view-action-btn"
@@ -420,16 +611,26 @@ export function CanvasView() {
           >
             + 自定义节点
           </button>
-          {state.focus.locked && (
-            <button
-              type="button"
-              className="canvas-view-action-btn is-active"
-              onClick={exitLockedFocus}
-              title="退出聚焦（Esc / F）"
-            >
-              聚焦中：± {state.focus.radius}  ×
-            </button>
-          )}
+
+          {/* Save / reset */}
+          <button
+            type="button"
+            className={`canvas-view-action-btn${dirty ? " is-primary" : ""}`}
+            onClick={onSave}
+            disabled={!dirty}
+            title="将当前 disk 状态标记为新检查点（保存）"
+          >
+            保存
+          </button>
+          <button
+            type="button"
+            className="canvas-view-action-btn is-destructive"
+            onClick={() => void onReset()}
+            disabled={!dirty}
+            title="恢复到上次保存的状态（撤销自上次保存以来的所有改动）"
+          >
+            重置
+          </button>
         </div>
       </div>
 
@@ -1270,5 +1471,43 @@ function CustomCard({
         </span>
       )}
     </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Top-bar toggle switch (iOS-style)
+// ──────────────────────────────────────────────────────────────────
+
+/**
+ * Compact pill switch used for view-state toggles in the canvas
+ * top bar (coverage filter, flow line). Reads as a horizontal
+ * track with an animated knob — visually obvious on/off without
+ * spelling out 开/关. Label sits before the switch.
+ */
+function ToggleSwitch({
+  label,
+  on,
+  onChange,
+  title
+}: {
+  label: string;
+  on: boolean;
+  onChange: (next: boolean) => void;
+  title?: string;
+}) {
+  return (
+    <button
+      type="button"
+      className={`canvas-toggle${on ? " is-on" : ""}`}
+      onClick={() => onChange(!on)}
+      title={title}
+      aria-pressed={on}
+      role="switch"
+    >
+      <span className="canvas-toggle-label">{label}</span>
+      <span className="canvas-toggle-track" aria-hidden="true">
+        <span className="canvas-toggle-knob" />
+      </span>
+    </button>
   );
 }

@@ -109,7 +109,9 @@ export interface ChainAssemblyValue {
   saveAsNewRoot: () => Promise<void>;
   reload: () => Promise<void>;
 
-  newProfile: () => Promise<void>;
+  /** Creates a new profile (prompts for name). Returns the new
+   *  profile path on success, null when cancelled or on error. */
+  newProfile: () => Promise<string | null>;
   /**
    * Open the new-resource creation dialog. Returns the new resource info on
    * success so callers can immediately open the editor on it, or `null`
@@ -974,10 +976,10 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
     [disk, dialog, reload, setCollapse]
   );
 
-  const newProfile = useCallback(async () => {
-    if (!disk) return;
+  const newProfile = useCallback(async (): Promise<string | null> => {
+    if (!disk) return null;
     const name = await dialog.prompt({ title: "新建配置档案", placeholder: "档案名" });
-    if (!name?.trim()) return;
+    if (!name?.trim()) return null;
     const trimmed = name.trim();
     try {
       const path = await uniqueFilePath(disk.paths.profilesDir, slugify(trimmed), ".json");
@@ -989,8 +991,13 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
         ...prev,
         profiles: { ...(prev.profiles ?? {}), [path]: true }
       }));
+      // Returning the path lets canvas-mode dropdown auto-switch
+      // to the new profile via enterCanvasMode without polling
+      // activeProfileId.
+      return path;
     } catch (err) {
       await dialog.notify({ title: "创建失败", message: String(err) });
+      return null;
     }
   }, [disk, dialog, reload, setCollapse]);
 
