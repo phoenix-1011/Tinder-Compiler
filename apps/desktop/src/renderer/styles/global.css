@@ -5260,6 +5260,15 @@ kbd {
   align-items: center;
   justify-content: flex-start;
   padding-top: 8px;
+  gap: 6px;
+}
+/* Collapsed bottom-dock rail lays its buttons horizontally so the
+   thin strip stays thin, but right-dock keeps the column-flow from
+   the parent .canvas-inspector flex-column. */
+.canvas-inspector.is-collapsed.is-dock-bottom {
+  flex-direction: row;
+  padding-top: 0;
+  padding-left: 8px;
 }
 .canvas-inspector-rail-btn {
   background: transparent;

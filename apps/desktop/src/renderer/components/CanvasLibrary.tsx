@@ -37,7 +37,14 @@ import { ContextMenu, useContextMenu, type ContextMenuItem } from "./ContextMenu
 export function CanvasLibrary() {
   const { canvasProfileId } = useWorkspace();
   const ca = useCa();
-  const { disk, pinBranch, unpinFamily } = ca;
+  const {
+    disk,
+    pinBranch,
+    unpinFamily,
+    setProfileResourceEnabled,
+    createResourceBranchFromSource,
+    deleteResourceBranch
+  } = ca;
   const cm = useContextMenu();
 
   const profile = useMemo(() => {
@@ -68,6 +75,52 @@ export function CanvasLibrary() {
     if (!canvasProfileId) return;
     void unpinFamily(canvasProfileId, kind, resourceInstanceId);
   };
+  // S6: 停用/激活 from the pin context menu. Reuses
+  // setProfileResourceEnabled by synthesizing a minimal
+  // ProfileResourceItem — the mutation only reads `kind` and
+  // `resourceId` off it.
+  const onToggleEnabled = (
+    kind: "standard" | "custom",
+    resourceInstanceId: string,
+    label: string,
+    branchId: string,
+    nextEnabled: boolean
+  ) => {
+    if (!canvasProfileId) return;
+    void setProfileResourceEnabled(
+      canvasProfileId,
+      {
+        id: `lib::${kind}::${resourceInstanceId}`,
+        label,
+        kind,
+        source: "binding",
+        resourceId: resourceInstanceId,
+        branchId,
+        enabled: !nextEnabled
+      },
+      nextEnabled
+    );
+  };
+  // S6: 新建分支（基于此分支）— wraps createResourceBranchFromSource.
+  const onCreateBranchFromSource = (
+    kind: "standard" | "custom",
+    resourceInstanceId: string,
+    sourceBranchId: string
+  ) => {
+    void createResourceBranchFromSource(kind, resourceInstanceId, sourceBranchId, {
+      mode: "copy"
+    });
+  };
+  // S6: 删除分支（未使用）— wraps deleteResourceBranch, which itself
+  // refuses to remove a branch that has profile slots pointing at
+  // it. The user gets the mutation's own confirm + error dialogs.
+  const onDeleteBranch = (
+    kind: "standard" | "custom",
+    resourceInstanceId: string,
+    branchId: string
+  ) => {
+    void deleteResourceBranch(kind, resourceInstanceId, branchId);
+  };
 
   return (
     <div className="canvas-library">
@@ -83,6 +136,9 @@ export function CanvasLibrary() {
             kind="standard"
             onPin={onPin}
             onUnpin={onUnpin}
+            onToggleEnabled={onToggleEnabled}
+            onCreateBranchFromSource={onCreateBranchFromSource}
+            onDeleteBranch={onDeleteBranch}
             openMenu={(e, items) => cm.open(e, items)}
           />
         ))}
@@ -100,6 +156,9 @@ export function CanvasLibrary() {
             kind="custom"
             onPin={onPin}
             onUnpin={onUnpin}
+            onToggleEnabled={onToggleEnabled}
+            onCreateBranchFromSource={onCreateBranchFromSource}
+            onDeleteBranch={onDeleteBranch}
             openMenu={(e, items) => cm.open(e, items)}
           />
         ))}
@@ -124,6 +183,23 @@ type PinHandler = (
   branchId: string
 ) => void;
 type UnpinHandler = (kind: "standard" | "custom", resourceInstanceId: string) => void;
+type ToggleEnabledHandler = (
+  kind: "standard" | "custom",
+  resourceInstanceId: string,
+  label: string,
+  branchId: string,
+  nextEnabled: boolean
+) => void;
+type CreateBranchFromSourceHandler = (
+  kind: "standard" | "custom",
+  resourceInstanceId: string,
+  sourceBranchId: string
+) => void;
+type DeleteBranchHandler = (
+  kind: "standard" | "custom",
+  resourceInstanceId: string,
+  branchId: string
+) => void;
 
 // ──────────────────────────────────────────────────────────────────
 // Section wrapper
@@ -178,6 +254,9 @@ interface FamilyRowProps {
   kind: "standard" | "custom";
   onPin: PinHandler;
   onUnpin: UnpinHandler;
+  onToggleEnabled: ToggleEnabledHandler;
+  onCreateBranchFromSource: CreateBranchFromSourceHandler;
+  onDeleteBranch: DeleteBranchHandler;
   openMenu: OpenMenu;
 }
 
@@ -187,6 +266,9 @@ function FamilyRow({
   kind,
   onPin,
   onUnpin,
+  onToggleEnabled,
+  onCreateBranchFromSource,
+  onDeleteBranch,
   openMenu
 }: FamilyRowProps) {
   const [open, setOpen] = useState(false);
@@ -247,6 +329,9 @@ function FamilyRow({
                 kind={kind}
                 onPin={onPin}
                 onUnpin={onUnpin}
+                onToggleEnabled={onToggleEnabled}
+                onCreateBranchFromSource={onCreateBranchFromSource}
+                onDeleteBranch={onDeleteBranch}
                 openMenu={openMenu}
               />
             ))
@@ -264,6 +349,9 @@ interface BranchRowProps {
   kind: "standard" | "custom";
   onPin: PinHandler;
   onUnpin: UnpinHandler;
+  onToggleEnabled: ToggleEnabledHandler;
+  onCreateBranchFromSource: CreateBranchFromSourceHandler;
+  onDeleteBranch: DeleteBranchHandler;
   openMenu: OpenMenu;
 }
 
@@ -274,6 +362,9 @@ function BranchRow({
   kind,
   onPin,
   onUnpin,
+  onToggleEnabled,
+  onCreateBranchFromSource,
+  onDeleteBranch,
   openMenu
 }: BranchRowProps) {
   // Custom branches expand to show their nodes; standard branches are
@@ -329,7 +420,48 @@ function BranchRow({
         label: "Unpin",
         run: () => onUnpin(kind, familyId)
       });
+      // S6: 停用/激活 makes sense only while pinned — toggles the
+      // ref's enabled flag without dropping the pin.
+      if (pin === "pinned-active") {
+        items.push({
+          id: "deactivate",
+          label: "停用（保留 pin）",
+          run: () =>
+            onToggleEnabled(
+              kind,
+              familyId,
+              entry.branch.display_name,
+              branchId,
+              false
+            )
+        });
+      } else {
+        items.push({
+          id: "activate",
+          label: "激活",
+          run: () =>
+            onToggleEnabled(
+              kind,
+              familyId,
+              entry.branch.display_name,
+              branchId,
+              true
+            )
+        });
+      }
     }
+    // S6: existing branch operations — available regardless of pin.
+    items.push({ separator: true });
+    items.push({
+      id: "new-from",
+      label: "新建分支（基于此分支）",
+      run: () => onCreateBranchFromSource(kind, familyId, branchId)
+    });
+    items.push({
+      id: "delete-branch",
+      label: "删除此分支（仅在未被任何档案引用时）",
+      run: () => onDeleteBranch(kind, familyId, branchId)
+    });
     openMenu(e, items);
   };
 

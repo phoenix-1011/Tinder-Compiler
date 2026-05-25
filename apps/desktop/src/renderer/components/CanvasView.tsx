@@ -998,7 +998,37 @@ function SlotCard({
               const onCoverageContextMenu = (e: React.MouseEvent) => {
                 e.preventDefault();
                 e.stopPropagation();
+                // Helper for the two select-then-act items that
+                // need this card selected first so the inspector
+                // shows the right context.
+                const selectThis = () =>
+                  onSelectionChange({
+                    kind: "coverage",
+                    chainNodeId: node.nodeId,
+                    resourceInstanceId: r.resourceId,
+                    variantId: r.variantId
+                  });
                 onCardContextMenu(e, [
+                  {
+                    // S3: spec calls for `切换分支…` here. Branch
+                    // switching is the pin metaphor (C25), which
+                    // lives in the library sidebar — selecting the
+                    // coverage card draws the user's eye to the
+                    // inspector's branch label, and the library
+                    // shows the family with the current pin.
+                    id: "switch-branch",
+                    label: "切换分支…（在左侧库中 pin 其它分支）",
+                    run: selectThis
+                  },
+                  {
+                    // S3: `候选实现…` — select to reveal the
+                    // candidate dropdown in the inspector (C24c
+                    // single-slot variant).
+                    id: "switch-candidate",
+                    label: "候选实现…",
+                    run: selectThis
+                  },
+                  { separator: true },
                   {
                     id: "deactivate",
                     label: "停用此覆盖",
@@ -1017,7 +1047,6 @@ function SlotCard({
                         false
                       )
                   },
-                  { separator: true },
                   {
                     id: "remove",
                     label: "从档案中移除",
@@ -1153,6 +1182,24 @@ function CustomCard({
     e.preventDefault();
     e.stopPropagation();
     onCardContextMenu(e, [
+      // S4: parity with the list-view custom row menu
+      // (上移 / 下移 / 移到段… / 停用 / 移出链路).
+      {
+        id: "up",
+        label: "上移",
+        run: () => void ca.shiftCustomUsage(profileId, node.arrayIndex, -1)
+      },
+      {
+        id: "down",
+        label: "下移",
+        run: () => void ca.shiftCustomUsage(profileId, node.arrayIndex, 1)
+      },
+      {
+        id: "move",
+        label: "移到段…",
+        run: () => void ca.promptMoveCustomUsage(profileId, node.arrayIndex)
+      },
+      { separator: true },
       node.enabled
         ? {
             id: "deactivate",
@@ -1166,7 +1213,6 @@ function CustomCard({
             run: () =>
               void ca.setCustomUsageEnabled(profileId, node.arrayIndex, true)
           },
-      { separator: true },
       {
         id: "remove",
         label: "移出链路",

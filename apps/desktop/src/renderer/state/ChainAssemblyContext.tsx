@@ -795,6 +795,27 @@ function normalizeProfileFolderPath(folder?: string | null): string | null {
   return normalized || null;
 }
 
+/**
+ * Render the `@ <anchor> 之后` annotation used in dialogs that list
+ * custom usages (S7 soft-orphan, S8 unpin cascade). Looks up the
+ * chain node's display name in CHAIN_CATALOG so users see the
+ * friendly label, not the raw canonical id.
+ */
+function anchorLabel(
+  anchor: { kind: string; chain_id?: string; node_id?: string } | null
+): string {
+  if (!anchor) return "  (尾部)";
+  if (anchor.kind === "builtin_core_chain" && anchor.chain_id) {
+    const node = CHAIN_CATALOG.nodes[anchor.chain_id];
+    const name = node?.displayName ?? anchor.chain_id;
+    return `  @ ${name} 之后`;
+  }
+  if (anchor.kind === "builtin_domain_node" && anchor.node_id) {
+    return `  @ ${anchor.node_id} 之后`;
+  }
+  return "  (anchor 未知)";
+}
+
 function preserveProfileFolderExtras(
   extras: Record<string, ProfileExtras>,
   profileKey: string,
@@ -1817,9 +1838,12 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
                 !newNodeIdSet.has(u.node_id)
             );
             if (orphans.length > 0) {
+              // S7: include the anchor display name "@ <anchor>
+              // 之后" so the user can identify each placement
+              // without cross-referencing the canvas.
               const lines = orphans
                 .slice(0, 8)
-                .map((u) => `  · ${u.node_id}`)
+                .map((u) => `  · ${u.node_id}${anchorLabel(u.insert_before ?? null)}`)
                 .join("\n");
               const overflow =
                 orphans.length - Math.min(8, orphans.length);
@@ -1933,9 +1957,11 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
           : [];
 
       if (kind === "custom" && affectedUsages.length > 0) {
+        // S8: include the anchor display name "@ <anchor> 之后" so
+        // the user can identify each affected placement at a glance.
         const lines = affectedUsages
           .slice(0, 8)
-          .map((u) => `  · ${u.node_id}`)
+          .map((u) => `  · ${u.node_id}${anchorLabel(u.insert_before ?? null)}`)
           .join("\n");
         const overflow = affectedUsages.length - Math.min(8, affectedUsages.length);
         const message =

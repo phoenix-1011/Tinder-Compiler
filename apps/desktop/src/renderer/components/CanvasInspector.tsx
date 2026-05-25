@@ -49,6 +49,9 @@ interface CanvasInspectorProps {
 
 export function CanvasInspector(props: CanvasInspectorProps) {
   if (props.collapsed) {
+    // N4: spec requires the dock toggle to be reachable from the
+    // collapsed rail too — otherwise the user has to expand,
+    // toggle, then collapse again to flip dock orientation.
     return (
       <aside
         className={`canvas-inspector is-collapsed is-dock-${props.dock}`}
@@ -61,6 +64,18 @@ export function CanvasInspector(props: CanvasInspectorProps) {
           title="展开 Inspector"
         >
           {props.dock === "right" ? "⟨" : "⌃"}
+        </button>
+        <button
+          type="button"
+          className="canvas-inspector-rail-btn"
+          onClick={props.onToggleDock}
+          title={
+            props.dock === "right"
+              ? "切换到底部 dock"
+              : "切换到右侧 dock"
+          }
+        >
+          {props.dock === "right" ? "⤓" : "⤖"}
         </button>
       </aside>
     );

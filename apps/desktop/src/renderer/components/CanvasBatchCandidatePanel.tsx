@@ -84,13 +84,14 @@ export function CanvasBatchCandidatePanel({
           (c) => c.node_id === node.nodeId && c.status !== "disabled"
         );
         if (candidates.length === 0) continue;
-        // Only emit a row when this branch claims coverage for this
-        // chain node — i.e., the branch's effective_candidates map
-        // names something here. Otherwise the user has nothing to
-        // adjust.
+        // S2 fix: surface this row regardless of whether the branch
+        // already names an effective candidate for the chain node.
+        // Previously we skipped rows where `branchDefaultCandidateId`
+        // was empty — but those are exactly the rows the user came
+        // here to set. `null` is rendered as "未选" in the "inherit"
+        // option's label so users can see the gap.
         const branchDefaultCandidateId =
           branch.effective_candidates?.[node.nodeId] ?? null;
-        if (!branchDefaultCandidateId) continue;
 
         out.push({
           chainNodeId: node.nodeId,
@@ -193,7 +194,8 @@ export function CanvasBatchCandidatePanel({
                     onChange={(e) => onChange(row, e.target.value)}
                   >
                     <option value="__inherit__">
-                      继承分支默认（{row.branchDefaultCandidateId}）
+                      继承分支默认（
+                      {row.branchDefaultCandidateId ?? "未选"}）
                     </option>
                     {row.candidates.map((c) => (
                       <option key={c.candidateId} value={c.candidateId}>
