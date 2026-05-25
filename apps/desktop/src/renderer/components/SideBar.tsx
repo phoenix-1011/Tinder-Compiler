@@ -4,10 +4,28 @@ import { SearchView } from "./SearchView";
 import { RunView } from "./RunView";
 import { ChainAssemblyView } from "./ChainAssemblyView";
 import { ChainAssemblyHeaderActions } from "./ChainAssemblyChrome";
+import { CanvasLibrary } from "./CanvasLibrary";
 import { ChainHelpSidebar } from "../help/ChainHelpSidebar";
 
 export function SideBar() {
-  const { activeView, folder, openFolder } = useWorkspace();
+  const { activeView, folder, openFolder, appMode } = useWorkspace();
+
+  // Canvas mode (C2 / C4) replaces the sidebar contents with the
+  // library-only view, regardless of which activitybar item the user
+  // last had selected. ActivityBar stays functional but only governs
+  // the profile-tree-mode sidebar.
+  if (appMode === "canvas") {
+    return (
+      <aside className="sidebar" aria-label="侧边栏（画布模式）">
+        <div className="sidebar-header">
+          <span className="sidebar-header-title">计算实例库</span>
+        </div>
+        <div className="sidebar-body">
+          <CanvasLibrary />
+        </div>
+      </aside>
+    );
+  }
 
   let body;
   if (activeView === "explorer") {

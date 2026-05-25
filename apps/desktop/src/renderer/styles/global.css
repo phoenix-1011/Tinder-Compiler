@@ -4723,3 +4723,332 @@ kbd {
   font-size: 14px;
 }
 
+/* Canvas action button active state (Phase 2 — coverage filter / flow line) */
+.canvas-view-action-btn.is-active {
+  background: var(--tc-bg-hover);
+  color: var(--tc-fg-strong);
+  border-color: var(--tc-fg-muted);
+}
+
+/* ─── Canvas Library (left sidebar, Phase 2 read-only) ────────── */
+.canvas-library {
+  padding: 4px 0;
+}
+.canvas-library.is-empty {
+  padding: 16px;
+  color: var(--tc-fg-muted);
+}
+.canvas-library-section {
+  display: flex;
+  flex-direction: column;
+}
+.canvas-library-section-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  color: var(--tc-fg-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 8px 12px 4px;
+  cursor: pointer;
+  text-align: left;
+}
+.canvas-library-section-header:hover {
+  color: var(--tc-fg-strong);
+}
+.canvas-library-section-title {
+  font-weight: 600;
+}
+.canvas-library-section-body {
+  display: flex;
+  flex-direction: column;
+}
+.canvas-library-empty {
+  padding: 4px 24px;
+  color: var(--tc-fg-muted);
+  font-size: 12px;
+  font-style: italic;
+}
+.canvas-library-row {
+  display: inline-flex;
+  width: 100%;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  text-align: left;
+  font-size: 12.5px;
+  color: var(--tc-fg-default);
+  padding: 3px 12px 3px 12px;
+  cursor: pointer;
+  min-height: 22px;
+}
+.canvas-library-row:hover {
+  background: var(--tc-bg-hover);
+}
+.canvas-library-chevron {
+  font-size: 12px;
+  color: var(--tc-fg-muted);
+}
+.canvas-library-chevron-spacer {
+  display: inline-block;
+  width: 12px;
+}
+.canvas-library-family .canvas-library-children {
+  padding-left: 14px;
+}
+.canvas-library-branch .canvas-library-children {
+  padding-left: 14px;
+}
+.canvas-library-branch-row.is-pinned-active {
+  background: rgba(50, 130, 220, 0.10);
+}
+.canvas-library-branch-row.is-pinned-active:hover {
+  background: rgba(50, 130, 220, 0.18);
+}
+.canvas-library-branch-row.is-pinned-disabled {
+  color: var(--tc-fg-muted);
+  font-style: italic;
+}
+.canvas-library-branch-suffix {
+  color: var(--tc-fg-muted);
+  font-size: 11.5px;
+}
+.canvas-library-status-chip {
+  margin-left: auto;
+  font-size: 10.5px;
+  color: var(--tc-fg-muted);
+  border: 1px solid var(--tc-border-soft);
+  border-radius: 8px;
+  padding: 0 6px;
+}
+.canvas-library-name {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.canvas-library-pin {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1px solid var(--tc-fg-muted);
+  background: transparent;
+  flex: 0 0 auto;
+}
+.canvas-library-pin.is-pinned-active {
+  background: #3a7bdc;
+  border-color: #3a7bdc;
+  color: transparent;
+  font-size: 0;
+}
+.canvas-library-pin.is-pinned-disabled {
+  border-color: #3a7bdc;
+  color: transparent;
+  font-size: 0;
+}
+.canvas-library-node-row {
+  font-size: 12px;
+}
+.canvas-library-node-row.is-unplaced {
+  color: var(--tc-fg-muted);
+}
+.canvas-library-drag-handle {
+  color: var(--tc-fg-muted);
+  font-size: 11px;
+  letter-spacing: -2px;
+  cursor: grab;
+}
+.canvas-library-usage-count {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--tc-fg-strong);
+  font-family: var(--tc-font-mono, ui-monospace, "Cascadia Code", Consolas, monospace);
+}
+.canvas-library-usage-count.is-zero {
+  color: var(--tc-fg-muted);
+}
+
+/* ─── Canvas body: group panels + flow track ──────────────────── */
+.canvas-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.canvas-group {
+  border: 1px solid var(--tc-border-soft);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.015);
+}
+.canvas-group.is-custom-only {
+  border-style: dashed;
+}
+.canvas-group-header {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  border: none;
+  color: var(--tc-fg-strong);
+  font-size: 13px;
+  padding: 8px 12px;
+  cursor: pointer;
+  text-align: left;
+}
+.canvas-group-header:hover {
+  background: var(--tc-bg-hover);
+}
+.canvas-group-chevron {
+  font-size: 12px;
+  color: var(--tc-fg-muted);
+}
+.canvas-group-title {
+  font-weight: 600;
+}
+.canvas-group-counts {
+  margin-left: auto;
+  color: var(--tc-fg-muted);
+  font-size: 11.5px;
+}
+.canvas-group-track {
+  padding: 8px 12px 12px;
+}
+.canvas-flow-track {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 8px;
+}
+.canvas-flow-empty {
+  color: var(--tc-fg-muted);
+  font-size: 12px;
+  font-style: italic;
+}
+.canvas-edge {
+  align-self: center;
+  color: var(--tc-fg-muted);
+  font-family: var(--tc-font-mono, ui-monospace, "Cascadia Code", Consolas, monospace);
+  font-size: 13px;
+  user-select: none;
+}
+.canvas-edge.is-dashed {
+  color: rgba(160, 160, 160, 0.6);
+  letter-spacing: 1.5px;
+  font-style: italic;
+}
+.canvas-edge-spacer {
+  display: inline-block;
+  width: 16px;
+}
+
+/* ─── Slot card ───────────────────────────────────────────────── */
+.canvas-slot {
+  display: flex;
+  flex-direction: column;
+  min-width: 160px;
+  max-width: 220px;
+  border: 1px solid var(--tc-border-popup);
+  border-radius: 4px;
+  background: var(--tc-bg-editor);
+  padding: 6px 8px;
+}
+.canvas-slot.is-uncovered {
+  opacity: 0.55;
+  border-style: dashed;
+}
+.canvas-slot.is-multi {
+  border-color: #3a7bdc;
+}
+.canvas-slot-header {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.canvas-slot-order {
+  color: var(--tc-fg-muted);
+  font-size: 11px;
+  font-family: var(--tc-font-mono, ui-monospace, "Cascadia Code", Consolas, monospace);
+}
+.canvas-slot-name {
+  font-size: 12.5px;
+  color: var(--tc-fg-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.canvas-slot-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.canvas-slot-empty {
+  color: var(--tc-fg-muted);
+  font-size: 11.5px;
+  font-style: italic;
+}
+.canvas-coverage-card {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-left: 3px solid #3a7bdc;
+  background: rgba(50, 130, 220, 0.08);
+  padding: 3px 6px;
+  border-radius: 2px;
+  font-size: 11.5px;
+}
+.canvas-coverage-marker {
+  color: var(--tc-fg-muted);
+  font-size: 11px;
+}
+.canvas-coverage-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.canvas-coverage-branch {
+  color: var(--tc-fg-muted);
+  font-size: 11px;
+}
+.canvas-coverage-overflow {
+  align-self: flex-start;
+  font-size: 11px;
+  color: var(--tc-fg-muted);
+  border: 1px solid var(--tc-border-soft);
+  border-radius: 8px;
+  padding: 1px 6px;
+  cursor: default;
+}
+
+/* ─── Custom node (between slots on the flow line) ────────────── */
+.canvas-custom {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  align-self: center;
+  border: 1px solid #8e5fc5;
+  background: rgba(140, 90, 200, 0.10);
+  border-radius: 12px;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+.canvas-custom.is-disabled {
+  opacity: 0.55;
+  border-style: dashed;
+}
+.canvas-custom-marker {
+  color: #8e5fc5;
+}
+.canvas-custom-label {
+  color: var(--tc-fg-strong);
+}
+.canvas-custom-branch {
+  color: var(--tc-fg-muted);
+  font-size: 11px;
+}
+

@@ -1,0 +1,231 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ensureDir, join } from "./chainAssemblyStorage";
+
+/**
+ * Canvas-only UI state, persisted per profile to
+ * `<dataRoot>/.tinder/state/canvas.json` (C1, C15). This file is a
+ * pure UI projection and never enters profile JSON or runtime export.
+ *
+ * Phase 2 persists a minimal subset of the requirement.md schema:
+ * `coverageFilter`, `flowLineVisible`, `collapsedGroups`, and the
+ * inspector dock/collapsed state (Phase 3 will use the dock fields).
+ * Other fields (focus, scroll, selection, collapsedSlots) are added
+ * in later phases.
+ *
+ * Loss-tolerant: missing or invalid file → defaults. Never blocks
+ * profile loading.
+ */
+
+export interface CanvasInspectorState {
+  dock: "right" | "bottom";
+  collapsed: boolean;
+}
+
+export interface CanvasPerProfileState {
+  coverageFilter: boolean;
+  flowLineVisible: boolean;
+  collapsedGroups: string[];
+  inspector: CanvasInspectorState;
+}
+
+interface CanvasStateFile {
+  schema_version: 1;
+  profiles: Record<string, CanvasPerProfileState>;
+}
+
+export const CANVAS_STATE_DIR = "state";
+export const CANVAS_STATE_FILE = "canvas.json";
+
+export const DEFAULT_CANVAS_PER_PROFILE: CanvasPerProfileState = {
+  coverageFilter: true,
+  flowLineVisible: true,
+  collapsedGroups: [],
+  inspector: { dock: "right", collapsed: true }
+};
+
+const DEBOUNCE_MS = 250;
+
+function isPerProfileState(value: unknown): value is CanvasPerProfileState {
+  if (!value || typeof value !== "object") return false;
+  const v = value as Partial<CanvasPerProfileState>;
+  return (
+    typeof v.coverageFilter === "boolean" &&
+    typeof v.flowLineVisible === "boolean" &&
+    Array.isArray(v.collapsedGroups) &&
+    !!v.inspector &&
+    typeof v.inspector === "object" &&
+    (v.inspector.dock === "right" || v.inspector.dock === "bottom") &&
+    typeof v.inspector.collapsed === "boolean"
+  );
+}
+
+async function readCanvasFile(
+  tinderDir: string | null
+): Promise<CanvasStateFile | null> {
+  if (!tinderDir) return null;
+  const stateDir = await join(tinderDir, CANVAS_STATE_DIR);
+  const filePath = await join(stateDir, CANVAS_STATE_FILE);
+  // tryReadText avoids throwing when the file doesn't yet exist —
+  // first canvas-mode open is a no-file case.
+  const raw = await window.tinder.tryReadText(filePath);
+  if (raw == null) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      (parsed as CanvasStateFile).schema_version === 1 &&
+      typeof (parsed as CanvasStateFile).profiles === "object"
+    ) {
+      return parsed as CanvasStateFile;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function writeCanvasFile(
+  tinderDir: string,
+  file: CanvasStateFile
+): Promise<void> {
+  const stateDir = await join(tinderDir, CANVAS_STATE_DIR);
+  await ensureDir(stateDir);
+  const filePath = await join(stateDir, CANVAS_STATE_FILE);
+  await window.tinder.writeText(filePath, JSON.stringify(file, null, 2));
+}
+
+/**
+ * Load + persist canvas state for a single profile.
+ *
+ * - On mount (and whenever `profileId` / `tinderDir` change): reads
+ *   the file, hydrates state from the matching per-profile slot, and
+ *   falls back to defaults if absent or invalid.
+ * - On state change: debounced write back to disk (DEBOUNCE_MS) that
+ *   merges the patched slot into the existing file, preserving other
+ *   profiles' state.
+ * - On unmount: flushes any pending write so a fast mode-switch
+ *   doesn't lose the latest change.
+ *
+ * Returns the per-profile state + a patcher. `loaded` is true once
+ * the first read has resolved; callers can render skeleton UI before
+ * that to avoid a brief flash of default state.
+ */
+export function useCanvasPersistedState(
+  tinderDir: string | null,
+  profileId: string | null
+): {
+  state: CanvasPerProfileState;
+  setState: (patch: Partial<CanvasPerProfileState>) => void;
+  loaded: boolean;
+} {
+  const [state, _setState] = useState<CanvasPerProfileState>(
+    DEFAULT_CANVAS_PER_PROFILE
+  );
+  const [loaded, setLoaded] = useState<boolean>(false);
+
+  // Latest known file contents so we can merge per-profile writes
+  // without clobbering other profiles' slots. Updated on read and
+  // after each successful write.
+  const fileRef = useRef<CanvasStateFile>({ schema_version: 1, profiles: {} });
+  // Debounce + unmount-flush plumbing.
+  const writeTimerRef = useRef<number | null>(null);
+  const pendingWriteRef = useRef<{
+    tinderDir: string;
+    state: CanvasPerProfileState;
+  } | null>(null);
+
+  // Reset state when the keying inputs change. Important so opening
+  // a different profile in canvas mode doesn't briefly show the
+  // previous profile's preferences.
+  useEffect(() => {
+    let cancelled = false;
+    setLoaded(false);
+    _setState(DEFAULT_CANVAS_PER_PROFILE);
+
+    if (!tinderDir || !profileId) {
+      // Nothing to load; mark as loaded so consumers stop showing
+      // the skeleton.
+      setLoaded(true);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    (async () => {
+      const file = await readCanvasFile(tinderDir);
+      if (cancelled) return;
+      if (file) {
+        fileRef.current = file;
+        const slot = file.profiles[profileId];
+        if (slot && isPerProfileState(slot)) {
+          _setState(slot);
+        }
+      }
+      setLoaded(true);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [tinderDir, profileId]);
+
+  const flushPending = useCallback(async () => {
+    if (writeTimerRef.current != null) {
+      window.clearTimeout(writeTimerRef.current);
+      writeTimerRef.current = null;
+    }
+    const pending = pendingWriteRef.current;
+    pendingWriteRef.current = null;
+    if (!pending || !profileId) return;
+    const nextFile: CanvasStateFile = {
+      schema_version: 1,
+      profiles: {
+        ...fileRef.current.profiles,
+        [profileId]: pending.state
+      }
+    };
+    fileRef.current = nextFile;
+    try {
+      await writeCanvasFile(pending.tinderDir, nextFile);
+    } catch {
+      /* Persistence failure is non-fatal: state stays in memory and
+         the next change will retry the write. */
+    }
+  }, [profileId]);
+
+  // On unmount: flush whatever's pending. Don't await — unmount is
+  // synchronous; an async tail kicked off here finishes in the
+  // background before the renderer process tears down.
+  useEffect(() => {
+    return () => {
+      void flushPending();
+    };
+  }, [flushPending]);
+
+  const setState = useCallback(
+    (patch: Partial<CanvasPerProfileState>) => {
+      _setState((prev) => {
+        const merged: CanvasPerProfileState = {
+          ...prev,
+          ...patch,
+          inspector: { ...prev.inspector, ...(patch.inspector ?? {}) }
+        };
+        if (tinderDir && profileId) {
+          pendingWriteRef.current = { tinderDir, state: merged };
+          if (writeTimerRef.current != null) {
+            window.clearTimeout(writeTimerRef.current);
+          }
+          writeTimerRef.current = window.setTimeout(() => {
+            writeTimerRef.current = null;
+            void flushPending();
+          }, DEBOUNCE_MS);
+        }
+        return merged;
+      });
+    },
+    [tinderDir, profileId, flushPending]
+  );
+
+  return { state, setState, loaded };
+}
