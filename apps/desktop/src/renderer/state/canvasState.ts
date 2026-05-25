@@ -21,11 +21,30 @@ export interface CanvasInspectorState {
   collapsed: boolean;
 }
 
+/**
+ * The currently selected canvas entity. Persisted so the inspector
+ * shows the same selection across reloads. Slot is keyed by chain
+ * node id; coverage by (chain node, resource); custom by its
+ * `arrayIndex` into `profile.custom_node_usages` (the same key used
+ * by reorder / shift mutations).
+ */
+export type CanvasSelection =
+  | { kind: "slot"; chainNodeId: string }
+  | {
+      kind: "coverage";
+      chainNodeId: string;
+      resourceInstanceId: string;
+      variantId: string;
+    }
+  | { kind: "custom"; usageArrayIndex: number };
+
 export interface CanvasPerProfileState {
   coverageFilter: boolean;
   flowLineVisible: boolean;
   collapsedGroups: string[];
   inspector: CanvasInspectorState;
+  /** Currently selected canvas entity; null when nothing is selected. */
+  selection: CanvasSelection | null;
 }
 
 interface CanvasStateFile {
@@ -40,7 +59,12 @@ export const DEFAULT_CANVAS_PER_PROFILE: CanvasPerProfileState = {
   coverageFilter: true,
   flowLineVisible: true,
   collapsedGroups: [],
-  inspector: { dock: "right", collapsed: true }
+  // Inspector defaults to right + expanded (Phase 3+). Phase 1
+  // started with `collapsed: true` because there was no content;
+  // once we have real inspector content, expanded is the more
+  // useful initial state per the C4 "self-sufficient canvas" intent.
+  inspector: { dock: "right", collapsed: false },
+  selection: null
 };
 
 const DEBOUNCE_MS = 250;
@@ -48,15 +72,46 @@ const DEBOUNCE_MS = 250;
 function isPerProfileState(value: unknown): value is CanvasPerProfileState {
   if (!value || typeof value !== "object") return false;
   const v = value as Partial<CanvasPerProfileState>;
-  return (
-    typeof v.coverageFilter === "boolean" &&
-    typeof v.flowLineVisible === "boolean" &&
-    Array.isArray(v.collapsedGroups) &&
-    !!v.inspector &&
-    typeof v.inspector === "object" &&
-    (v.inspector.dock === "right" || v.inspector.dock === "bottom") &&
-    typeof v.inspector.collapsed === "boolean"
-  );
+  if (typeof v.coverageFilter !== "boolean") return false;
+  if (typeof v.flowLineVisible !== "boolean") return false;
+  if (!Array.isArray(v.collapsedGroups)) return false;
+  if (
+    !v.inspector ||
+    typeof v.inspector !== "object" ||
+    (v.inspector.dock !== "right" && v.inspector.dock !== "bottom") ||
+    typeof v.inspector.collapsed !== "boolean"
+  ) {
+    return false;
+  }
+  // `selection` is additive in Phase 3; older files may omit it. We
+  // accept both `undefined`, `null`, and a structurally-valid value
+  // and then normalize the hydrated state below.
+  if (v.selection !== undefined && v.selection !== null) {
+    if (typeof v.selection !== "object") return false;
+    const sel = v.selection as { kind?: string };
+    if (
+      sel.kind !== "slot" &&
+      sel.kind !== "coverage" &&
+      sel.kind !== "custom"
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Normalize a hydrated slot — older files that pre-date Phase 3
+ * may not include `selection`. Backfill defaults so downstream code
+ * can treat the field as required.
+ */
+function normalizePerProfileState(
+  raw: CanvasPerProfileState
+): CanvasPerProfileState {
+  return {
+    ...raw,
+    selection: raw.selection ?? null
+  };
 }
 
 async function readCanvasFile(
@@ -159,7 +214,7 @@ export function useCanvasPersistedState(
         fileRef.current = file;
         const slot = file.profiles[profileId];
         if (slot && isPerProfileState(slot)) {
-          _setState(slot);
+          _setState(normalizePerProfileState(slot));
         }
       }
       setLoaded(true);

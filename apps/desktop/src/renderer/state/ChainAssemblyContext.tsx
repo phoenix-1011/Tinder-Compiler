@@ -186,6 +186,40 @@ export interface ChainAssemblyValue {
     branchId: string
   ) => Promise<boolean>;
   /**
+   * Canvas-mode pin (C25): make `branchId` of `resourceInstanceId` the
+   * active branch for the given profile.
+   *
+   * - If the family slot is absent: add it with `selected_branch_id =
+   *   branchId`, `enabled = true`.
+   * - If the family slot exists with a different branch: switch the
+   *   branch (B8 radio) AND set `enabled = true` (Resolved Edge Case
+   *   "Pinning when the family is in profile but enabled = false").
+   * - If the family slot exists with this branch: ensure
+   *   `enabled = true` (re-enable case).
+   *
+   * Returns true on a successful write, false on validation or write
+   * failure (with the user already notified).
+   */
+  pinBranch: (
+    profileId: string,
+    kind: "standard" | "custom",
+    resourceInstanceId: string,
+    branchId: string
+  ) => Promise<boolean>;
+  /**
+   * Canvas-mode unpin (C25): remove the family slot from
+   * `profile.resources`. For custom families, also cascade-remove all
+   * `custom_node_usages` entries belonging to the family, after a
+   * confirm dialog that lists the affected placements (C26).
+   *
+   * Returns true on a successful write, false on cancel / failure.
+   */
+  unpinFamily: (
+    profileId: string,
+    kind: "standard" | "custom",
+    resourceInstanceId: string
+  ) => Promise<boolean>;
+  /**
    * Set a profile-local effective candidate override for one standard node.
    * `undefined` clears the override so the branch default applies; `null`
    * explicitly disables the node for this profile slot.
@@ -1723,6 +1757,171 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
     [disk, writeProfile]
   );
 
+  const pinBranch = useCallback(
+    async (
+      profileId: string,
+      kind: "standard" | "custom",
+      resourceInstanceId: string,
+      branchId: string
+    ): Promise<boolean> => {
+      if (!disk) return false;
+      const target = disk.profiles.find((p) => p.id === profileId);
+      if (!target) return false;
+      // Validate the branch exists in the family — same guard
+      // setProfileResourceBranch uses so the canvas pin can't write
+      // a dangling branch id.
+      const family = disk.resourceIndex.familyByKey.get(
+        `${kind}:${resourceInstanceId}`
+      );
+      const branchExists = family?.branches.some(
+        (entry) => entry.branch.branch_id === branchId
+      );
+      if (!branchExists) {
+        await dialog.notify({
+          title: "无法 pin 分支",
+          message: `计算实例 ${resourceInstanceId} 下不存在分支 ${branchId}。`
+        });
+        return false;
+      }
+
+      const refs = target.project.resources ?? [];
+      const matchIdx = refs.findIndex(
+        (ref) =>
+          ref.kind === kind && ref.resource_instance_id === resourceInstanceId
+      );
+
+      let nextRefs: ProfileResourceRef[];
+      if (matchIdx >= 0) {
+        // Family already in profile — switch branch and re-enable.
+        // For standard refs we also drop any profile-local
+        // `overrides` because they reference the previous branch's
+        // candidates (mirrors the behavior of
+        // setProfileResourceBranch).
+        nextRefs = refs.map((ref, idx) => {
+          if (idx !== matchIdx) return ref;
+          if (ref.kind === "standard") {
+            const { overrides: _drop, ...rest } = ref;
+            return {
+              ...rest,
+              variant_id: branchId,
+              selected_branch_id: branchId,
+              enabled: true
+            };
+          }
+          return {
+            ...ref,
+            selected_branch_id: branchId,
+            enabled: true
+          };
+        });
+      } else {
+        // Family not yet in profile — add a fresh slot.
+        const newRef: ProfileResourceRef =
+          kind === "standard"
+            ? {
+                kind: "standard",
+                resource_instance_id: resourceInstanceId,
+                variant_id: branchId,
+                selected_branch_id: branchId,
+                enabled: true
+              }
+            : {
+                kind: "custom",
+                resource_instance_id: resourceInstanceId,
+                selected_branch_id: branchId,
+                enabled: true
+              };
+        nextRefs = [...refs, newRef];
+      }
+
+      return writeProfile(
+        target,
+        {
+          ...target.project,
+          resources: nextRefs,
+          custom_node_usages: target.project.custom_node_usages ?? []
+        },
+        "Pin 分支失败"
+      );
+    },
+    [disk, dialog, writeProfile]
+  );
+
+  const unpinFamily = useCallback(
+    async (
+      profileId: string,
+      kind: "standard" | "custom",
+      resourceInstanceId: string
+    ): Promise<boolean> => {
+      if (!disk) return false;
+      const target = disk.profiles.find((p) => p.id === profileId);
+      if (!target) return false;
+      const refs = target.project.resources ?? [];
+      const familyRef = refs.find(
+        (ref) =>
+          ref.kind === kind && ref.resource_instance_id === resourceInstanceId
+      );
+      if (!familyRef) {
+        // Nothing to unpin — treat as a successful no-op so the
+        // caller doesn't have to special-case the "already unpinned"
+        // race.
+        return true;
+      }
+
+      // For custom families, cascade-remove the matching usages from
+      // `custom_node_usages` and require explicit confirmation when
+      // any usage exists (C25 + C26). Standard families have no
+      // such cascade — they don't own usages.
+      const usages = target.project.custom_node_usages ?? [];
+      const affectedUsages =
+        kind === "custom"
+          ? usages.filter(
+              (usage) => usage.resource_instance_id === resourceInstanceId
+            )
+          : [];
+
+      if (kind === "custom" && affectedUsages.length > 0) {
+        const lines = affectedUsages
+          .slice(0, 8)
+          .map((u) => `  · ${u.node_id}`)
+          .join("\n");
+        const overflow = affectedUsages.length - Math.min(8, affectedUsages.length);
+        const message =
+          `Unpin ${resourceInstanceId} 将同时删除 ${affectedUsages.length} 个节点放置：\n` +
+          lines +
+          (overflow > 0 ? `\n  · …及另外 ${overflow} 个` : "");
+        const ok = await dialog.confirm({
+          title: "Unpin 自定义资源",
+          message,
+          destructive: true
+        });
+        if (!ok) return false;
+      }
+
+      const nextRefs = refs.filter(
+        (ref) =>
+          !(ref.kind === kind && ref.resource_instance_id === resourceInstanceId)
+      );
+      const nextUsages =
+        kind === "custom"
+          ? usages.filter(
+              (usage) => usage.resource_instance_id !== resourceInstanceId
+            )
+          : usages;
+
+      return writeProfile(
+        target,
+        {
+          ...target.project,
+          resources: nextRefs,
+          custom_node_usages: nextUsages
+        },
+        "Unpin 分支失败"
+      );
+    },
+    [disk, dialog, writeProfile]
+  );
+
   const createProfileBranchFromCurrent = useCallback(
     async (
       profileId: string,
@@ -3223,6 +3422,8 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
       setProfileResourceEnabled,
       setProfileResourceFolder,
       setProfileResourceBranch,
+      pinBranch,
+      unpinFamily,
       setProfileStandardEffectiveCandidate,
       createProfileBranchFromCurrent,
       saveResourceBranch,
@@ -3278,6 +3479,8 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
       setProfileResourceEnabled,
       setProfileResourceFolder,
       setProfileResourceBranch,
+      pinBranch,
+      unpinFamily,
       setProfileStandardEffectiveCandidate,
       createProfileBranchFromCurrent,
       saveResourceBranch,

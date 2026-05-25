@@ -11,6 +11,7 @@ import type {
   ComputeResourceBranchEntry,
   ResourceFamilyEntry
 } from "../state/chainAssemblyStorage";
+import { ContextMenu, useContextMenu, type ContextMenuItem } from "./ContextMenu";
 
 /**
  * Canvas-mode left sidebar (Phase 2 read-only).
@@ -34,7 +35,9 @@ import type {
  */
 export function CanvasLibrary() {
   const { canvasProfileId } = useWorkspace();
-  const { disk } = useCa();
+  const ca = useCa();
+  const { disk, pinBranch, unpinFamily } = ca;
+  const cm = useContextMenu();
 
   const profile = useMemo(() => {
     if (!canvasProfileId || !disk) return null;
@@ -52,6 +55,19 @@ export function CanvasLibrary() {
   const standardFamilies = disk.resourceFamilies.standard;
   const customFamilies = disk.resourceFamilies.custom;
 
+  const onPin = (
+    kind: "standard" | "custom",
+    resourceInstanceId: string,
+    branchId: string
+  ) => {
+    if (!canvasProfileId) return;
+    void pinBranch(canvasProfileId, kind, resourceInstanceId, branchId);
+  };
+  const onUnpin = (kind: "standard" | "custom", resourceInstanceId: string) => {
+    if (!canvasProfileId) return;
+    void unpinFamily(canvasProfileId, kind, resourceInstanceId);
+  };
+
   return (
     <div className="canvas-library">
       <CanvasLibrarySection
@@ -64,6 +80,9 @@ export function CanvasLibrary() {
             family={family}
             profile={profile?.project ?? null}
             kind="standard"
+            onPin={onPin}
+            onUnpin={onUnpin}
+            openMenu={(e, items) => cm.open(e, items)}
           />
         ))}
       </CanvasLibrarySection>
@@ -78,12 +97,32 @@ export function CanvasLibrary() {
             family={family}
             profile={profile?.project ?? null}
             kind="custom"
+            onPin={onPin}
+            onUnpin={onUnpin}
+            openMenu={(e, items) => cm.open(e, items)}
           />
         ))}
       </CanvasLibrarySection>
+
+      {cm.state && (
+        <ContextMenu
+          x={cm.state.x}
+          y={cm.state.y}
+          items={cm.state.items}
+          onClose={cm.close}
+        />
+      )}
     </div>
   );
 }
+
+type OpenMenu = (e: React.MouseEvent, items: ContextMenuItem[]) => void;
+type PinHandler = (
+  kind: "standard" | "custom",
+  resourceInstanceId: string,
+  branchId: string
+) => void;
+type UnpinHandler = (kind: "standard" | "custom", resourceInstanceId: string) => void;
 
 // ──────────────────────────────────────────────────────────────────
 // Section wrapper
@@ -136,9 +175,19 @@ interface FamilyRowProps {
   family: ResourceFamilyEntry;
   profile: GuiProjectFile | null;
   kind: "standard" | "custom";
+  onPin: PinHandler;
+  onUnpin: UnpinHandler;
+  openMenu: OpenMenu;
 }
 
-function FamilyRow({ family, profile, kind }: FamilyRowProps) {
+function FamilyRow({
+  family,
+  profile,
+  kind,
+  onPin,
+  onUnpin,
+  openMenu
+}: FamilyRowProps) {
   const [open, setOpen] = useState(false);
   const familyId = family.family.resource_instance_id;
   // Pin scope is "any branch of this family is pinned" — the header
@@ -151,12 +200,27 @@ function FamilyRow({ family, profile, kind }: FamilyRowProps) {
     return ref.enabled ? "pinned-active" : "pinned-disabled";
   }, [profile, kind, familyId]);
 
+  const onContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const items: ContextMenuItem[] = [];
+    if (familyPin !== "unpinned") {
+      items.push({
+        id: "unpin",
+        label: "Unpin",
+        run: () => onUnpin(kind, familyId)
+      });
+    }
+    if (items.length === 0) return;
+    openMenu(e, items);
+  };
+
   return (
     <div className="canvas-library-family">
       <button
         type="button"
         className="canvas-library-row canvas-library-family-row"
         onClick={() => setOpen((v) => !v)}
+        onContextMenu={onContextMenu}
         title={familyId}
       >
         <span
@@ -180,6 +244,9 @@ function FamilyRow({ family, profile, kind }: FamilyRowProps) {
                 family={family}
                 profile={profile}
                 kind={kind}
+                onPin={onPin}
+                onUnpin={onUnpin}
+                openMenu={openMenu}
               />
             ))
           )}
@@ -194,9 +261,20 @@ interface BranchRowProps {
   family: ResourceFamilyEntry;
   profile: GuiProjectFile | null;
   kind: "standard" | "custom";
+  onPin: PinHandler;
+  onUnpin: UnpinHandler;
+  openMenu: OpenMenu;
 }
 
-function BranchRow({ entry, family, profile, kind }: BranchRowProps) {
+function BranchRow({
+  entry,
+  family,
+  profile,
+  kind,
+  onPin,
+  onUnpin,
+  openMenu
+}: BranchRowProps) {
   // Custom branches expand to show their nodes; standard branches are
   // leaves in the canvas library (C8 — standard nodes are never
   // draggable, no need to expose them).
@@ -226,12 +304,41 @@ function BranchRow({ entry, family, profile, kind }: BranchRowProps) {
 
   const labelSuffix = isDefault ? " (default)" : "";
 
+  const togglePin = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (pin === "unpinned") {
+      onPin(kind, familyId, branchId);
+    } else {
+      onUnpin(kind, familyId);
+    }
+  };
+
+  const onContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const items: ContextMenuItem[] = [];
+    if (pin === "unpinned") {
+      items.push({
+        id: "pin",
+        label: "Pin 此分支",
+        run: () => onPin(kind, familyId, branchId)
+      });
+    } else {
+      items.push({
+        id: "unpin",
+        label: "Unpin",
+        run: () => onUnpin(kind, familyId)
+      });
+    }
+    openMenu(e, items);
+  };
+
   return (
     <div className="canvas-library-branch">
       <button
         type="button"
         className={rowClass}
         onClick={() => isCustomBranch && setOpen((v) => !v)}
+        onContextMenu={onContextMenu}
         title={`${branchId}${labelSuffix}`}
       >
         {isCustomBranch ? (
@@ -244,7 +351,7 @@ function BranchRow({ entry, family, profile, kind }: BranchRowProps) {
         ) : (
           <span className="canvas-library-chevron-spacer" aria-hidden="true" />
         )}
-        <PinIndicator state={pin} />
+        <PinButton state={pin} onClick={togglePin} />
         <span className="canvas-library-name">
           {entry.branch.display_name}
           <span className="canvas-library-branch-suffix">{labelSuffix}</span>
@@ -350,6 +457,39 @@ function PinIndicator({ state }: { state: PinState }) {
     >
       ●
     </span>
+  );
+}
+
+/**
+ * Clickable pin button used on branch rows — distinct from
+ * `PinIndicator` (purely visual, used on family headers). Click
+ * toggles between pin and unpin via the parent's handlers. The
+ * onClick is stopped from propagating so it doesn't also fire the
+ * row-level expand toggle.
+ */
+function PinButton({
+  state,
+  onClick
+}: {
+  state: PinState;
+  onClick: (e: React.MouseEvent) => void;
+}) {
+  const label =
+    state === "unpinned"
+      ? "Pin 此分支"
+      : state === "pinned-active"
+        ? "Unpin（当前激活）"
+        : "Unpin（当前停用）";
+  return (
+    <button
+      type="button"
+      className={`canvas-library-pin canvas-library-pin-btn is-${state}`}
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+    >
+      {state === "unpinned" ? "" : "●"}
+    </button>
   );
 }
 
