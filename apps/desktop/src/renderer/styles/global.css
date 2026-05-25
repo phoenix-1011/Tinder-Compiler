@@ -5072,20 +5072,53 @@ kbd {
   font-size: 12px;
   font-style: italic;
 }
+/* Pure-CSS directional edge — a line drawn via ::before and a triangle
+   arrowhead via ::after. No Unicode text. Color is driven by
+   `currentColor` so state classes (is-dashed / is-drop-over / etc.)
+   only need to set `color`. */
 .canvas-edge {
+  position: relative;
   align-self: center;
+  width: 44px;
+  height: 14px;
+  flex: 0 0 auto;
   color: var(--tc-fg-muted);
-  font-family: var(--tc-font-mono, ui-monospace, "Cascadia Code", Consolas, monospace);
-  font-size: 13px;
   user-select: none;
+  border-radius: 3px;
 }
+/* shaft */
+.canvas-edge::before {
+  content: "";
+  position: absolute;
+  left: 4px;
+  right: 10px;
+  top: 50%;
+  height: 2px;
+  background: currentColor;
+  transform: translateY(-50%);
+  border-radius: 1px;
+}
+/* arrowhead — CSS triangle pointing right */
+.canvas-edge::after {
+  content: "";
+  position: absolute;
+  right: 2px;
+  top: 50%;
+  width: 0;
+  height: 0;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-left: 8px solid currentColor;
+  transform: translateY(-50%);
+}
+/* Dashed variant for edges incident to a disabled custom node (C17). */
 .canvas-edge.is-dashed {
-  color: rgba(160, 160, 160, 0.6);
-  letter-spacing: 1.5px;
-  /* dashed-ish: replace the solid double-arrow with dotted segments
-     via background gradient — but simpler is to lower opacity and
-     italicize. Phase 4 may swap this for proper SVG dashing. */
-  font-style: italic;
+  color: rgba(160, 160, 160, 0.55);
+}
+.canvas-edge.is-dashed::before {
+  background: transparent;
+  border-top: 2px dashed currentColor;
+  height: 0;
 }
 .canvas-edge-spacer {
   display: inline-block;
@@ -5476,25 +5509,24 @@ kbd {
 .canvas-library-node-row:active {
   cursor: grabbing;
 }
-/* Drop-target edge highlight. When a drag is over the edge or the
-   flow line is hidden but the user has started a drag, the edge
-   widens and changes color so the target is unmissable. */
-.canvas-edge {
-  padding: 0 2px;
-  border-radius: 3px;
-}
+/* Edge state variants — drop hover highlight + line-hidden mode.
+   Both reuse the base shaft+arrowhead drawn via ::before / ::after;
+   state classes just recolor. */
 .canvas-edge.is-line-hidden {
-  /* When flow line is OFF and nothing is being dragged, render the
-     edge as a small invisible spacer to preserve gap geometry. */
-  min-width: 16px;
+  /* Flow line OFF and no drag: hide the visual but keep the hit
+     area (44 × 14 px) so the gap geometry between cards stays
+     consistent and drop targets remain detectable. */
   color: transparent;
 }
+.canvas-edge.is-line-hidden::before,
+.canvas-edge.is-line-hidden::after {
+  visibility: hidden;
+}
 .canvas-edge.is-drop-over {
-  background: rgba(140, 90, 200, 0.18);
   color: #b58be0;
+  background: rgba(140, 90, 200, 0.18);
   outline: 1px dashed #8e5fc5;
-  outline-offset: -1px;
-  padding: 0 6px;
+  outline-offset: 1px;
 }
 .canvas-custom[draggable="true"] {
   cursor: grab;

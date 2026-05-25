@@ -1050,6 +1050,9 @@ function FlowTrack({
         return (
           <Fragment key={canvasNodeKey(node, idx)}>
             {prev && (
+              // Edge is drawn entirely via CSS (::before line + ::after
+              // arrowhead). State classes recolor / hide; no Unicode
+              // text content needed.
               <span
                 className={`canvas-edge${edgeDashed ? " is-dashed" : ""}${
                   isDragOver ? " is-drop-over" : ""
@@ -1058,9 +1061,7 @@ function FlowTrack({
                 onDragOver={onEdgeDragOver(idx)}
                 onDragLeave={onEdgeDragLeave}
                 onDrop={onEdgeDrop(idx)}
-              >
-                {flowLineVisible || isDragOver ? "══►" : ""}
-              </span>
+              />
             )}
             {node.kind === "slot" ? (
               <SlotCard
