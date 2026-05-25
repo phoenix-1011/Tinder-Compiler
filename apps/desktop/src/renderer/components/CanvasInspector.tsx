@@ -532,6 +532,12 @@ function CustomInspector({
   const ca = useCa();
   return (
     <div className="canvas-inspector-custom">
+      {node.isOrphan && (
+        <div className="canvas-inspector-orphan-banner">
+          ⚠ 孤立 usage：当前 pin 分支不再声明 <code>{node.usage.node_id}</code>。
+          可在下方移出链路，或在库中切回原分支。
+        </div>
+      )}
       <div className="canvas-inspector-section-title">
         {node.displayName}
       </div>

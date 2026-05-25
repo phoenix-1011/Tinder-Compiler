@@ -5667,3 +5667,65 @@ kbd {
   margin: 6px 0 0;
 }
 
+/* ─── Phase 5: lens highlight (C10 light layer) ───────────────── */
+/* Applied to slot / coverage / custom cards when there's a
+   selection: "near" stays full-opacity, "far" fades to ~40%. The
+   selected card itself (.is-selected) overrides the fade via
+   specificity. */
+.canvas-slot.is-lens-far,
+.canvas-custom.is-lens-far {
+  opacity: 0.45;
+  transition: opacity 0.12s ease-out;
+}
+.canvas-slot.is-lens-near,
+.canvas-custom.is-lens-near {
+  opacity: 1;
+  transition: opacity 0.12s ease-out;
+}
+.canvas-slot.is-selected.is-lens-far,
+.canvas-custom.is-selected.is-lens-far {
+  opacity: 1;
+}
+
+/* ─── Phase 5: locked focus (C10 heavy layer) ─────────────────── */
+.canvas-groups.is-focus-locked .canvas-group.is-force-folded {
+  background: rgba(255, 255, 255, 0.015);
+}
+.canvas-groups.is-focus-locked .canvas-group.is-force-folded .canvas-group-title {
+  color: var(--tc-fg-muted);
+}
+.canvas-groups.is-focus-locked .canvas-group.is-force-folded .canvas-group-counts {
+  color: rgba(160, 160, 160, 0.6);
+}
+
+/* ─── Phase 5: orphan custom usage (C26) ──────────────────────── */
+.canvas-custom.is-orphan {
+  border-color: #d65a5a;
+  background: rgba(214, 90, 90, 0.10);
+}
+.canvas-custom.is-orphan .canvas-custom-marker {
+  color: #d65a5a;
+}
+.canvas-custom-orphan-chip {
+  margin-left: 4px;
+  color: #d65a5a;
+  font-weight: 700;
+}
+.canvas-inspector-orphan-banner {
+  background: rgba(214, 90, 90, 0.10);
+  border: 1px solid rgba(214, 90, 90, 0.45);
+  color: #d65a5a;
+  border-radius: 4px;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.4;
+  margin-bottom: 10px;
+}
+.canvas-inspector-orphan-banner code {
+  background: rgba(255, 255, 255, 0.06);
+  padding: 1px 4px;
+  border-radius: 2px;
+  font-family: var(--tc-font-mono, ui-monospace, "Cascadia Code", Consolas, monospace);
+  font-size: 11px;
+}
+

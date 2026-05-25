@@ -38,6 +38,25 @@ export type CanvasSelection =
     }
   | { kind: "custom"; usageArrayIndex: number };
 
+/**
+ * Locked focus state (C10). When `locked === true`, the canvas
+ * filters its rendered nodes to `target ± radius` in canonical
+ * execution order, folding non-windowed group panels to title
+ * strips. `target === null` while locked means "no target yet" and
+ * the canvas behaves as if unlocked.
+ *
+ * Radius counts ALL nodes (slot + custom) per Resolved Edge Case
+ * "Locked Focus Geometry → Radius counting". Cross-group span is
+ * allowed; coverage filter is applied first (in the projection),
+ * then radius is computed over the filtered list.
+ */
+export interface CanvasFocusState {
+  locked: boolean;
+  target: CanvasSelection | null;
+  /** ± N neighbors. Default 2 per Resolved Edge Cases. */
+  radius: number;
+}
+
 export interface CanvasPerProfileState {
   coverageFilter: boolean;
   flowLineVisible: boolean;
@@ -45,6 +64,8 @@ export interface CanvasPerProfileState {
   inspector: CanvasInspectorState;
   /** Currently selected canvas entity; null when nothing is selected. */
   selection: CanvasSelection | null;
+  /** Locked focus state (C10); see CanvasFocusState. */
+  focus: CanvasFocusState;
 }
 
 interface CanvasStateFile {
@@ -64,7 +85,8 @@ export const DEFAULT_CANVAS_PER_PROFILE: CanvasPerProfileState = {
   // once we have real inspector content, expanded is the more
   // useful initial state per the C4 "self-sufficient canvas" intent.
   inspector: { dock: "right", collapsed: false },
-  selection: null
+  selection: null,
+  focus: { locked: false, target: null, radius: 2 }
 };
 
 const DEBOUNCE_MS = 250;
@@ -97,6 +119,11 @@ function isPerProfileState(value: unknown): value is CanvasPerProfileState {
       return false;
     }
   }
+  // `focus` is additive in Phase 5; allow missing or any
+  // structurally-valid value. We re-normalize fields below.
+  if (v.focus !== undefined && v.focus !== null) {
+    if (typeof v.focus !== "object") return false;
+  }
   return true;
 }
 
@@ -108,9 +135,19 @@ function isPerProfileState(value: unknown): value is CanvasPerProfileState {
 function normalizePerProfileState(
   raw: CanvasPerProfileState
 ): CanvasPerProfileState {
+  const rawFocus = raw.focus as Partial<CanvasFocusState> | undefined | null;
+  const focus: CanvasFocusState = {
+    locked: typeof rawFocus?.locked === "boolean" ? rawFocus.locked : false,
+    target: rawFocus?.target ?? null,
+    radius:
+      typeof rawFocus?.radius === "number" && rawFocus.radius >= 0
+        ? rawFocus.radius
+        : 2
+  };
   return {
     ...raw,
-    selection: raw.selection ?? null
+    selection: raw.selection ?? null,
+    focus
   };
 }
 
@@ -166,12 +203,24 @@ async function writeCanvasFile(
  * the first read has resolved; callers can render skeleton UI before
  * that to avoid a brief flash of default state.
  */
+/**
+ * Patch shape accepted by `setState`. Nested objects (`inspector`,
+ * `focus`) are themselves Partial so callers can update a single
+ * sub-field without re-specifying the full sub-object.
+ */
+export type CanvasStatePatch = Partial<
+  Omit<CanvasPerProfileState, "inspector" | "focus">
+> & {
+  inspector?: Partial<CanvasInspectorState>;
+  focus?: Partial<CanvasFocusState>;
+};
+
 export function useCanvasPersistedState(
   tinderDir: string | null,
   profileId: string | null
 ): {
   state: CanvasPerProfileState;
-  setState: (patch: Partial<CanvasPerProfileState>) => void;
+  setState: (patch: CanvasStatePatch) => void;
   loaded: boolean;
 } {
   const [state, _setState] = useState<CanvasPerProfileState>(
@@ -259,12 +308,13 @@ export function useCanvasPersistedState(
   }, [flushPending]);
 
   const setState = useCallback(
-    (patch: Partial<CanvasPerProfileState>) => {
+    (patch: CanvasStatePatch) => {
       _setState((prev) => {
         const merged: CanvasPerProfileState = {
           ...prev,
           ...patch,
-          inspector: { ...prev.inspector, ...(patch.inspector ?? {}) }
+          inspector: { ...prev.inspector, ...(patch.inspector ?? {}) },
+          focus: { ...prev.focus, ...(patch.focus ?? {}) }
         };
         if (tinderDir && profileId) {
           pendingWriteRef.current = { tinderDir, state: merged };

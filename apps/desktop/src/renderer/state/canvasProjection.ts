@@ -11,6 +11,7 @@ import {
   type ChainProjectionRow,
   type CustomUsageRow
 } from "./chainProjection";
+import type { CanvasSelection } from "./canvasState";
 
 /**
  * Canvas-side projection of a profile. The canvas (Phase 2+) renders
@@ -62,6 +63,13 @@ export interface CanvasCustomNode {
   anchorChainId: string | null;
   /** Mirror of usage.enabled for the canvas renderer (C17 dashed edges). */
   enabled: boolean;
+  /**
+   * True when the usage's `node_id` does not exist in the currently
+   * pinned branch's `custom_nodes` — i.e., a soft-orphan left over
+   * from a branch transfer (C26). The canvas renders these with a
+   * warning treatment and the inspector exposes recovery actions.
+   */
+  isOrphan: boolean;
 }
 
 export interface CanvasGroup {
@@ -111,6 +119,33 @@ export function buildCanvasProjection(
   customLeaves: CustomNodeConfig[],
   coverageFilter: boolean
 ): CanvasProjection {
+  // Pre-compute orphan-usage set (C26): a usage is orphan when its
+  // `node_id` isn't declared by the currently pinned branch's
+  // `custom_nodes`. `profileResources` already resolves to the
+  // pinned branch's content per `collectProfileV2Resources`, so a
+  // missing `custom_nodes` match here means the branch transferred
+  // away from a definition that previously existed.
+  const orphanArrayIndexes = new Set<number>();
+  (profile.custom_node_usages ?? []).forEach((usage, idx) => {
+    const resource = profileResources.find(
+      (r) =>
+        r.resource_kind === "custom" &&
+        r.resource_instance_id === usage.resource_instance_id
+    );
+    if (!resource || resource.resource_kind !== "custom") {
+      // No resolved resource — treat as orphan so the user sees a
+      // recoverable warning instead of a silently-broken usage.
+      orphanArrayIndexes.add(idx);
+      return;
+    }
+    const declared = resource.custom_nodes.some(
+      (n) => n.node_id === usage.node_id
+    );
+    if (!declared) orphanArrayIndexes.add(idx);
+  });
+  const rowToNodeWithOrphans = (row: ChainProjectionRow): CanvasNode =>
+    rowToNode(row, orphanArrayIndexes);
+
   // Reuse the list projection so canvas + list stay perfectly
   // aligned on row ordering, coverage tallying, and custom display
   // names. Differences are limited to *grouping* and the visibility
@@ -168,7 +203,7 @@ export function buildCanvasProjection(
     const meta = groupBySlug.get(slug);
     const title = meta?.title ?? slug;
     const rowsInGroup = buckets.get(slug) ?? [];
-    const allNodes = rowsInGroup.map(rowToNode);
+    const allNodes = rowsInGroup.map(rowToNodeWithOrphans);
 
     const slotsInGroup = allNodes.filter(
       (n): n is CanvasSlotNode => n.kind === "slot"
@@ -205,8 +240,8 @@ export function buildCanvasProjection(
           docSlug: "__custom_only__",
           docTitle: "Custom-only anchors",
           isCustomOnly: true,
-          allNodes: customOnlyRows.map(rowToNode),
-          visibleNodes: customOnlyRows.map(rowToNode),
+          allNodes: customOnlyRows.map(rowToNodeWithOrphans),
+          visibleNodes: customOnlyRows.map(rowToNodeWithOrphans),
           coveredSlotCount: 0,
           totalSlotCount: 0,
           hiddenSlotCount: 0
@@ -220,7 +255,10 @@ export function buildCanvasProjection(
 // Internals
 // ──────────────────────────────────────────────────────────────────────
 
-function rowToNode(row: ChainProjectionRow): CanvasNode {
+function rowToNode(
+  row: ChainProjectionRow,
+  orphanArrayIndexes: Set<number>
+): CanvasNode {
   if (row.kind === "chain-node") {
     return {
       kind: "slot",
@@ -240,7 +278,8 @@ function rowToNode(row: ChainProjectionRow): CanvasNode {
     resourceDisplayName: row.resourceDisplayName,
     branchId: row.branchId,
     anchorChainId: row.anchorChainId,
-    enabled: row.usage.enabled
+    enabled: row.usage.enabled,
+    isOrphan: orphanArrayIndexes.has(row.arrayIndex)
   };
 }
 
@@ -272,4 +311,151 @@ function filterVisible(
     if (customsBySlotAnchor.has(n.nodeId)) return true;
     return false;
   });
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Locked focus filter (C10)
+// ──────────────────────────────────────────────────────────────────
+
+/**
+ * Apply the locked-focus window to a projection. Returns a NEW
+ * projection where:
+ *   - the ±N neighborhood around `target` is rendered as the only
+ *     visible nodes (groups outside the window collapse to title
+ *     strips — the caller decides whether to honor that via UI)
+ *   - groups containing in-window nodes keep only the in-window
+ *     portion in `visibleNodes`
+ *   - groups with no in-window node have empty `visibleNodes`; the
+ *     UI is expected to treat them as collapsed-to-title (a Phase 5
+ *     UI concern, not a projection concern).
+ *
+ * Per Resolved Edge Cases:
+ *   - radius counts ALL nodes (slot + custom), not slots only
+ *   - cross-group span is allowed
+ *   - coverage filter has already been applied by buildCanvasProjection;
+ *     this filter operates on the post-coverage-filter list so the
+ *     ±N window is interpreted in "visible space"
+ *
+ * If `target` is null or can't be located in the projection, returns
+ * the projection unchanged.
+ */
+export function applyLockedFocus(
+  projection: CanvasProjection,
+  target: CanvasSelection | null,
+  radius: number
+): CanvasProjection {
+  if (!target) return projection;
+  // Flatten visible nodes across groups (plus custom-only) in
+  // canonical order so we can compute the window in one pass. The
+  // flat-index → group mapping lets us split the window back into
+  // per-group slices afterwards.
+  const flat: Array<{ node: CanvasNode; groupIndex: number }> = [];
+  projection.groups.forEach((g, gi) => {
+    for (const n of g.visibleNodes) {
+      flat.push({ node: n, groupIndex: gi });
+    }
+  });
+  if (projection.customOnly) {
+    for (const n of projection.customOnly.visibleNodes) {
+      flat.push({ node: n, groupIndex: projection.groups.length });
+    }
+  }
+
+  const centerIdx = flat.findIndex(({ node }) =>
+    nodeMatchesSelection(node, target)
+  );
+  if (centerIdx < 0) {
+    // Target was filtered out by the coverage filter, or selection
+    // points at something not present (e.g. just-deleted custom). No
+    // window to compute — return unchanged.
+    return projection;
+  }
+
+  const minIdx = Math.max(0, centerIdx - radius);
+  const maxIdx = Math.min(flat.length - 1, centerIdx + radius);
+
+  // Build a Set of "(groupIndex, nodeKey)" tokens for fast in-window
+  // checks per group's visibleNodes. nodeKey is the canonical
+  // identity used elsewhere.
+  const inWindow = new Set<string>();
+  for (let i = minIdx; i <= maxIdx; i++) {
+    const entry = flat[i]!;
+    inWindow.add(`${entry.groupIndex}::${nodeIdentity(entry.node)}`);
+  }
+
+  const filterGroup = (g: CanvasGroup, gi: number): CanvasGroup => {
+    const filtered = g.visibleNodes.filter((n) =>
+      inWindow.has(`${gi}::${nodeIdentity(n)}`)
+    );
+    if (filtered.length === g.visibleNodes.length) return g;
+    return { ...g, visibleNodes: filtered };
+  };
+
+  return {
+    groups: projection.groups.map((g, gi) => filterGroup(g, gi)),
+    customOnly: projection.customOnly
+      ? filterGroup(projection.customOnly, projection.groups.length)
+      : null
+  };
+}
+
+function nodeMatchesSelection(
+  node: CanvasNode,
+  sel: CanvasSelection
+): boolean {
+  if (sel.kind === "slot") {
+    return node.kind === "slot" && node.nodeId === sel.chainNodeId;
+  }
+  if (sel.kind === "coverage") {
+    // The slot containing the coverage is the center — coverage
+    // cards live inside slots, they don't have their own canvas
+    // position.
+    return node.kind === "slot" && node.nodeId === sel.chainNodeId;
+  }
+  return (
+    node.kind === "custom" && node.arrayIndex === sel.usageArrayIndex
+  );
+}
+
+function nodeIdentity(node: CanvasNode): string {
+  return node.kind === "slot"
+    ? `slot:${node.nodeId}`
+    : `custom:${node.arrayIndex}`;
+}
+
+/**
+ * Lens-highlight neighbor set (C10 light layer). Given a selection
+ * and the projection, returns a set of node-identity tokens that
+ * represent the selection + its first-degree neighbors in canonical
+ * visible order. Callers compare each rendered node's identity
+ * against this set to decide between `is-lens-near` and
+ * `is-lens-far` classes.
+ *
+ * When no selection: returns null (caller should not apply any
+ * fade — the default rendering already shows all nodes at full
+ * opacity).
+ */
+export function lensNeighborTokens(
+  projection: CanvasProjection,
+  selection: CanvasSelection | null
+): Set<string> | null {
+  if (!selection) return null;
+  const flat: CanvasNode[] = [
+    ...projection.groups.flatMap((g) => g.visibleNodes),
+    ...(projection.customOnly?.visibleNodes ?? [])
+  ];
+  const centerIdx = flat.findIndex((n) =>
+    nodeMatchesSelection(n, selection)
+  );
+  if (centerIdx < 0) return null;
+  const tokens = new Set<string>();
+  for (let i = Math.max(0, centerIdx - 1); i <= Math.min(flat.length - 1, centerIdx + 1); i++) {
+    tokens.add(nodeIdentity(flat[i]!));
+  }
+  return tokens;
+}
+
+/** Same identity function the focus filter uses — exported for callers. */
+export function canvasNodeIdentity(node: CanvasNode): string {
+  return nodeIdentity(node);
 }

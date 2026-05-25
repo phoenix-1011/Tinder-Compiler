@@ -6,10 +6,14 @@ import {
   flattenLeaves
 } from "../state/chainAssemblyStorage";
 import {
+  applyLockedFocus,
   buildCanvasProjection,
+  canvasNodeIdentity,
+  lensNeighborTokens,
   type CanvasCustomNode,
   type CanvasGroup,
   type CanvasNode,
+  type CanvasProjection,
   type CanvasSlotNode
 } from "../state/canvasProjection";
 import {
@@ -73,7 +77,7 @@ export function CanvasView() {
     [disk]
   );
 
-  const projection = useMemo(() => {
+  const projectionBase = useMemo(() => {
     if (!profile) return null;
     return buildCanvasProjection(
       profile.project,
@@ -82,6 +86,29 @@ export function CanvasView() {
       state.coverageFilter
     );
   }, [profile, v2Resources, flatCustom, state.coverageFilter]);
+
+  // Locked focus (C10) windows the projection to ±radius around the
+  // focus target. Composed AFTER the coverage filter per Resolved
+  // Edge Cases. When unlocked or target missing, projection === base.
+  const projection = useMemo<CanvasProjection | null>(() => {
+    if (!projectionBase) return null;
+    if (!state.focus.locked || !state.focus.target) return projectionBase;
+    return applyLockedFocus(
+      projectionBase,
+      state.focus.target,
+      state.focus.radius
+    );
+  }, [projectionBase, state.focus.locked, state.focus.target, state.focus.radius]);
+
+  // Lens highlight (C10 light layer). null when no selection — the
+  // FlowTrack treats null as "no fade applied".
+  const lensTokens = useMemo(
+    () =>
+      projectionBase
+        ? lensNeighborTokens(projectionBase, state.selection)
+        : null,
+    [projectionBase, state.selection]
+  );
 
   const collapsedGroupSet = useMemo(
     () => new Set(state.collapsedGroups),
@@ -102,13 +129,59 @@ export function CanvasView() {
     [setState]
   );
 
-  const onCardKeyDown = useCallback(
+  /**
+   * Enter / exit / toggle locked focus (C10 heavy layer).
+   *   - enterLockedFocus(target): explicit set, used by double-click
+   *   - toggleLockedFocus(): F shortcut — locks on current selection,
+   *     or unlocks if already locked
+   *   - exitLockedFocus(): explicit unlock, used by Esc and the
+   *     unlock button on the canvas top bar.
+   */
+  const enterLockedFocus = useCallback(
+    (target: CanvasSelection) => {
+      setState({ focus: { locked: true, target } });
+    },
+    [setState]
+  );
+  const exitLockedFocus = useCallback(() => {
+    setState({ focus: { locked: false } });
+  }, [setState]);
+  const toggleLockedFocus = useCallback(() => {
+    if (state.focus.locked) {
+      exitLockedFocus();
+      return;
+    }
+    if (!state.selection) return;
+    enterLockedFocus(state.selection);
+  }, [state.focus.locked, state.selection, enterLockedFocus, exitLockedFocus]);
+
+  const onCanvasKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
+      // Esc: unlock focus first, then clear selection. Pressing
+      // twice in a row gets the user back to the default view.
       if (event.key === "Escape") {
-        setSelection(null);
+        if (state.focus.locked) exitLockedFocus();
+        else setSelection(null);
+        return;
+      }
+      // F: toggle locked focus on the current selection (C10).
+      // Ignore when an editable element is focused so it doesn't
+      // hijack typing in form fields (the inspector has dropdowns
+      // and the batch panel has selects).
+      if (event.key === "f" || event.key === "F") {
+        const tag = (event.target as HTMLElement | null)?.tagName ?? "";
+        if (
+          tag === "INPUT" ||
+          tag === "TEXTAREA" ||
+          tag === "SELECT"
+        ) {
+          return;
+        }
+        event.preventDefault();
+        toggleLockedFocus();
       }
     },
-    [setSelection]
+    [state.focus.locked, exitLockedFocus, setSelection, toggleLockedFocus]
   );
 
   /**
@@ -144,15 +217,18 @@ export function CanvasView() {
    * C13 dialog before invoking this directly.
    */
   const proceedJumpToFullEditor = useCallback(
-    (target: {
+    async (target: {
       resourceKind: "standard" | "custom";
       resourceInstanceId: string;
       branchId: string;
     }) => {
-      const ok = window.confirm(
-        `切换到「配置档案编辑」并打开 ${target.resourceInstanceId} / ${target.branchId} 的完整编辑器？\n` +
-          `画布将退出，UI 状态 (聚焦 / 折叠 / scroll / inspector dock) 已保存，可下次回到画布恢复。`
-      );
+      const ok = await ca.dialogConfirm({
+        title: "切换到「配置档案编辑」？",
+        message:
+          `即将打开 ${target.resourceInstanceId} / ${target.branchId} 的完整编辑器。\n` +
+          `画布将退出，UI 状态 (聚焦 / 折叠 / scroll / inspector dock) 已保存，可下次回到画布恢复。`,
+        okLabel: "继续"
+      });
       if (!ok) return;
       exitCanvasMode();
       openResourceBranch({
@@ -163,7 +239,7 @@ export function CanvasView() {
         displayName: target.resourceInstanceId
       });
     },
-    [exitCanvasMode, openResourceBranch]
+    [ca, exitCanvasMode, openResourceBranch]
   );
 
   /**
@@ -189,7 +265,7 @@ export function CanvasView() {
         setSharedGuard({ target, usageCount });
         return;
       }
-      proceedJumpToFullEditor(target);
+      void proceedJumpToFullEditor(target);
     },
     [profile, countBranchUsage, proceedJumpToFullEditor]
   );
@@ -214,7 +290,7 @@ export function CanvasView() {
     if (!sharedGuard) return;
     const target = sharedGuard.target;
     setSharedGuard(null);
-    proceedJumpToFullEditor(target);
+    void proceedJumpToFullEditor(target);
   }, [sharedGuard, proceedJumpToFullEditor]);
 
   // Profile not loaded: render the same minimal apologetic shell as
@@ -249,7 +325,7 @@ export function CanvasView() {
   ].join(" ");
 
   return (
-    <div className="canvas-view" onKeyDown={onCardKeyDown} tabIndex={-1}>
+    <div className="canvas-view" onKeyDown={onCanvasKeyDown} tabIndex={-1}>
       <div className="canvas-view-topbar">
         <button
           type="button"
@@ -295,12 +371,22 @@ export function CanvasView() {
           </button>
           <button
             type="button"
-            className="canvas-view-action-btn is-placeholder"
-            disabled
-            title="Phase 5: 新建自定义节点"
+            className="canvas-view-action-btn"
+            onClick={() => void ca.promptNewResource("custom")}
+            title="新建自定义计算实例（C14）"
           >
             + 自定义节点
           </button>
+          {state.focus.locked && (
+            <button
+              type="button"
+              className="canvas-view-action-btn is-active"
+              onClick={exitLockedFocus}
+              title="退出聚焦（Esc / F）"
+            >
+              聚焦中：± {state.focus.radius}  ×
+            </button>
+          )}
         </div>
       </div>
 
@@ -324,6 +410,9 @@ export function CanvasView() {
               onToggleGroup={toggleGroup}
               selection={state.selection}
               onSelectionChange={setSelection}
+              onEnterLockedFocus={enterLockedFocus}
+              focusLocked={state.focus.locked}
+              lensTokens={lensTokens}
               onCardContextMenu={(e, items) => cm.open(e, items)}
               profileId={profile.id}
             />
@@ -392,6 +481,9 @@ interface CanvasBodyProps {
   onToggleGroup: (docSlug: string) => void;
   selection: CanvasSelection | null;
   onSelectionChange: (next: CanvasSelection | null) => void;
+  onEnterLockedFocus: (target: CanvasSelection) => void;
+  focusLocked: boolean;
+  lensTokens: Set<string> | null;
   onCardContextMenu: (event: React.MouseEvent, items: ContextMenuItem[]) => void;
   profileId: string;
 }
@@ -403,6 +495,9 @@ function CanvasBody({
   onToggleGroup,
   selection,
   onSelectionChange,
+  onEnterLockedFocus,
+  focusLocked,
+  lensTokens,
   onCardContextMenu,
   profileId
 }: CanvasBodyProps) {
@@ -426,20 +521,34 @@ function CanvasBody({
   }
 
   return (
-    <div className="canvas-groups">
-      {visibleGroups.map((group) => (
-        <GroupPanel
-          key={group.docSlug}
-          group={group}
-          collapsed={collapsedGroups.has(group.docSlug)}
-          flowLineVisible={flowLineVisible}
-          onToggle={() => onToggleGroup(group.docSlug)}
-          selection={selection}
-          onSelectionChange={onSelectionChange}
-          onCardContextMenu={onCardContextMenu}
-          profileId={profileId}
-        />
-      ))}
+    <div className={`canvas-groups${focusLocked ? " is-focus-locked" : ""}`}>
+      {visibleGroups.map((group) => {
+        // When locked focus is on, groups outside the radius window
+        // have empty visibleNodes — render them as collapsed title
+        // strips (no body) regardless of the user's per-group
+        // collapsed preference. This satisfies the C10 "fold other
+        // group panels to title strips" rule.
+        const isFolded =
+          focusLocked && group.visibleNodes.length === 0
+            ? true
+            : collapsedGroups.has(group.docSlug);
+        return (
+          <GroupPanel
+            key={group.docSlug}
+            group={group}
+            collapsed={isFolded}
+            forceFold={focusLocked && group.visibleNodes.length === 0}
+            flowLineVisible={flowLineVisible}
+            onToggle={() => onToggleGroup(group.docSlug)}
+            selection={selection}
+            onSelectionChange={onSelectionChange}
+            onEnterLockedFocus={onEnterLockedFocus}
+            lensTokens={lensTokens}
+            onCardContextMenu={onCardContextMenu}
+            profileId={profileId}
+          />
+        );
+      })}
     </div>
   );
 }
@@ -447,25 +556,39 @@ function CanvasBody({
 function GroupPanel({
   group,
   collapsed,
+  forceFold,
   flowLineVisible,
   onToggle,
   selection,
   onSelectionChange,
+  onEnterLockedFocus,
+  lensTokens,
   onCardContextMenu,
   profileId
 }: {
   group: CanvasGroup;
   collapsed: boolean;
+  /**
+   * Set to true when the group was folded by locked focus (not by
+   * the user's collapsed-groups list). Used for a subtle visual
+   * cue: title appears semi-transparent so the user can tell it's
+   * folded by focus rather than by their own collapse.
+   */
+  forceFold: boolean;
   flowLineVisible: boolean;
   onToggle: () => void;
   selection: CanvasSelection | null;
   onSelectionChange: (next: CanvasSelection | null) => void;
+  onEnterLockedFocus: (target: CanvasSelection) => void;
+  lensTokens: Set<string> | null;
   onCardContextMenu: (event: React.MouseEvent, items: ContextMenuItem[]) => void;
   profileId: string;
 }) {
   return (
     <section
-      className={`canvas-group${group.isCustomOnly ? " is-custom-only" : ""}`}
+      className={`canvas-group${group.isCustomOnly ? " is-custom-only" : ""}${
+        forceFold ? " is-force-folded" : ""
+      }`}
     >
       <button
         type="button"
@@ -486,6 +609,7 @@ function GroupPanel({
             {group.hiddenSlotCount > 0 && (
               <> · 隐藏 {group.hiddenSlotCount}</>
             )}
+            {forceFold && <> · 聚焦外</>}
           </span>
         )}
       </button>
@@ -496,6 +620,8 @@ function GroupPanel({
             flowLineVisible={flowLineVisible}
             selection={selection}
             onSelectionChange={onSelectionChange}
+            onEnterLockedFocus={onEnterLockedFocus}
+            lensTokens={lensTokens}
             onCardContextMenu={onCardContextMenu}
             profileId={profileId}
           />
@@ -514,6 +640,8 @@ function FlowTrack({
   flowLineVisible,
   selection,
   onSelectionChange,
+  onEnterLockedFocus,
+  lensTokens,
   onCardContextMenu,
   profileId
 }: {
@@ -521,6 +649,8 @@ function FlowTrack({
   flowLineVisible: boolean;
   selection: CanvasSelection | null;
   onSelectionChange: (next: CanvasSelection | null) => void;
+  onEnterLockedFocus: (target: CanvasSelection) => void;
+  lensTokens: Set<string> | null;
   onCardContextMenu: (event: React.MouseEvent, items: ContextMenuItem[]) => void;
   profileId: string;
 }) {
@@ -642,6 +772,8 @@ function FlowTrack({
                 node={node}
                 selection={selection}
                 onSelectionChange={onSelectionChange}
+                onEnterLockedFocus={onEnterLockedFocus}
+                lensTokens={lensTokens}
                 onCardContextMenu={onCardContextMenu}
                 profileId={profileId}
               />
@@ -650,6 +782,8 @@ function FlowTrack({
                 node={node}
                 selection={selection}
                 onSelectionChange={onSelectionChange}
+                onEnterLockedFocus={onEnterLockedFocus}
+                lensTokens={lensTokens}
                 onCardContextMenu={onCardContextMenu}
                 profileId={profileId}
               />
@@ -678,12 +812,16 @@ function SlotCard({
   node,
   selection,
   onSelectionChange,
+  onEnterLockedFocus,
+  lensTokens,
   onCardContextMenu,
   profileId
 }: {
   node: CanvasSlotNode;
   selection: CanvasSelection | null;
   onSelectionChange: (next: CanvasSelection | null) => void;
+  onEnterLockedFocus: (target: CanvasSelection) => void;
+  lensTokens: Set<string> | null;
   onCardContextMenu: (e: React.MouseEvent, items: ContextMenuItem[]) => void;
   profileId: string;
 }) {
@@ -697,11 +835,21 @@ function SlotCard({
   const overflow = cov.resources.length - visible.length;
   const slotSelected =
     selection?.kind === "slot" && selection.chainNodeId === node.nodeId;
+  // Lens classification (C10 light layer). When `lensTokens` is null
+  // no selection exists — render normally. Otherwise the selected
+  // node + its first-degree neighbors are "near"; everything else
+  // fades.
+  const lensClass = lensTokens
+    ? lensTokens.has(canvasNodeIdentity(node))
+      ? "is-lens-near"
+      : "is-lens-far"
+    : "";
   const slotClass = [
     "canvas-slot",
     cov.count === 0 ? "is-uncovered" : "",
     cov.count > 1 ? "is-multi" : "",
-    slotSelected ? "is-selected" : ""
+    slotSelected ? "is-selected" : "",
+    lensClass
   ]
     .filter(Boolean)
     .join(" ");
@@ -710,14 +858,20 @@ function SlotCard({
     e.stopPropagation();
     onSelectionChange({ kind: "slot", chainNodeId: node.nodeId });
   };
+  const onSlotDoubleClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onEnterLockedFocus({ kind: "slot", chainNodeId: node.nodeId });
+  };
 
   return (
     <div className={slotClass} title={`${node.nodeId} · order ${node.order}`}>
       <header
         className="canvas-slot-header"
         onClick={onSlotClick}
+        onDoubleClick={onSlotDoubleClick}
         role="button"
         tabIndex={0}
+        title="单击选中 · 双击聚焦"
       >
         <span className="canvas-slot-order">{node.order}</span>
         <span className="canvas-slot-name">{node.displayName}</span>
@@ -826,28 +980,46 @@ function CustomCard({
   node,
   selection,
   onSelectionChange,
+  onEnterLockedFocus,
+  lensTokens,
   onCardContextMenu,
   profileId
 }: {
   node: CanvasCustomNode;
   selection: CanvasSelection | null;
   onSelectionChange: (next: CanvasSelection | null) => void;
+  onEnterLockedFocus: (target: CanvasSelection) => void;
+  lensTokens: Set<string> | null;
   onCardContextMenu: (e: React.MouseEvent, items: ContextMenuItem[]) => void;
   profileId: string;
 }) {
   const ca = useCa();
   const isSelected =
     selection?.kind === "custom" && selection.usageArrayIndex === node.arrayIndex;
+  const lensClass = lensTokens
+    ? lensTokens.has(canvasNodeIdentity(node))
+      ? "is-lens-near"
+      : "is-lens-far"
+    : "";
   const cls = [
     "canvas-custom",
     node.enabled ? "is-enabled" : "is-disabled",
-    isSelected ? "is-selected" : ""
+    isSelected ? "is-selected" : "",
+    node.isOrphan ? "is-orphan" : "",
+    lensClass
   ]
     .filter(Boolean)
     .join(" ");
   const onClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     onSelectionChange({
+      kind: "custom",
+      usageArrayIndex: node.arrayIndex
+    });
+  };
+  const onDoubleClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onEnterLockedFocus({
       kind: "custom",
       usageArrayIndex: node.arrayIndex
     });
@@ -896,21 +1068,27 @@ function CustomCard({
       }
     ]);
   };
+  const titleParts: string[] = [
+    `${node.resourceDisplayName ?? ""} / ${node.usage.node_id}`
+  ];
+  if (!node.enabled) titleParts.push("停用");
+  if (node.isOrphan)
+    titleParts.push(
+      "孤立 (orphan)：当前分支不再声明此节点。可删除此放置或切回原分支。"
+    );
+  titleParts.push("单击选中 · 双击聚焦");
   return (
     <div
       className={cls}
       onClick={onClick}
+      onDoubleClick={onDoubleClick}
       onContextMenu={onContextMenu}
       draggable
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       role="button"
       tabIndex={0}
-      title={
-        node.enabled
-          ? `${node.resourceDisplayName ?? ""} / ${node.usage.node_id} · 拖动以重新定位`
-          : `${node.resourceDisplayName ?? ""} / ${node.usage.node_id} · 停用`
-      }
+      title={titleParts.join(" · ")}
     >
       <span className="canvas-custom-marker" aria-hidden="true">
         ⌬
@@ -918,6 +1096,14 @@ function CustomCard({
       <span className="canvas-custom-label">{node.displayName}</span>
       {node.branchId && (
         <span className="canvas-custom-branch">· {node.branchId}</span>
+      )}
+      {node.isOrphan && (
+        <span
+          className="canvas-custom-orphan-chip"
+          title="孤立 usage（C26 soft-orphan）"
+        >
+          ⚠
+        </span>
       )}
     </div>
   );
