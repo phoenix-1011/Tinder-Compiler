@@ -131,7 +131,8 @@ export function ChainAssemblyView() {
     openChainEditor,
     openProfileLifecycle,
     openResourceEditor,
-    openResourceBranch
+    openResourceBranch,
+    enterCanvasMode
   } =
     useWorkspace();
   const { dataRoot, disk, loading, loadError, collapse, setCollapse } = ca;
@@ -265,6 +266,12 @@ export function ChainAssemblyView() {
 
   const profileMenu = (e: React.MouseEvent, profile: ProfileEntry): void => {
     cm.open(e, [
+      {
+        id: "canvas-edit",
+        label: "画布编辑",
+        run: () => enterCanvasMode(profile.id)
+      },
+      { separator: true },
       { id: "rename", label: "重命名…", run: () => ca.renameProfileById(profile) },
       { separator: true },
       { id: "delete", label: "删除", run: () => ca.deleteProfileById(profile) }

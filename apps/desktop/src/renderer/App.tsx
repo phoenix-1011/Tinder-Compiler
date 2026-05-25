@@ -2,6 +2,7 @@ import { TitleBar } from "./components/TitleBar";
 import { ActivityBar } from "./components/ActivityBar";
 import { SideBar } from "./components/SideBar";
 import { EditorArea } from "./components/EditorArea";
+import { CanvasView } from "./components/CanvasView";
 import { Panel } from "./components/Panel";
 import { AIPanel } from "./components/AIPanel";
 import { StatusBar } from "./components/StatusBar";
@@ -45,7 +46,7 @@ function Workbench() {
     closeThemePicker,
     isSettingsOpen
   } = useUI();
-  const { activeView } = useWorkspace();
+  const { activeView, appMode } = useWorkspace();
 
   // Body grid: activity bar | [optional sidebar + 0-width splitter overlay] |
   // main | [optional 0-width AI splitter overlay + AI panel]. Splitters
@@ -78,6 +79,13 @@ function Workbench() {
         <div className="workbench-main" style={{ gridTemplateRows: mainTemplate }}>
           {isSettingsOpen ? (
             <SettingsView />
+          ) : appMode === "canvas" ? (
+            // Canvas mode (C2 hard switch) takes over the main area
+            // entirely. Settings remains a higher-priority overlay
+            // above it so users can still reach preferences. The
+            // sidebar stays unchanged in Phase 1; Phase 2 narrows it
+            // to library-only.
+            <CanvasView />
           ) : activeView === "help" ? (
             <ChainHelpView />
           ) : (

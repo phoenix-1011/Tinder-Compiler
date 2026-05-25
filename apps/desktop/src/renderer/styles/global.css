@@ -4595,3 +4595,131 @@ kbd {
 .md-table tr:nth-child(2n) td {
   background: rgba(255, 255, 255, 0.02);
 }
+
+/* Canvas View (Phase 1 shell) -------------------------------- */
+/* Layout: topbar (back + label + actions) / body (main | inspector rail) */
+.canvas-view {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--tc-bg-editor);
+  color: var(--tc-fg-default);
+  overflow: hidden;
+}
+.canvas-view-topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--tc-border-soft);
+  min-height: 38px;
+  flex: 0 0 auto;
+}
+.canvas-view-back-btn {
+  background: transparent;
+  border: 1px solid var(--tc-border-popup);
+  color: var(--tc-fg-default);
+  border-radius: 3px;
+  padding: 4px 10px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.canvas-view-back-btn:hover {
+  background: var(--tc-bg-hover);
+  color: var(--tc-fg-strong);
+}
+.canvas-view-profile-label {
+  font-size: 13px;
+  color: var(--tc-fg-strong);
+  font-weight: 500;
+  margin-left: 4px;
+}
+.canvas-view-topbar-actions {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 8px;
+}
+.canvas-view-action-btn {
+  background: transparent;
+  border: 1px solid var(--tc-border-popup);
+  color: var(--tc-fg-default);
+  border-radius: 3px;
+  padding: 4px 10px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.canvas-view-action-btn:hover:not(:disabled) {
+  background: var(--tc-bg-hover);
+  color: var(--tc-fg-strong);
+}
+.canvas-view-action-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.canvas-view-action-btn.is-placeholder {
+  font-style: italic;
+}
+.canvas-view-body {
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  min-height: 0;
+  overflow: hidden;
+}
+.canvas-view-main {
+  overflow: auto;
+  padding: 24px;
+}
+.canvas-view-stub {
+  max-width: 640px;
+  margin: 40px auto;
+  border: 1px dashed var(--tc-border-soft);
+  border-radius: 4px;
+  padding: 20px 24px;
+  background: var(--tc-bg-hover-faint, rgba(255, 255, 255, 0.02));
+}
+.canvas-view-stub-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--tc-fg-strong);
+  margin-bottom: 8px;
+}
+.canvas-view-stub-text {
+  font-size: 12.5px;
+  color: var(--tc-fg-muted);
+  line-height: 1.6;
+}
+.canvas-view-stub-text ul {
+  margin: 8px 0 0 18px;
+  padding: 0;
+}
+.canvas-view-stub-text code {
+  font-family: var(--tc-font-mono, ui-monospace, "Cascadia Code", Consolas, monospace);
+  font-size: 11.5px;
+  color: var(--tc-fg-default);
+  background: rgba(255, 255, 255, 0.04);
+  padding: 1px 4px;
+  border-radius: 2px;
+}
+.canvas-view-empty-hint {
+  padding: 40px;
+  font-size: 13px;
+  color: var(--tc-fg-muted);
+  text-align: center;
+}
+/* Phase 1: collapsed inspector rail is just a narrow strip with a chevron.
+   Phase 3 expands this into a real dockable panel (right or bottom). */
+.canvas-view-inspector-rail {
+  width: 32px;
+  border-left: 1px solid var(--tc-border-soft);
+  background: var(--tc-bg-sidebar);
+  display: flex;
+  justify-content: center;
+  padding-top: 12px;
+}
+.canvas-view-inspector-rail-icon {
+  color: var(--tc-fg-muted);
+  font-size: 14px;
+}
+

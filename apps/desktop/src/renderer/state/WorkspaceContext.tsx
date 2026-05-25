@@ -93,6 +93,15 @@ export type ActivityView =
 
 export type MainView = "editor" | "settings";
 
+/**
+ * Top-level application mode. `profile-tree` is the original layout
+ * (profile tree + tabs in EditorArea). `canvas` is the Simulink-style
+ * canvas takeover for a single profile (Phase 0 decisions C1–C26).
+ * Mode is global; canvas is always profile-scoped through
+ * `canvasProfileId`.
+ */
+export type AppMode = "profile-tree" | "canvas";
+
 export interface ProfileTabGroup {
   profileId: string;
   displayName: string;
@@ -125,6 +134,13 @@ interface WorkspaceState {
   canGoBack: boolean;
   /** Whether a popped activeView is reachable via goForward(). */
   canGoForward: boolean;
+  /**
+   * Current top-level app mode. `profile-tree` is the default; `canvas`
+   * takes over the main area with the canvas editor for `canvasProfileId`.
+   */
+  appMode: AppMode;
+  /** Profile being edited in canvas mode; null when not in canvas mode. */
+  canvasProfileId: string | null;
 }
 
 export type SaveStatus =
@@ -227,6 +243,18 @@ interface WorkspaceActions {
   setLanguage(uri: string, language: string): void;
   setEol(uri: string, eol: EolKind): void;
   reorderTabs(fromUri: string, toUri: string): void;
+  /**
+   * Switch to canvas mode for the given profile. Persists across reloads
+   * via localStorage. Entry points: profile-tree context menu (C3) and
+   * the chain editor toolbar button (C3).
+   */
+  enterCanvasMode(profileId: string): void;
+  /**
+   * Leave canvas mode and return to `profile-tree`. The previous
+   * `canvasProfileId` is preserved in localStorage so a subsequent
+   * `enterCanvasMode` reload restores the same profile.
+   */
+  exitCanvasMode(): void;
 }
 
 type WorkspaceContextValue = WorkspaceState & WorkspaceActions;
@@ -266,6 +294,27 @@ function languageFor(name: string): string {
 
 const VIEW_HISTORY_LIMIT = 50;
 
+const APP_MODE_KEY = "tinder.appMode";
+const CANVAS_PROFILE_ID_KEY = "tinder.canvasProfileId";
+
+function readPersistedAppMode(): AppMode {
+  // localStorage may be unavailable (SSR, sandbox); default to profile-tree.
+  try {
+    const raw = localStorage.getItem(APP_MODE_KEY);
+    return raw === "canvas" ? "canvas" : "profile-tree";
+  } catch {
+    return "profile-tree";
+  }
+}
+
+function readPersistedCanvasProfileId(): string | null {
+  try {
+    return localStorage.getItem(CANVAS_PROFILE_ID_KEY);
+  } catch {
+    return null;
+  }
+}
+
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [folder, setFolder] = useState<OpenedFolder | null>(null);
   const [activeView, _setActiveView] = useState<ActivityView>("explorer");
@@ -294,6 +343,44 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       _setActiveView(target);
       return prevBack.slice(0, -1);
     });
+  }, []);
+
+  // App-mode state — persisted in localStorage so reloads (Electron dev
+  // hot-reload, devtools refresh) preserve where the user was. Canvas
+  // mode requires a profileId; if the persisted mode is `canvas` but
+  // the persisted id is missing, we fall back to `profile-tree`.
+  const [appMode, _setAppMode] = useState<AppMode>(() => {
+    const stored = readPersistedAppMode();
+    if (stored === "canvas" && !readPersistedCanvasProfileId()) {
+      return "profile-tree";
+    }
+    return stored;
+  });
+  const [canvasProfileId, _setCanvasProfileId] = useState<string | null>(() =>
+    readPersistedCanvasProfileId()
+  );
+
+  const enterCanvasMode = useCallback((profileId: string) => {
+    _setCanvasProfileId(profileId);
+    _setAppMode("canvas");
+    try {
+      localStorage.setItem(APP_MODE_KEY, "canvas");
+      localStorage.setItem(CANVAS_PROFILE_ID_KEY, profileId);
+    } catch {
+      /* persistence failure should not block the mode switch */
+    }
+  }, []);
+
+  const exitCanvasMode = useCallback(() => {
+    _setAppMode("profile-tree");
+    try {
+      localStorage.setItem(APP_MODE_KEY, "profile-tree");
+      // Preserve canvasProfileId so the next enterCanvasMode without
+      // argument could resume (Phase 2+); for Phase 1 we always pass a
+      // profile id, so this is forward-compatible state only.
+    } catch {
+      /* ignore */
+    }
   }, []);
 
   const goForward = useCallback(() => {
@@ -899,7 +986,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       revealAt,
       setLanguage,
       setEol,
-      reorderTabs
+      reorderTabs,
+      appMode,
+      canvasProfileId,
+      enterCanvasMode,
+      exitCanvasMode
     }),
     [
       folder,
@@ -938,7 +1029,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       revealAt,
       setLanguage,
       setEol,
-      reorderTabs
+      reorderTabs,
+      appMode,
+      canvasProfileId,
+      enterCanvasMode,
+      exitCanvasMode
     ]
   );
 

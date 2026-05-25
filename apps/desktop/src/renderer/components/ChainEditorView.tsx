@@ -44,7 +44,8 @@ const CUSTOM_GROUP_FILTER = "__custom__";
 
 export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
   const ca = useCa();
-  const { openHelpDoc, openResourceBranch, closeFile } = useWorkspace();
+  const { openHelpDoc, openResourceBranch, closeFile, enterCanvasMode } =
+    useWorkspace();
   const cm = useContextMenu();
   const [reportState, setReportState] = useState<{
     report: RuntimeReport;
@@ -372,6 +373,14 @@ export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
           ))}
         </select>
         <div className="chain-editor-toolbar-actions">
+          <button
+            type="button"
+            className="chain-editor-action-btn"
+            onClick={() => enterCanvasMode(profile.id)}
+            title="进入画布编辑（C3 / Phase 1 入口）"
+          >
+            画布
+          </button>
           <button
             type="button"
             className="chain-editor-action-btn"
