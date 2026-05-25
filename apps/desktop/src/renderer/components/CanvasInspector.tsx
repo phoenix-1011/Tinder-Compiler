@@ -479,12 +479,20 @@ function CandidateDropdown({
 
   const onChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
     const next = event.target.value;
-    const candidateId = next === "__default__" ? undefined : next;
+    // setProfileStandardEffectiveCandidate semantics:
+    //   undefined → clear override → inherit branch default
+    //   null      → explicit clear (disable this slot)
+    //   string    → set override to this candidate id
+    // Previously this collapsed undefined → null via `?? null`, so
+    // once the user touched the dropdown they could never go back
+    // to inheriting the branch default — fixed (G6).
+    const candidateId: string | null | undefined =
+      next === "__default__" ? undefined : next;
     void ca.setProfileStandardEffectiveCandidate(
       profile.id,
       resourceInstanceId,
       chainNodeId,
-      candidateId ?? null
+      candidateId
     );
   };
 

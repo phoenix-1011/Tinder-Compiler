@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { useCa } from "../state/ChainAssemblyContext";
 import { useWorkspace } from "../state/WorkspaceContext";
 import {
@@ -44,6 +44,35 @@ export function CanvasView() {
   const { disk } = ca;
   const cm = useContextMenu();
   const [batchOpen, setBatchOpen] = useState(false);
+  // Transient drag-active state. Used to (S10) auto-show the flow
+  // line for the entire track while dragging — not just the hovered
+  // edge — and (S11) temporarily reveal coverage-filtered slots so
+  // the user can drop on a slot that would otherwise be hidden.
+  // Updated via document-level dragstart/dragend listeners so we
+  // catch every canvas-mode drag without each source needing to
+  // wire a callback.
+  const [isDragActive, setIsDragActive] = useState(false);
+  useEffect(() => {
+    const onStart = () => {
+      // Only react to drags that actually carry a canvas payload —
+      // dragStart fires for arbitrary draggables elsewhere in the
+      // window and we don't want those to perturb the canvas.
+      if (canvasDragState.value) setIsDragActive(true);
+    };
+    const onEnd = () => setIsDragActive(false);
+    document.addEventListener("dragstart", onStart);
+    document.addEventListener("dragend", onEnd);
+    // dragend fires on the source; drop fires on the target. We
+    // need a backstop in case drop completes without dragend
+    // bubbling (Esc-cancelled native drag).
+    document.addEventListener("drop", onEnd);
+    return () => {
+      document.removeEventListener("dragstart", onStart);
+      document.removeEventListener("dragend", onEnd);
+      document.removeEventListener("drop", onEnd);
+    };
+  }, []);
+
   // Shared-branch guard pending state — non-null while the dialog
   // is open. Carries the requested jump target so accepting either
   // action knows what was originally requested.
@@ -79,13 +108,17 @@ export function CanvasView() {
 
   const projectionBase = useMemo(() => {
     if (!profile) return null;
+    // S11: while a drag is active, temporarily ignore the coverage
+    // filter so the user can drop on slots that would otherwise be
+    // hidden. The filter snaps back on drop / dragend / cancel.
+    const effectiveCoverageFilter = state.coverageFilter && !isDragActive;
     return buildCanvasProjection(
       profile.project,
       v2Resources,
       flatCustom,
-      state.coverageFilter
+      effectiveCoverageFilter
     );
-  }, [profile, v2Resources, flatCustom, state.coverageFilter]);
+  }, [profile, v2Resources, flatCustom, state.coverageFilter, isDragActive]);
 
   // Locked focus (C10) windows the projection to ±radius around the
   // focus target. Composed AFTER the coverage filter per Resolved
@@ -405,12 +438,16 @@ export function CanvasView() {
           ) : (
             <CanvasBody
               projection={projection}
-              flowLineVisible={state.flowLineVisible}
+              // S10: while dragging, force the flow line on so every
+              // edge is a visible drop target — not just the one
+              // currently hovered.
+              flowLineVisible={state.flowLineVisible || isDragActive}
               collapsedGroups={collapsedGroupSet}
               onToggleGroup={toggleGroup}
               selection={state.selection}
               onSelectionChange={setSelection}
               onEnterLockedFocus={enterLockedFocus}
+              onOpenFullEditor={onOpenFullEditor}
               focusLocked={state.focus.locked}
               lensTokens={lensTokens}
               onCardContextMenu={(e, items) => cm.open(e, items)}
@@ -474,6 +511,18 @@ export function CanvasView() {
 // Body: group panels
 // ──────────────────────────────────────────────────────────────────
 
+/**
+ * Shared open-full-editor signature, threaded from CanvasView down
+ * to slot / coverage / custom cards so a double-click on a
+ * resource-bearing card can dispatch the C13 shared-branch guard +
+ * C21 jump-out without each card needing to know the implementation.
+ */
+type OpenFullEditorFn = (target: {
+  resourceKind: "standard" | "custom";
+  resourceInstanceId: string;
+  branchId: string;
+}) => void;
+
 interface CanvasBodyProps {
   projection: ReturnType<typeof buildCanvasProjection> | null;
   flowLineVisible: boolean;
@@ -482,6 +531,7 @@ interface CanvasBodyProps {
   selection: CanvasSelection | null;
   onSelectionChange: (next: CanvasSelection | null) => void;
   onEnterLockedFocus: (target: CanvasSelection) => void;
+  onOpenFullEditor: OpenFullEditorFn;
   focusLocked: boolean;
   lensTokens: Set<string> | null;
   onCardContextMenu: (event: React.MouseEvent, items: ContextMenuItem[]) => void;
@@ -496,6 +546,7 @@ function CanvasBody({
   selection,
   onSelectionChange,
   onEnterLockedFocus,
+  onOpenFullEditor,
   focusLocked,
   lensTokens,
   onCardContextMenu,
@@ -515,7 +566,7 @@ function CanvasBody({
     return (
       <div className="canvas-view-empty-hint">
         此档案目前没有可显示的链路节点。<br />
-        Phase 3 起可以在左侧库中 pin 标准资源以覆盖槽位，或拖入自定义节点。
+        在左侧库中 pin 标准资源以覆盖槽位，或拖入自定义节点。
       </div>
     );
   }
@@ -543,6 +594,7 @@ function CanvasBody({
             selection={selection}
             onSelectionChange={onSelectionChange}
             onEnterLockedFocus={onEnterLockedFocus}
+            onOpenFullEditor={onOpenFullEditor}
             lensTokens={lensTokens}
             onCardContextMenu={onCardContextMenu}
             profileId={profileId}
@@ -562,6 +614,7 @@ function GroupPanel({
   selection,
   onSelectionChange,
   onEnterLockedFocus,
+  onOpenFullEditor,
   lensTokens,
   onCardContextMenu,
   profileId
@@ -580,6 +633,7 @@ function GroupPanel({
   selection: CanvasSelection | null;
   onSelectionChange: (next: CanvasSelection | null) => void;
   onEnterLockedFocus: (target: CanvasSelection) => void;
+  onOpenFullEditor: OpenFullEditorFn;
   lensTokens: Set<string> | null;
   onCardContextMenu: (event: React.MouseEvent, items: ContextMenuItem[]) => void;
   profileId: string;
@@ -621,6 +675,7 @@ function GroupPanel({
             selection={selection}
             onSelectionChange={onSelectionChange}
             onEnterLockedFocus={onEnterLockedFocus}
+            onOpenFullEditor={onOpenFullEditor}
             lensTokens={lensTokens}
             onCardContextMenu={onCardContextMenu}
             profileId={profileId}
@@ -641,6 +696,7 @@ function FlowTrack({
   selection,
   onSelectionChange,
   onEnterLockedFocus,
+  onOpenFullEditor,
   lensTokens,
   onCardContextMenu,
   profileId
@@ -650,6 +706,7 @@ function FlowTrack({
   selection: CanvasSelection | null;
   onSelectionChange: (next: CanvasSelection | null) => void;
   onEnterLockedFocus: (target: CanvasSelection) => void;
+  onOpenFullEditor: OpenFullEditorFn;
   lensTokens: Set<string> | null;
   onCardContextMenu: (event: React.MouseEvent, items: ContextMenuItem[]) => void;
   profileId: string;
@@ -664,10 +721,15 @@ function FlowTrack({
   /**
    * Resolve the drop position from an "edge index" — the edge BETWEEN
    * nodes[idx-1] and nodes[idx]. The anchor is the chain id of the
-   * first slot at or after nodes[idx] (or null when there's no
-   * trailing slot in this group). The before-custom hint is set when
-   * nodes[idx] is a custom in the same anchor bucket — preserves
-   * precise within-bucket positioning for reorder.
+   * first slot/anchor at or after nodes[idx]; when no such anchor
+   * exists (drop on a trailing edge of the group), fall back to
+   * scanning *backwards* from nodes[idx-1] for the most recent
+   * anchor so the new custom stays in the same group instead of
+   * silently landing in the custom-only virtual group (G7).
+   *
+   * The before-custom hint is set when nodes[idx] is a custom in
+   * the same anchor bucket — preserves precise within-bucket
+   * positioning for reorder.
    */
   const positionForEdge = (
     edgeIdx: number
@@ -676,6 +738,9 @@ function FlowTrack({
     beforeCustomArrayIndex?: number;
   } => {
     let anchorChainId: string | null = null;
+    // Forward scan from the drop position. This picks up the natural
+    // "insert before X" anchor when there's a slot/anchored custom
+    // following the drop point.
     for (let i = edgeIdx; i < nodes.length; i++) {
       const n = nodes[i]!;
       if (n.kind === "slot") {
@@ -685,6 +750,25 @@ function FlowTrack({
       if (n.kind === "custom" && n.anchorChainId) {
         anchorChainId = n.anchorChainId;
         break;
+      }
+    }
+    // Fallback for tail-of-group drops: nothing follows the drop
+    // point in this group's visible nodes, so the forward scan
+    // produced null. The user clearly meant to add to THIS group,
+    // not the custom-only catch-all — so reuse the preceding
+    // slot's anchor (with insert_before that slot's downstream
+    // sibling implicitly via the order-allocator).
+    if (anchorChainId === null) {
+      for (let i = edgeIdx - 1; i >= 0; i--) {
+        const n = nodes[i]!;
+        if (n.kind === "slot") {
+          anchorChainId = n.nodeId;
+          break;
+        }
+        if (n.kind === "custom" && n.anchorChainId) {
+          anchorChainId = n.anchorChainId;
+          break;
+        }
       }
     }
     const nextNode = nodes[edgeIdx];
@@ -773,6 +857,7 @@ function FlowTrack({
                 selection={selection}
                 onSelectionChange={onSelectionChange}
                 onEnterLockedFocus={onEnterLockedFocus}
+                onOpenFullEditor={onOpenFullEditor}
                 lensTokens={lensTokens}
                 onCardContextMenu={onCardContextMenu}
                 profileId={profileId}
@@ -782,7 +867,7 @@ function FlowTrack({
                 node={node}
                 selection={selection}
                 onSelectionChange={onSelectionChange}
-                onEnterLockedFocus={onEnterLockedFocus}
+                onOpenFullEditor={onOpenFullEditor}
                 lensTokens={lensTokens}
                 onCardContextMenu={onCardContextMenu}
                 profileId={profileId}
@@ -813,6 +898,7 @@ function SlotCard({
   selection,
   onSelectionChange,
   onEnterLockedFocus,
+  onOpenFullEditor,
   lensTokens,
   onCardContextMenu,
   profileId
@@ -821,6 +907,7 @@ function SlotCard({
   selection: CanvasSelection | null;
   onSelectionChange: (next: CanvasSelection | null) => void;
   onEnterLockedFocus: (target: CanvasSelection) => void;
+  onOpenFullEditor: OpenFullEditorFn;
   lensTokens: Set<string> | null;
   onCardContextMenu: (e: React.MouseEvent, items: ContextMenuItem[]) => void;
   profileId: string;
@@ -871,7 +958,7 @@ function SlotCard({
         onDoubleClick={onSlotDoubleClick}
         role="button"
         tabIndex={0}
-        title="单击选中 · 双击聚焦"
+        title="单击选中 · 双击聚焦（F 切换）"
       >
         <span className="canvas-slot-order">{node.order}</span>
         <span className="canvas-slot-name">{node.displayName}</span>
@@ -894,6 +981,18 @@ function SlotCard({
                   chainNodeId: node.nodeId,
                   resourceInstanceId: r.resourceId,
                   variantId: r.variantId
+                });
+              };
+              const onCoverageDoubleClick = (e: React.MouseEvent) => {
+                e.stopPropagation();
+                // C11: double-click on a card opens the standalone
+                // ResourceBranchView (after C13 shared-branch guard
+                // + C21 jump-out confirmation, both handled by
+                // onOpenFullEditor in CanvasView).
+                onOpenFullEditor({
+                  resourceKind: "standard",
+                  resourceInstanceId: r.resourceId,
+                  branchId: r.variantId
                 });
               };
               const onCoverageContextMenu = (e: React.MouseEvent) => {
@@ -933,8 +1032,9 @@ function SlotCard({
                   className={`canvas-coverage-card${
                     coverageSelected ? " is-selected" : ""
                   }`}
-                  title={`${r.resourceId} · ${r.variantId}`}
+                  title={`${r.resourceId} · ${r.variantId} · 双击打开完整编辑`}
                   onClick={onCoverageClick}
+                  onDoubleClick={onCoverageDoubleClick}
                   onContextMenu={onCoverageContextMenu}
                   role="button"
                   tabIndex={0}
@@ -980,7 +1080,7 @@ function CustomCard({
   node,
   selection,
   onSelectionChange,
-  onEnterLockedFocus,
+  onOpenFullEditor,
   lensTokens,
   onCardContextMenu,
   profileId
@@ -988,7 +1088,7 @@ function CustomCard({
   node: CanvasCustomNode;
   selection: CanvasSelection | null;
   onSelectionChange: (next: CanvasSelection | null) => void;
-  onEnterLockedFocus: (target: CanvasSelection) => void;
+  onOpenFullEditor: OpenFullEditorFn;
   lensTokens: Set<string> | null;
   onCardContextMenu: (e: React.MouseEvent, items: ContextMenuItem[]) => void;
   profileId: string;
@@ -1019,9 +1119,15 @@ function CustomCard({
   };
   const onDoubleClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    onEnterLockedFocus({
-      kind: "custom",
-      usageArrayIndex: node.arrayIndex
+    // C11: double-click opens the standalone ResourceBranchView
+    // tab for this custom node's resource + branch. Falls back to
+    // a no-op when branchId hasn't resolved (orphan / unresolved
+    // resource — the inspector still works in that case).
+    if (!node.branchId) return;
+    onOpenFullEditor({
+      resourceKind: "custom",
+      resourceInstanceId: node.usage.resource_instance_id,
+      branchId: node.branchId
     });
   };
   const onDragStart = (e: React.DragEvent) => {
@@ -1076,7 +1182,9 @@ function CustomCard({
     titleParts.push(
       "孤立 (orphan)：当前分支不再声明此节点。可删除此放置或切回原分支。"
     );
-  titleParts.push("单击选中 · 双击聚焦");
+  titleParts.push(
+    node.branchId ? "单击选中 · 双击打开完整编辑" : "单击选中"
+  );
   return (
     <div
       className={cls}

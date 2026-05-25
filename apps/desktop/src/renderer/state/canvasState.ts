@@ -232,18 +232,60 @@ export function useCanvasPersistedState(
   // without clobbering other profiles' slots. Updated on read and
   // after each successful write.
   const fileRef = useRef<CanvasStateFile>({ schema_version: 1, profiles: {} });
-  // Debounce + unmount-flush plumbing.
+  // Debounce + unmount-flush plumbing. The pending payload captures
+  // `profileId` at the time of the setState call — critical because
+  // the debounce may outlast a profile-dropdown switch in canvas
+  // mode (G2): if we read `profileId` from the closure at flush
+  // time, the previous profile's state could be written into the
+  // new profile's canvas.json slot, corrupting both.
   const writeTimerRef = useRef<number | null>(null);
   const pendingWriteRef = useRef<{
     tinderDir: string;
+    profileId: string;
     state: CanvasPerProfileState;
   } | null>(null);
 
+  const flushPending = useCallback(async () => {
+    if (writeTimerRef.current != null) {
+      window.clearTimeout(writeTimerRef.current);
+      writeTimerRef.current = null;
+    }
+    const pending = pendingWriteRef.current;
+    pendingWriteRef.current = null;
+    if (!pending) return;
+    // Use the captured profileId from the pending entry, NOT the
+    // current closure value — otherwise a profile-dropdown switch
+    // during the debounce window writes the previous profile's
+    // state into the new profile's slot (G2).
+    const nextFile: CanvasStateFile = {
+      schema_version: 1,
+      profiles: {
+        ...fileRef.current.profiles,
+        [pending.profileId]: pending.state
+      }
+    };
+    fileRef.current = nextFile;
+    try {
+      await writeCanvasFile(pending.tinderDir, nextFile);
+    } catch {
+      /* Persistence failure is non-fatal: state stays in memory and
+         the next change will retry the write. */
+    }
+  }, []);
+
   // Reset state when the keying inputs change. Important so opening
   // a different profile in canvas mode doesn't briefly show the
-  // previous profile's preferences.
+  // previous profile's preferences. Declared *after* `flushPending`
+  // so the in-effect call resolves to the defined callback.
   useEffect(() => {
     let cancelled = false;
+    // Flush any pending write from the previous profile before
+    // switching. The pending payload already carries its own
+    // profileId (G2 fix) so the write lands in the correct slot
+    // even if the user is in the middle of switching profiles.
+    // We don't await because the next read overlaps the write
+    // cycle harmlessly (different file slots).
+    void flushPending();
     setLoaded(false);
     _setState(DEFAULT_CANVAS_PER_PROFILE);
 
@@ -272,31 +314,12 @@ export function useCanvasPersistedState(
     return () => {
       cancelled = true;
     };
+    // flushPending has stable identity (useCallback with []) so it
+    // doesn't need to be in the deps list — including it would re-
+    // trigger the loader on every render, which loses the cancel
+    // semantics. Effect re-runs only on keying-input changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tinderDir, profileId]);
-
-  const flushPending = useCallback(async () => {
-    if (writeTimerRef.current != null) {
-      window.clearTimeout(writeTimerRef.current);
-      writeTimerRef.current = null;
-    }
-    const pending = pendingWriteRef.current;
-    pendingWriteRef.current = null;
-    if (!pending || !profileId) return;
-    const nextFile: CanvasStateFile = {
-      schema_version: 1,
-      profiles: {
-        ...fileRef.current.profiles,
-        [profileId]: pending.state
-      }
-    };
-    fileRef.current = nextFile;
-    try {
-      await writeCanvasFile(pending.tinderDir, nextFile);
-    } catch {
-      /* Persistence failure is non-fatal: state stays in memory and
-         the next change will retry the write. */
-    }
-  }, [profileId]);
 
   // On unmount: flush whatever's pending. Don't await — unmount is
   // synchronous; an async tail kicked off here finishes in the
@@ -317,7 +340,10 @@ export function useCanvasPersistedState(
           focus: { ...prev.focus, ...(patch.focus ?? {}) }
         };
         if (tinderDir && profileId) {
-          pendingWriteRef.current = { tinderDir, state: merged };
+          // Capture profileId NOW so the write — possibly fired after
+          // the user switches profiles — still targets the slot the
+          // edit was meant for.
+          pendingWriteRef.current = { tinderDir, profileId, state: merged };
           if (writeTimerRef.current != null) {
             window.clearTimeout(writeTimerRef.current);
           }
