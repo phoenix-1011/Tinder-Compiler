@@ -70,6 +70,22 @@ Pan and zoom are react-flow defaults:
 Viewport state (x, y, zoom) is persisted in `canvas.json` per profile
 and restored on canvas mount.
 
+**Mini-map (D12)** — `<MiniMap pannable zoomable />` is rendered in
+the bottom-right corner of the canvas. It frames the current
+viewport on a thumbnail of the full canvas; clicking a position
+pans the main viewport there.
+
+**Auto-pan (D12)** — soft (250 ms ease via `setCenter`) and gated
+to explicit navigate-to gestures:
+
+- clicking an entry in the inspector's orphan list
+- clicking the `·N` usage count on a library node
+- selecting from a future canvas-top-bar search
+
+Single-click selection of a chain / coverage / custom node does
+NOT auto-pan. The viewport only moves when the user has
+deliberately said "take me there".
+
 ### Category Clusters (`categoryGroup` node type)
 
 Each of the 10 `CHAIN_CATALOG.groups` becomes a single react-flow
@@ -95,6 +111,19 @@ node of type `categoryGroup`:
 - Chain nodes inside are NOT individually draggable; they belong to
   the cluster and move with it
 
+**Collision policy (D11)** — clusters cannot overlap each other:
+
+- On every `onNodeDrag` tick for a `categoryGroup`, compute its
+  candidate bbox at the new position and check axis-aligned
+  intersection against every other cluster's bbox.
+- If any overlap: the cluster stays at its last valid (non-
+  overlapping) position. The mouse can continue moving; the cluster
+  catches up the moment the mouse path returns to a clear area.
+- "Multi-cluster" cases (cluster A would push between cluster B
+  and C in a gap too narrow) reduce to the same rule: any overlap
+  blocks, so a too-narrow gap simply traps the cluster outside.
+- Custom nodes are exempt — see Custom Nodes section.
+
 ### Chain Nodes (rendered inside `categoryGroup`)
 
 Each chain node is a fixed-position child of its cluster, ordered by
@@ -111,19 +140,23 @@ Each entry in `profile.custom_node_usages` becomes its own react-flow
 node at the canvas root (not inside any group). Position is
 user-controlled and persisted in `canvas.json` keyed by `arrayIndex`.
 
-**Anchor-snap on drop**: when a custom node finishes being dragged
-(`onNodeDragStop`), its position is adjusted to be near the chain
-node identified by `usage.anchorChainId` (or near the canonical
-predecessor when anchorChainId is null):
+**Mouse-coord drop (D3)**: the position where the user releases the
+drag is the position that gets saved. No anchor-snap; the user's
+chosen position is respected as-is. Rationale:
 
-- Locate the anchor's cluster + chain node DOM position
-- Offset the custom by `+24 px` to the right of the cluster
-- Vertically align with the anchor chain node (± a small bin if a
-  custom already occupies that slot)
-- Don't snap when the user holds `Shift` during drop (escape hatch)
+- Custom node placement is highly open-ended — users may place a
+  node away from its anchor to keep the visual neighborhood
+  uncluttered, or near the anchor for visual association. We
+  don't presume which.
+- The semantic anchor (`usage.insert_before` → `anchorChainId`) is
+  already recorded separately on the usage record and is the
+  source of truth for execution-order edges (D4). Position is
+  purely visual.
+- "Snap" would override user intent; users who think while
+  placing need the UI to follow their thinking, not "correct" it.
 
-This keeps customs visually associated with their anchor without
-locking position absolutely.
+Custom nodes are free to overlap clusters (they are not subject to
+the D11 collision policy — that applies only to clusters).
 
 ### Edges
 
@@ -176,11 +209,19 @@ Library sidebar unchanged from C26 — 3-level for custom (family →
 branch → node), 2-level for standard, pin three-state, custom node
 rows draggable. Drag target:
 
-- Library custom node → drop on canvas (anywhere) → creates a usage
-  with `anchorChainId` resolved by **nearest chain node** (by Y
-  position relative to clusters) and auto-pin (per C26).
-- Custom node already on canvas → drag to reorder/re-anchor — drop
-  triggers anchor-snap.
+- **Library custom node → drop on canvas (anywhere)** — creates a
+  usage with:
+  - `anchorChainId` resolved by **nearest chain node** in canonical
+    order relative to the drop coords (closest chain node by
+    Euclidean distance to its center). This determines the EDGE
+    position in execution order.
+  - `customPositions[arrayIndex]` set to the **exact drop coords**
+    (D3 — mouse coords, no snap).
+  - Auto-pin of the source branch if not pinned (C26 carried).
+- **Custom node already on canvas → drag elsewhere** — moves the
+  visual position only. `anchorChainId` is NOT changed by drag;
+  to re-anchor, the user uses the right-click `移到段…` menu (C4
+  carried).
 
 ## Persistence
 
@@ -227,11 +268,21 @@ When `clusterPositions` has no entry for a docSlug, position it by:
 - When the row would exceed 2000 px wide, wrap to a second row
   (~100 px below)
 
-When `customPositions` has no entry for a usage, anchor-snap to its
-canonical anchor's cluster as described above.
+When `customPositions` has no entry for a usage (e.g., the usage was
+created outside the canvas via the existing list-view path), pick a
+default position next to the canonical anchor's chain node:
+
+- 24 px to the right of the anchor's cluster bbox
+- vertically aligned with the anchor chain node inside that cluster
+
+This default ONLY applies to usages that have never been positioned
+via canvas drag. Once the user drags the custom node, the dropped
+coords are persisted (D3) and used on subsequent loads.
 
 `viewport` defaults to `{ x: 0, y: 0, zoom: 0.85 }` so the first row
-fits in a standard editor window.
+fits in a standard editor window. New profiles created via the
+top-bar dropdown start with this default since they have no
+`canvas.json` entry yet (D5).
 
 ## Theming
 
