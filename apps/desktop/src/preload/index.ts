@@ -185,6 +185,8 @@ export interface TinderApi {
   lsp: LspApi;
   userKeybindings: UserKeybindingsApi;
   project: ProjectApi;
+  /** Update the OS-drawn title bar overlay (minimize/maximize/close buttons). */
+  setTitleBarOverlay(opts: { color: string; symbolColor: string }): Promise<void>;
 }
 
 export interface UserKeybindingsApi {
@@ -291,7 +293,9 @@ const api: TinderApi = {
   recent,
   lsp,
   userKeybindings,
-  project
+  project,
+  setTitleBarOverlay: (opts) =>
+    ipcRenderer.invoke("window:setTitleBarOverlay", opts)
 };
 
 contextBridge.exposeInMainWorld("tinder", api);

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell } from "electron";
+import { app, BrowserWindow, ipcMain, shell } from "electron";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { registerIpcHandlers } from "./ipc.js";
@@ -57,6 +57,26 @@ app.whenReady().then(async () => {
   registerSearchHandlers();
   registerRecentHandlers();
   registerLspHandlers();
+
+  // Theme: update OS-drawn title-bar overlay buttons (minimize/maximize/close)
+  ipcMain.handle(
+    "window:setTitleBarOverlay",
+    (event, opts: { color: string; symbolColor: string }) => {
+      const win = BrowserWindow.fromWebContents(event.sender);
+      if (win) {
+        try {
+          win.setTitleBarOverlay({
+            color: opts.color,
+            symbolColor: opts.symbolColor,
+            height: 32
+          });
+        } catch {
+          // setTitleBarOverlay may not be available on all platforms
+        }
+      }
+    }
+  );
+
   await createMainWindow();
 
   app.on("activate", async () => {

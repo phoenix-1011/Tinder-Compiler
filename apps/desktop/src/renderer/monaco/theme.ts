@@ -143,9 +143,11 @@ const COLOR_VAR_MAP: Record<string, string[]> = {
   "panel.border": ["--tc-border"],
   "editorGroup.border": ["--tc-border-soft"],
 
-  // Status bar
+  // Status bar (foreground uses a dedicated var — must NOT set
+  // --tc-fg-strong, because light themes can have a dark status bar
+  // with white text while needing dark --tc-fg-strong everywhere else)
   "statusBar.background": ["--tc-bg-statusbar"],
-  "statusBar.foreground": ["--tc-fg-strong"],
+  "statusBar.foreground": ["--tc-statusbar-fg"],
 
   // Lists / selection
   "list.hoverBackground": ["--tc-bg-hover"],
@@ -185,6 +187,13 @@ function applyWorkbenchColors(colors: Record<string, string>, variant: "dark" | 
   // Variant flag drives a few CSS overrides (scrollbar tint, semi-transparent
   // hovers etc.) that aren't covered by the keyed mapping.
   root.dataset.themeVariant = variant;
+
+  // Sync OS-drawn title bar overlay buttons (minimize/maximize/close) to the
+  // active theme. These are painted by Windows/Electron outside the renderer —
+  // the only way to restyle them is via BrowserWindow.setTitleBarOverlay().
+  const titleBarBg = colors["titleBar.activeBackground"] ?? (variant === "dark" ? "#3c3c3c" : "#F8F8F8");
+  const titleBarFg = colors["titleBar.activeForeground"] ?? (variant === "dark" ? "#cccccc" : "#1E1E1E");
+  window.tinder?.setTitleBarOverlay?.({ color: titleBarBg, symbolColor: titleBarFg })?.catch(() => {});
 }
 
 export function registerAllThemes(): void {
