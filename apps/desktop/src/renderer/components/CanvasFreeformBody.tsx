@@ -8,6 +8,7 @@ import {
   Position,
   MarkerType,
   useNodesState,
+  useReactFlow,
   type Node,
   type Edge,
   type NodeTypes,
@@ -28,7 +29,9 @@ import {
   type CanvasPerProfileState,
   type CanvasSelection
 } from "../state/canvasState";
+import { canvasDragState } from "../state/canvasDrag";
 import { useCa } from "../state/ChainAssemblyContext";
+import { profileResourceBranchId } from "@tinder/nextstep";
 import { type ContextMenuItem } from "./ContextMenu";
 
 // ──────────────────────────────────────────────────────────────────
@@ -49,6 +52,16 @@ const SLOT_PADDING_V = 12;
 /** Cluster border (1px top + 1px bottom). */
 const CLUSTER_BORDER = 2;
 const CLUSTER_GAP = 48;
+/**
+ * Phase 5: flow-space distance threshold (px) for deciding
+ * near-cluster snap vs far-from-cluster floating drop.
+ */
+const SNAP_THRESHOLD_PX = 80;
+
+/** Auto-pan: distance (screen px) from viewport edge to start panning. */
+const AUTOPAN_EDGE_PX = 40;
+/** Auto-pan: viewport translation speed per rAF tick (screen px). */
+const AUTOPAN_SPEED = 8;
 
 // D11: AABB overlap check for cluster collision
 function aabbOverlap(
@@ -148,6 +161,7 @@ function CategoryGroupNodeComponent({ data }: { data: CategoryGroupData }) {
               onOpenFullEditor={onOpenFullEditor}
               onCardContextMenu={onCardContextMenu}
               profileId={profileId}
+              canvasDraggable
             />
           )
         )}
@@ -159,6 +173,39 @@ function CategoryGroupNodeComponent({ data }: { data: CategoryGroupData }) {
         className="rf-invisible-handle"
         isConnectable={false}
       />
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Floating custom node (unanchored, free-positioned — Phase 5)
+// ──────────────────────────────────────────────────────────────────
+
+interface FloatingCustomNodeData {
+  node: CanvasCustomNode;
+  selection: CanvasSelection | null;
+  lensTokens: Set<string> | null;
+  onSelectionChange: (next: CanvasSelection | null) => void;
+  onOpenFullEditor: OpenFullEditorFn;
+  onCardContextMenu: (e: React.MouseEvent, items: ContextMenuItem[]) => void;
+  profileId: string;
+}
+
+function FloatingCustomNodeComponent({ data }: { data: FloatingCustomNodeData }) {
+  return (
+    <div className="rf-floating-custom">
+      <CustomCardInline
+        node={data.node}
+        selection={data.selection}
+        lensTokens={data.lensTokens}
+        onSelectionChange={data.onSelectionChange}
+        onOpenFullEditor={data.onOpenFullEditor}
+        onCardContextMenu={data.onCardContextMenu}
+        profileId={data.profileId}
+      />
+      <div className="rf-floating-custom-badge" title="未锚定 — 拖到簇上以锚定">
+        ⚐ 未锚定
+      </div>
     </div>
   );
 }
@@ -360,7 +407,8 @@ function CustomCardInline({
   onSelectionChange,
   onOpenFullEditor,
   onCardContextMenu,
-  profileId
+  profileId,
+  canvasDraggable = false
 }: {
   node: CanvasCustomNode;
   selection: CanvasSelection | null;
@@ -369,6 +417,8 @@ function CustomCardInline({
   onOpenFullEditor: OpenFullEditorFn;
   onCardContextMenu: (e: React.MouseEvent, items: ContextMenuItem[]) => void;
   profileId: string;
+  /** Phase 5: when true, the card is an HTML5 drag source for re-anchor / float. */
+  canvasDraggable?: boolean;
 }) {
   const ca = useCa();
   const isSelected =
@@ -380,6 +430,9 @@ function CustomCardInline({
     : "";
   const cls = [
     "canvas-custom rf-custom-card",
+    // "nodrag" prevents react-flow from starting a cluster drag when
+    // the user grabs a draggable custom card (HTML5 DnD takes over).
+    canvasDraggable ? "nodrag" : "",
     node.enabled ? "is-enabled" : "is-disabled",
     isSelected ? "is-selected" : "",
     node.isOrphan ? "is-orphan" : "",
@@ -443,9 +496,36 @@ function CustomCardInline({
       }
     ]);
   };
+  // Phase 5: HTML5 DnD for re-anchor / float (in-cluster customs only)
+  const onCardDragStart = canvasDraggable
+    ? (e: React.DragEvent) => {
+        canvasDragState.value = {
+          kind: "canvas-custom",
+          arrayIndex: node.arrayIndex
+        };
+        e.dataTransfer.effectAllowed = "move";
+        try {
+          e.dataTransfer.setData(
+            "application/x-tinder-canvas-custom",
+            String(node.arrayIndex)
+          );
+        } catch {
+          /* ignore */
+        }
+      }
+    : undefined;
+  const onCardDragEnd = canvasDraggable
+    ? () => {
+        canvasDragState.value = null;
+      }
+    : undefined;
+
   return (
     <div
       className={cls}
+      draggable={canvasDraggable || undefined}
+      onDragStart={onCardDragStart}
+      onDragEnd={onCardDragEnd}
       onClick={onClick}
       onDoubleClick={onDoubleClick}
       onContextMenu={onContextMenu}
@@ -453,8 +533,8 @@ function CustomCardInline({
       tabIndex={0}
       title={
         node.branchId
-          ? `${node.resourceDisplayName ?? ""} / ${node.usage.node_id} · 单击选中 · 双击打开`
-          : `${node.resourceDisplayName ?? ""} / ${node.usage.node_id} · 单击选中`
+          ? `${node.resourceDisplayName ?? ""} / ${node.usage.node_id} · 拖拽移动 · 单击选中 · 双击打开`
+          : `${node.resourceDisplayName ?? ""} / ${node.usage.node_id} · 拖拽移动 · 单击选中`
       }
     >
       <span className="canvas-custom-marker" aria-hidden="true">
@@ -481,7 +561,8 @@ function CustomCardInline({
 // ──────────────────────────────────────────────────────────────────
 
 const nodeTypes: NodeTypes = {
-  categoryGroup: CategoryGroupNodeComponent
+  categoryGroup: CategoryGroupNodeComponent,
+  floatingCustom: FloatingCustomNodeComponent
 };
 
 // ──────────────────────────────────────────────────────────────────
@@ -525,6 +606,91 @@ function computeDefaultClusterPositions(
 }
 
 // ──────────────────────────────────────────────────────────────────
+// Phase 5: nearest-cluster resolution for library drop
+// ──────────────────────────────────────────────────────────────────
+
+/**
+ * Find the nearest cluster to a flow-space position using AABB
+ * distance. Returns the cluster's docSlug and the signed distance
+ * (0 = inside the cluster rectangle).
+ */
+function findNearestCluster(
+  flowPos: { x: number; y: number },
+  groups: CanvasGroup[],
+  clusterPositions: Record<string, { x: number; y: number }>
+): { docSlug: string | null; distance: number } {
+  let bestSlug: string | null = null;
+  let bestDistance = Infinity;
+  for (const group of groups) {
+    if (group.allNodes.length === 0) continue;
+    const pos = clusterPositions[group.docSlug];
+    if (!pos) continue;
+    const w = estimateClusterWidth(group);
+    const h = estimateClusterHeight(group);
+    // Distance from point to AABB (0 when inside)
+    const dx = Math.max(pos.x - flowPos.x, 0, flowPos.x - (pos.x + w));
+    const dy = Math.max(pos.y - flowPos.y, 0, flowPos.y - (pos.y + h));
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < bestDistance) {
+      bestDistance = dist;
+      bestSlug = group.docSlug;
+    }
+  }
+  return { docSlug: bestSlug, distance: bestDistance };
+}
+
+/** Find the first slot node in a group — used as the default anchor for near-cluster drops. */
+function findFirstSlotInGroup(group: CanvasGroup): string | null {
+  for (const node of group.allNodes) {
+    if (node.kind === "slot") return node.nodeId;
+  }
+  return null;
+}
+
+/**
+ * Phase 5 bug-fix: resolve which column gap the mouse is closest to
+ * based on the relative X offset inside the cluster body.
+ * Returns an insertion index in [0, nodeCount].
+ */
+function resolveInsertionIndex(relX: number, nodeCount: number): number {
+  for (let i = 0; i < nodeCount; i++) {
+    const center = CLUSTER_PAD + i * (NODE_COL_WIDTH + NODE_COL_GAP) + NODE_COL_WIDTH / 2;
+    if (relX < center) return i;
+  }
+  return nodeCount;
+}
+
+/**
+ * Find the first slot node at or after `insertIdx` in the group's
+ * allNodes array, used to anchor a drop at a specific column position.
+ * Falls back to last slot before insertIdx, then null.
+ */
+function resolveDropAnchor(
+  group: CanvasGroup,
+  insertIdx: number
+): string | null {
+  // Nodes in allNodes are in column order. Walk forward from insertIdx.
+  let lastSlotBefore: string | null = null;
+  for (let i = 0; i < group.allNodes.length; i++) {
+    const n = group.allNodes[i]!;
+    if (n.kind === "slot") {
+      if (i >= insertIdx) return n.nodeId;
+      lastSlotBefore = n.nodeId;
+    }
+  }
+  return lastSlotBefore;
+}
+
+/**
+ * Compute the CSS left offset (px) for the insertion line at a given
+ * column insertion index (0 = before first column, N = after last).
+ */
+function insertLineX(insertIdx: number): number {
+  if (insertIdx === 0) return CLUSTER_PAD / 2;
+  return CLUSTER_PAD + insertIdx * (NODE_COL_WIDTH + NODE_COL_GAP) - NODE_COL_GAP / 2;
+}
+
+// ──────────────────────────────────────────────────────────────────
 // Phase 3: Cluster-to-cluster directed edges (canonical order)
 // ──────────────────────────────────────────────────────────────────
 
@@ -535,10 +701,12 @@ function rgbaStr(r: number, g: number, b: number, a: number): string {
 /**
  * Find the react-flow node ID of the cluster that contains the
  * currently selected canvas entity, or null if nothing is selected.
+ * Floating customs are excluded — they live outside clusters.
  */
 function selectedClusterRfId(
   projection: CanvasProjection,
-  selection: CanvasSelection | null
+  selection: CanvasSelection | null,
+  floatingCustomIdxs: Set<number>
 ): string | null {
   if (!selection) return null;
   for (const group of projection.groups) {
@@ -553,7 +721,8 @@ function selectedClusterRfId(
       if (
         selection.kind === "custom" &&
         node.kind === "custom" &&
-        node.arrayIndex === selection.usageArrayIndex
+        node.arrayIndex === selection.usageArrayIndex &&
+        !floatingCustomIdxs.has(node.arrayIndex)
       ) {
         return `group:${group.docSlug}`;
       }
@@ -575,35 +744,42 @@ function selectedClusterRfId(
  */
 function computeCanvasEdges(
   projection: CanvasProjection,
-  selection: CanvasSelection | null
+  selection: CanvasSelection | null,
+  floatingCustomIdxs: Set<number>
 ): Edge[] {
-  // ── Build ordered cluster list by canonical execution order ─────
-  type ClusterEntry = { rfNodeId: string; minOrder: number };
-  const validClusters: ClusterEntry[] = [];
+  // ── Build ordered cluster list in VISUAL (docSlug) order ──────
+  // `projection.groups` is already sorted by docSlug number via
+  // `applyUiGroupOverrides`. Using this order instead of per-slot
+  // `minOrder` avoids edge zig-zags caused by UI_GROUP_OVERRIDES
+  // extracting sub-ranges whose canonical orders don't match the
+  // docSlug position (e.g. "65-strike" has minOrder 19 but sits
+  // visually after "50-navigation" with minOrder 27).
+  //
+  // Floating (unanchored) customs are excluded — they live outside
+  // clusters and must not contribute to cluster validity.
+  const validClusters: string[] = [];
 
   for (const group of projection.groups) {
     if (group.allNodes.length === 0) continue;
-    let minOrder = Infinity;
     let hasValid = false;
     for (const node of group.allNodes) {
       if (node.kind === "slot") {
-        minOrder = Math.min(minOrder, node.order);
         if (node.coverage.count > 0) hasValid = true;
       } else if (node.kind === "custom") {
-        hasValid = true;
+        if (!floatingCustomIdxs.has(node.arrayIndex)) {
+          hasValid = true;
+        }
       }
+      if (hasValid) break;
     }
     if (!hasValid) continue;
-    validClusters.push({
-      rfNodeId: `group:${group.docSlug}`,
-      minOrder: minOrder === Infinity ? 0 : minOrder
-    });
+    validClusters.push(`group:${group.docSlug}`);
   }
 
-  validClusters.sort((a, b) => a.minOrder - b.minOrder);
+  // No sort — projection.groups is already in display order.
 
   // ── Create edges ───────────────────────────────────────────────
-  const selCluster = selectedClusterRfId(projection, selection);
+  const selCluster = selectedClusterRfId(projection, selection, floatingCustomIdxs);
   const edges: Edge[] = [];
 
   for (let i = 0; i < validClusters.length - 1; i++) {
@@ -613,7 +789,7 @@ function computeCanvasEdges(
     let opacity: number;
     if (!selCluster) {
       opacity = 0.35;
-    } else if (curr.rfNodeId === selCluster || next.rfNodeId === selCluster) {
+    } else if (curr === selCluster || next === selCluster) {
       opacity = 0.9;
     } else {
       opacity = 0.1;
@@ -622,10 +798,10 @@ function computeCanvasEdges(
     const color = rgbaStr(142, 142, 142, opacity);
 
     edges.push({
-      id: `e:${curr.rfNodeId}→${next.rfNodeId}`,
-      source: curr.rfNodeId,
+      id: `e:${curr}→${next}`,
+      source: curr,
       sourceHandle: "src",
-      target: next.rfNodeId,
+      target: next,
       targetHandle: "tgt",
       type: "smoothstep",
       markerEnd: {
@@ -656,7 +832,8 @@ function projectionToNodes(
   onSelectionChange: (next: CanvasSelection | null) => void,
   onOpenFullEditor: OpenFullEditorFn,
   onCardContextMenu: (e: React.MouseEvent, items: ContextMenuItem[]) => void,
-  profileId: string
+  profileId: string,
+  floatingCustomIdxs: Set<number>
 ): Node[] {
   const defaultPositions = computeDefaultClusterPositions(projection.groups);
   let clusterPositions = { ...defaultPositions, ...canvasState.clusterPositions };
@@ -674,6 +851,22 @@ function projectionToNodes(
 
   for (const group of projection.groups) {
     if (group.allNodes.length === 0) continue;
+
+    // Filter out floating customs from the cluster's DOM children
+    const displayGroup =
+      floatingCustomIdxs.size > 0
+        ? {
+            ...group,
+            allNodes: group.allNodes.filter(
+              (n) =>
+                n.kind !== "custom" ||
+                !floatingCustomIdxs.has(n.arrayIndex)
+            )
+          }
+        : group;
+
+    if (displayGroup.allNodes.length === 0) continue;
+
     const pos = clusterPositions[group.docSlug] ?? defaultPositions[group.docSlug] ?? { x: 0, y: 0 };
 
     nodes.push({
@@ -681,7 +874,7 @@ function projectionToNodes(
       type: "categoryGroup",
       position: pos,
       data: {
-        group,
+        group: displayGroup,
         selection,
         lensTokens,
         onSelectionChange,
@@ -691,8 +884,34 @@ function projectionToNodes(
       } satisfies CategoryGroupData,
       draggable: true,
       selectable: false,
-      style: { width: estimateClusterWidth(group) }
+      style: { width: estimateClusterWidth(displayGroup) }
     });
+  }
+
+  // Phase 5: floating custom nodes (unanchored with explicit position)
+  for (const group of projection.groups) {
+    for (const node of group.allNodes) {
+      if (node.kind === "custom" && floatingCustomIdxs.has(node.arrayIndex)) {
+        const pos = canvasState.customPositions[node.arrayIndex]!;
+        nodes.push({
+          id: `floating:${node.arrayIndex}`,
+          type: "floatingCustom",
+          position: pos,
+          data: {
+            node,
+            selection,
+            lensTokens,
+            onSelectionChange,
+            onOpenFullEditor,
+            onCardContextMenu,
+            profileId
+          } satisfies FloatingCustomNodeData,
+          draggable: true,
+          selectable: false,
+          style: { width: NODE_COL_WIDTH }
+        });
+      }
+    }
   }
 
   return nodes;
@@ -726,11 +945,59 @@ function CanvasFreeformBodyInner({
   onCardContextMenu,
   profileId,
   onViewportChange,
-  onClusterDragEnd
+  onClusterDragEnd,
+  onCustomDragEnd
 }: CanvasFreeformBodyProps) {
+  // Phase 5: hooks must be called unconditionally (before the early return)
+  const ca = useCa();
+  const rf = useReactFlow();
+
+  // Phase 5 bug-fix: use a ref instead of useState for the drop target
+  // to avoid triggering rfNodes re-computation (which caused screen flash).
+  // Highlight/insertion-line are toggled via direct DOM manipulation.
+  const dropRef = useRef<{
+    slug: string;
+    anchorChainId: string | null;
+    insertLineXPx: number;
+  } | null>(null);
+
   if (!projection) {
     return <div className="canvas-view-empty-hint">尚无可用数据。</div>;
   }
+
+  // Phase 5: effective cluster positions for drop-target resolution.
+  // Duplicates the computation inside projectionToNodes intentionally
+  // so the drop handler can use it without coupling to the node builder.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const effectiveClusterPositions = useMemo(() => {
+    const defaults = computeDefaultClusterPositions(projection.groups);
+    const merged = { ...defaults, ...canvasState.clusterPositions };
+    if (
+      Object.keys(canvasState.clusterPositions).length > 0 &&
+      hasClusterOverlap(merged, projection.groups)
+    ) {
+      return defaults;
+    }
+    return merged;
+  }, [projection, canvasState.clusterPositions]);
+
+  // Phase 5: identify floating customs (unanchored + have explicit position).
+  // Shared across rfNodes + rfEdges so both agree on which customs are floating.
+  const floatingCustomIdxs = useMemo(() => {
+    const set = new Set<number>();
+    for (const group of projection.groups) {
+      for (const node of group.allNodes) {
+        if (
+          node.kind === "custom" &&
+          node.anchorChainId === null &&
+          canvasState.customPositions[node.arrayIndex]
+        ) {
+          set.add(node.arrayIndex);
+        }
+      }
+    }
+    return set;
+  }, [projection, canvasState.customPositions]);
 
   const rfNodes = useMemo(
     () =>
@@ -742,16 +1009,17 @@ function CanvasFreeformBodyInner({
         onSelectionChange,
         onOpenFullEditor,
         onCardContextMenu,
-        profileId
+        profileId,
+        floatingCustomIdxs
       ),
-    [projection, canvasState, selection, lensTokens, onSelectionChange, onOpenFullEditor, onCardContextMenu, profileId]
+    [projection, canvasState, selection, lensTokens, onSelectionChange, onOpenFullEditor, onCardContextMenu, profileId, floatingCustomIdxs]
   );
 
-  // Phase 3: cluster-to-cluster canonical-order edges. Depends on
-  // projection (cluster set + canonical order) and selection (opacity).
+  // Phase 3: cluster-to-cluster canonical-order edges. Floating customs
+  // are excluded from cluster validity so they don't cause spurious edges.
   const rfEdges = useMemo(
-    () => computeCanvasEdges(projection, selection),
-    [projection, selection]
+    () => computeCanvasEdges(projection, selection, floatingCustomIdxs),
+    [projection, selection, floatingCustomIdxs]
   );
 
   const [nodes, setNodes, onNodesChange] = useNodesState(rfNodes);
@@ -785,10 +1053,82 @@ function CanvasFreeformBodyInner({
     []
   );
 
+  const defaultViewport: Viewport = canvasState.viewport ?? DEFAULT_VIEWPORT;
+
+  const onPaneClick = useCallback(() => {
+    onSelectionChange(null);
+  }, [onSelectionChange]);
+
+  const handleMove = useCallback(
+    (_event: unknown, viewport: Viewport) => onViewportChange(viewport),
+    [onViewportChange]
+  );
+
+  // ─── Phase 5: drop highlight DOM helpers ─────────────────────────
+  // Avoid React state to prevent full node-tree re-computation
+  // (screen flash fix). Toggled via direct DOM class manipulation.
+
+  const applyDropHighlight = useCallback((slug: string, lineXPx: number) => {
+    const el = document.querySelector(`[data-id="group:${slug}"] .rf-category-group`) as HTMLElement | null;
+    if (!el) return;
+    el.classList.add("is-drop-target");
+    const body = el.querySelector(".rf-category-group-body") as HTMLElement | null;
+    if (body) body.style.setProperty("--insert-x", `${lineXPx}px`);
+  }, []);
+
+  const clearDropHighlight = useCallback((slug: string) => {
+    const el = document.querySelector(`[data-id="group:${slug}"] .rf-category-group`) as HTMLElement | null;
+    if (!el) return;
+    el.classList.remove("is-drop-target");
+    const body = el.querySelector(".rf-category-group-body") as HTMLElement | null;
+    if (body) body.style.removeProperty("--insert-x");
+  }, []);
+
+  // ─── handleNodeDragStop (after DOM helpers so clearDropHighlight is in scope) ──
+
   const handleNodeDragStop = useCallback(
     (_event: React.MouseEvent, node: Node, allNodes: Node[]) => {
       const startPos = dragStartPosRef.current.get(node.id);
       dragStartPosRef.current.delete(node.id);
+
+      // Phase 5: floating custom drag stop — reposition or re-anchor
+      if (node.id.startsWith("floating:")) {
+        // Clear drop highlight that was shown during the drag
+        const prevDrop = dropRef.current;
+        if (prevDrop) {
+          clearDropHighlight(prevDrop.slug);
+          dropRef.current = null;
+        }
+
+        const arrayIndex = parseInt(node.id.slice("floating:".length), 10);
+        if (isNaN(arrayIndex)) return;
+        // If dragged close to a cluster, auto-anchor into it
+        const { docSlug, distance } = findNearestCluster(
+          node.position, projection!.groups, effectiveClusterPositions
+        );
+        if (distance <= SNAP_THRESHOLD_PX && docSlug) {
+          const group = projection!.groups.find((g) => g.docSlug === docSlug);
+          if (group) {
+            const clusterPos = effectiveClusterPositions[docSlug];
+            const relX = clusterPos
+              ? node.position.x - clusterPos.x
+              : 0;
+            const insertIdx = resolveInsertionIndex(relX, group.allNodes.length);
+            const anchorId = resolveDropAnchor(group, insertIdx);
+            void ca.moveCustomUsage(profileId, arrayIndex, {
+              anchorChainId: anchorId
+            });
+          } else {
+            void ca.moveCustomUsage(profileId, arrayIndex, {
+              anchorChainId: null
+            });
+          }
+        } else {
+          // Stay floating — persist new position
+          onCustomDragEnd(arrayIndex, { x: node.position.x, y: node.position.y });
+        }
+        return;
+      }
 
       if (node.id.startsWith("group:")) {
         const slug = node.id.slice("group:".length);
@@ -827,18 +1167,231 @@ function CanvasFreeformBodyInner({
         }
       }
     },
-    [clusterDimensions, onClusterDragEnd, setNodes]
+    [clusterDimensions, onClusterDragEnd, onCustomDragEnd, setNodes,
+     projection, effectiveClusterPositions, ca, profileId, clearDropHighlight]
   );
 
-  const defaultViewport: Viewport = canvasState.viewport ?? DEFAULT_VIEWPORT;
+  // ─── Auto-pan during HTML5 DnD (library / in-cluster custom drag) ──
+  // A rAF loop keeps panning while the cursor sits near the viewport edge,
+  // even when the mouse is stationary (HTML5 dragover stops firing then).
+  const autoPanRef = useRef<{ dx: number; dy: number; rafId: number | null }>({
+    dx: 0, dy: 0, rafId: null
+  });
 
-  const onPaneClick = useCallback(() => {
-    onSelectionChange(null);
-  }, [onSelectionChange]);
+  const startAutoPan = useCallback(() => {
+    if (autoPanRef.current.rafId != null) return;
+    const tick = () => {
+      const { dx, dy } = autoPanRef.current;
+      if (dx === 0 && dy === 0) {
+        autoPanRef.current.rafId = null;
+        return;
+      }
+      const vp = rf.getViewport();
+      rf.setViewport({ x: vp.x + dx, y: vp.y + dy, zoom: vp.zoom });
+      autoPanRef.current.rafId = requestAnimationFrame(tick);
+    };
+    autoPanRef.current.rafId = requestAnimationFrame(tick);
+  }, [rf]);
 
-  const handleMove = useCallback(
-    (_event: unknown, viewport: Viewport) => onViewportChange(viewport),
-    [onViewportChange]
+  const stopAutoPan = useCallback(() => {
+    autoPanRef.current.dx = 0;
+    autoPanRef.current.dy = 0;
+    if (autoPanRef.current.rafId != null) {
+      cancelAnimationFrame(autoPanRef.current.rafId);
+      autoPanRef.current.rafId = null;
+    }
+  }, []);
+
+  // Cleanup rAF on unmount
+  useEffect(() => {
+    return () => {
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      const { rafId } = autoPanRef.current;
+      if (rafId != null) cancelAnimationFrame(rafId);
+    };
+  }, []);
+
+  // ─── Shared helper: update drop highlight for a flow-space position ──
+  // Used by both handleDragOver (HTML5 DnD) and handleNodeDrag (react-flow).
+  const updateDropHighlight = useCallback(
+    (flowPos: { x: number; y: number }) => {
+      if (!projection) return;
+      const { docSlug, distance } = findNearestCluster(
+        flowPos, projection.groups, effectiveClusterPositions
+      );
+      const isNear = distance <= SNAP_THRESHOLD_PX && !!docSlug;
+
+      let lineXPx = CLUSTER_PAD / 2;
+      if (isNear && docSlug) {
+        const group = projection.groups.find((g) => g.docSlug === docSlug);
+        if (group) {
+          const clusterPos = effectiveClusterPositions[docSlug];
+          const relX = clusterPos ? flowPos.x - clusterPos.x : 0;
+          const insertIdx = resolveInsertionIndex(relX, group.allNodes.length);
+          lineXPx = insertLineX(insertIdx);
+        }
+      }
+
+      const prev = dropRef.current;
+      const targetSlug = isNear ? docSlug : null;
+
+      if (prev && prev.slug !== targetSlug) {
+        clearDropHighlight(prev.slug);
+      }
+
+      if (targetSlug) {
+        const group = projection.groups.find((g) => g.docSlug === targetSlug);
+        const clusterPos = effectiveClusterPositions[targetSlug!];
+        const relX = clusterPos ? flowPos.x - clusterPos.x : 0;
+        const insertIdx = group ? resolveInsertionIndex(relX, group.allNodes.length) : 0;
+        const anchorChainId = group ? resolveDropAnchor(group, insertIdx) : null;
+        dropRef.current = { slug: targetSlug, anchorChainId, insertLineXPx: lineXPx };
+        applyDropHighlight(targetSlug, lineXPx);
+      } else {
+        dropRef.current = null;
+      }
+    },
+    [projection, effectiveClusterPositions, applyDropHighlight, clearDropHighlight]
+  );
+
+  // ─── React-flow node drag: show highlight for floating customs ────
+  const handleNodeDrag = useCallback(
+    (_event: React.MouseEvent, node: Node) => {
+      if (!node.id.startsWith("floating:")) return;
+      updateDropHighlight(node.position);
+    },
+    [updateDropHighlight]
+  );
+
+  const handleDragOver = useCallback(
+    (event: React.DragEvent) => {
+      const payload = canvasDragState.value;
+      if (!payload) return;
+      if (payload.kind !== "library-custom-node" && payload.kind !== "canvas-custom") return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = payload.kind === "library-custom-node" ? "copy" : "move";
+
+      if (!projection) return;
+      const flowPos = rf.screenToFlowPosition({ x: event.clientX, y: event.clientY });
+      updateDropHighlight(flowPos);
+
+      // Auto-pan when cursor is near viewport edges
+      const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+      let dx = 0, dy = 0;
+      if (event.clientY > rect.bottom - AUTOPAN_EDGE_PX) dy = -AUTOPAN_SPEED;
+      else if (event.clientY < rect.top + AUTOPAN_EDGE_PX) dy = AUTOPAN_SPEED;
+      if (event.clientX > rect.right - AUTOPAN_EDGE_PX) dx = -AUTOPAN_SPEED;
+      else if (event.clientX < rect.left + AUTOPAN_EDGE_PX) dx = AUTOPAN_SPEED;
+      autoPanRef.current.dx = dx;
+      autoPanRef.current.dy = dy;
+      if (dx !== 0 || dy !== 0) startAutoPan();
+    },
+    [projection, rf, updateDropHighlight, startAutoPan]
+  );
+
+  const handleDragLeave = useCallback(() => {
+    stopAutoPan();
+    const prev = dropRef.current;
+    if (prev) {
+      clearDropHighlight(prev.slug);
+      dropRef.current = null;
+    }
+  }, [clearDropHighlight, stopAutoPan]);
+
+  const handleDrop = useCallback(
+    (event: React.DragEvent) => {
+      event.preventDefault();
+      stopAutoPan();
+
+      // Clear DOM highlight
+      const dropInfo = dropRef.current;
+      if (dropInfo) {
+        clearDropHighlight(dropInfo.slug);
+      }
+      dropRef.current = null;
+
+      const payload = canvasDragState.value;
+      canvasDragState.value = null;
+      if (!payload || !projection) return;
+      if (payload.kind !== "library-custom-node" && payload.kind !== "canvas-custom") return;
+
+      const flowPos = rf.screenToFlowPosition({ x: event.clientX, y: event.clientY });
+      const { docSlug, distance } = findNearestCluster(
+        flowPos, projection.groups, effectiveClusterPositions
+      );
+
+      // ── Resolve anchor from position within the nearest cluster ──
+      const isNear = distance <= SNAP_THRESHOLD_PX && !!docSlug;
+      let nearAnchorId: string | null = null;
+      if (isNear && docSlug) {
+        const nearGroup = projection.groups.find((g) => g.docSlug === docSlug);
+        if (nearGroup) {
+          const clusterPos = effectiveClusterPositions[docSlug];
+          const relX = clusterPos ? flowPos.x - clusterPos.x : 0;
+          const insertIdx = resolveInsertionIndex(relX, nearGroup.allNodes.length);
+          nearAnchorId = resolveDropAnchor(nearGroup, insertIdx);
+        }
+      }
+
+      void (async () => {
+        if (payload.kind === "canvas-custom") {
+          // ── Re-anchor / float an existing custom node ────────────
+          if (isNear) {
+            await ca.moveCustomUsage(profileId, payload.arrayIndex, {
+              anchorChainId: nearAnchorId
+            });
+          } else {
+            onCustomDragEnd(payload.arrayIndex, flowPos);
+            await ca.moveCustomUsage(profileId, payload.arrayIndex, {
+              anchorChainId: null
+            });
+          }
+          return;
+        }
+
+        // ── Library drop: add new custom usage ─────────────────────
+        const prof = ca.disk?.profiles.find((p) => p.id === profileId);
+        if (!prof) return;
+
+        // Auto-pin: silently pin the branch if the family isn't pinned
+        // to this branch yet (C26 carried).
+        const refs = prof.project.resources ?? [];
+        const existingRef = refs.find(
+          (r) =>
+            r.kind === "custom" &&
+            r.resource_instance_id === payload.resourceInstanceId
+        );
+        if (
+          !existingRef ||
+          profileResourceBranchId(existingRef) !== payload.branchId
+        ) {
+          const ok = await ca.pinBranch(
+            profileId, "custom",
+            payload.resourceInstanceId, payload.branchId
+          );
+          if (!ok) return; // pinBranch failed (showed dialog)
+        }
+
+        if (isNear) {
+          // ── Near cluster: anchor at the resolved insertion position ──
+          const anchor = nearAnchorId
+            ? { kind: "builtin_core_chain" as const, chain_id: nearAnchorId }
+            : null;
+          await ca.addCustomUsage(
+            profileId, payload.resourceInstanceId, payload.nodeId, anchor
+          );
+        } else {
+          // ── Far from cluster: add unanchored + save position ──────
+          const freshProf = ca.disk?.profiles.find((p) => p.id === profileId);
+          const nextIdx = (freshProf?.project.custom_node_usages ?? []).length;
+          onCustomDragEnd(nextIdx, flowPos);
+          await ca.addCustomUsage(
+            profileId, payload.resourceInstanceId, payload.nodeId, null
+          );
+        }
+      })();
+    },
+    [projection, effectiveClusterPositions, rf, ca, profileId, onCustomDragEnd, clearDropHighlight, stopAutoPan]
   );
 
   return (
@@ -848,9 +1401,13 @@ function CanvasFreeformBodyInner({
       nodeTypes={nodeTypes}
       onNodesChange={onNodesChange}
       onNodeDragStart={handleNodeDragStart}
+      onNodeDrag={handleNodeDrag}
       onNodeDragStop={handleNodeDragStop}
       onMove={handleMove}
       onPaneClick={onPaneClick}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+      onDragLeave={handleDragLeave}
       defaultViewport={defaultViewport}
       fitView={false}
       panOnScroll

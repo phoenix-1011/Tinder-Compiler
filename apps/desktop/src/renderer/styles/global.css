@@ -6106,3 +6106,58 @@ kbd {
   stroke-width: 0.5;
   opacity: 0.5;
 }
+
+/* ─── Phase 5: Library drag-to-canvas ──────────────────────────── */
+
+/* Drop-target cluster highlight (簇高亮) — toggled via direct DOM
+   class manipulation (not React state) to avoid react-flow node-tree
+   re-computation on every dragover event. Purple so it stands out
+   from the blue selection accent. */
+.rf-category-group.is-drop-target {
+  border-color: #a855f7;
+  box-shadow: 0 0 0 2px #a855f7, 0 0 12px rgba(168, 85, 247, 0.35);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+/* Insertion line — positioned dynamically via --insert-x CSS variable
+   set by the drag handler through direct DOM manipulation. */
+.rf-category-group-body {
+  position: relative;
+}
+.rf-category-group.is-drop-target .rf-category-group-body::after {
+  content: "";
+  position: absolute;
+  left: var(--insert-x, 6px);
+  top: 12px;
+  bottom: 12px;
+  width: 2px;
+  background: #a855f7;
+  border-radius: 1px;
+  opacity: 0.85;
+  pointer-events: none;
+}
+
+/* Draggable custom card cursor affordance */
+.rf-custom-card[draggable="true"] {
+  cursor: grab;
+}
+.rf-custom-card[draggable="true"]:active {
+  cursor: grabbing;
+}
+
+/* Floating custom node (unanchored, free-positioned) */
+.rf-floating-custom {
+  background: var(--tc-canvas-cluster-bg);
+  border: 1px dashed var(--tc-fg-muted);
+  border-radius: 6px;
+  padding: 6px;
+}
+.rf-floating-custom .canvas-custom {
+  width: 100%;
+}
+.rf-floating-custom-badge {
+  font-size: 10px;
+  color: var(--tc-fg-warn);
+  text-align: center;
+  padding: 2px 0 0;
+  white-space: nowrap;
+}
