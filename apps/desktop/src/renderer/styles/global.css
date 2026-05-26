@@ -5985,6 +5985,15 @@ kbd {
   padding: 0;
   font-size: inherit;
   color: inherit;
+  /* react-flow sets pointer-events: none on nodes with both
+     selectable + draggable = false (our child nodes). Force
+     pointer-events so card-level click handlers still fire. */
+  pointer-events: all !important;
+}
+/* Suppress react-flow's default selection outline — we manage
+   selection visually at the card level, not the node wrapper. */
+.rf-canvas-host .react-flow__node.selected {
+  box-shadow: none;
 }
 .rf-canvas-host .react-flow__controls {
   background: var(--tc-bg-sidebar);
@@ -6067,4 +6076,27 @@ kbd {
   flex-shrink: 0;
   box-sizing: border-box;
   overflow: hidden;
+}
+
+/* ─── Phase 3: invisible edge handles (L/R for horizontal flow) ── */
+.rf-invisible-handle.react-flow__handle {
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  min-width: 0;
+  min-height: 0;
+  border: none;
+  padding: 0;
+  pointer-events: none;
+}
+
+/* ─── Phase 3: cluster-to-cluster edges ──────────────────────── */
+.rf-canvas-host .react-flow__edge-path {
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+/* Soften edge rendering on the minimap */
+.rf-canvas-host .react-flow__minimap .react-flow__edge-path {
+  stroke-width: 0.5;
+  opacity: 0.5;
 }

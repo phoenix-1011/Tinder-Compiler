@@ -4,8 +4,12 @@ import {
   Background,
   Controls,
   MiniMap,
+  Handle,
+  Position,
+  MarkerType,
   useNodesState,
   type Node,
+  type Edge,
   type NodeTypes,
   type Viewport
 } from "@xyflow/react";
@@ -16,6 +20,7 @@ import {
   canvasNodeIdentity,
   type CanvasCustomNode,
   type CanvasGroup,
+  type CanvasNode,
   type CanvasProjection,
   type CanvasSlotNode
 } from "../state/canvasProjection";
@@ -94,16 +99,6 @@ export interface CategoryGroupData {
   profileId: string;
 }
 
-export interface CustomNodeData {
-  node: CanvasCustomNode;
-  selection: CanvasSelection | null;
-  lensTokens: Set<string> | null;
-  onSelectionChange: (next: CanvasSelection | null) => void;
-  onOpenFullEditor: OpenFullEditorFn;
-  onCardContextMenu: (e: React.MouseEvent, items: ContextMenuItem[]) => void;
-  profileId: string;
-}
-
 type OpenFullEditorFn = (target: {
   resourceKind: "standard" | "custom";
   resourceInstanceId: string;
@@ -111,13 +106,20 @@ type OpenFullEditorFn = (target: {
 }) => void;
 
 // ──────────────────────────────────────────────────────────────────
-// Category group node (renders chain-node cards as children)
+// Category group node (cluster with cards as DOM children + L/R handles)
 // ──────────────────────────────────────────────────────────────────
 
 function CategoryGroupNodeComponent({ data }: { data: CategoryGroupData }) {
   const { group, selection, lensTokens, onSelectionChange, onOpenFullEditor, onCardContextMenu, profileId } = data;
   return (
     <div className="rf-category-group">
+      <Handle
+        type="target"
+        position={Position.Left}
+        id="tgt"
+        className="rf-invisible-handle"
+        isConnectable={false}
+      />
       <div className="rf-category-group-header">
         <span className="rf-category-group-title">{group.docTitle}</span>
         <span className="rf-category-group-count">
@@ -151,26 +153,14 @@ function CategoryGroupNodeComponent({ data }: { data: CategoryGroupData }) {
           )
         )}
       </div>
+      <Handle
+        type="source"
+        position={Position.Right}
+        id="src"
+        className="rf-invisible-handle"
+        isConnectable={false}
+      />
     </div>
-  );
-}
-
-// ──────────────────────────────────────────────────────────────────
-// Custom node (free-positioned on canvas)
-// ──────────────────────────────────────────────────────────────────
-
-function CustomNodeComponent({ data }: { data: CustomNodeData }) {
-  const { node, selection, lensTokens, onSelectionChange, onOpenFullEditor, onCardContextMenu, profileId } = data;
-  return (
-    <CustomCardInline
-      node={node}
-      selection={selection}
-      lensTokens={lensTokens}
-      onSelectionChange={onSelectionChange}
-      onOpenFullEditor={onOpenFullEditor}
-      onCardContextMenu={onCardContextMenu}
-      profileId={profileId}
-    />
   );
 }
 
@@ -492,8 +482,7 @@ function CustomCardInline({
 // ──────────────────────────────────────────────────────────────────
 
 const nodeTypes: NodeTypes = {
-  categoryGroup: CategoryGroupNodeComponent,
-  customNode: CustomNodeComponent
+  categoryGroup: CategoryGroupNodeComponent
 };
 
 // ──────────────────────────────────────────────────────────────────
@@ -536,27 +525,124 @@ function computeDefaultClusterPositions(
   return positions;
 }
 
-function computeDefaultCustomPosition(
-  _node: CanvasCustomNode,
-  clusterPositions: Record<string, { x: number; y: number }>,
-  groups: CanvasGroup[]
-): { x: number; y: number } {
-  if (_node.anchorChainId) {
-    for (const g of groups) {
-      const pos = clusterPositions[g.docSlug];
-      if (!pos) continue;
-      const colIdx = g.allNodes.findIndex(
-        (n) => n.kind === "slot" && n.nodeId === _node.anchorChainId
-      );
-      if (colIdx >= 0) {
-        return {
-          x: pos.x + CLUSTER_PAD + colIdx * (NODE_COL_WIDTH + NODE_COL_GAP),
-          y: pos.y + estimateClusterHeight(g) + 16
-        };
+// ──────────────────────────────────────────────────────────────────
+// Phase 3: Cluster-to-cluster directed edges (canonical order)
+// ──────────────────────────────────────────────────────────────────
+
+function rgbaStr(r: number, g: number, b: number, a: number): string {
+  return `rgba(${r},${g},${b},${a.toFixed(3)})`;
+}
+
+/**
+ * Find the react-flow node ID of the cluster that contains the
+ * currently selected canvas entity, or null if nothing is selected.
+ */
+function selectedClusterRfId(
+  projection: CanvasProjection,
+  selection: CanvasSelection | null
+): string | null {
+  if (!selection) return null;
+  for (const group of projection.groups) {
+    for (const node of group.allNodes) {
+      if (
+        (selection.kind === "slot" || selection.kind === "coverage") &&
+        node.kind === "slot" &&
+        node.nodeId === selection.chainNodeId
+      ) {
+        return `group:${group.docSlug}`;
+      }
+      if (
+        selection.kind === "custom" &&
+        node.kind === "custom" &&
+        node.arrayIndex === selection.usageArrayIndex
+      ) {
+        return `group:${group.docSlug}`;
       }
     }
   }
-  return { x: 0, y: 0 };
+  return null;
+}
+
+/**
+ * Compute directed cluster-to-cluster edges. Each cluster's position
+ * in the execution chain is determined by the minimum canonical
+ * `order` value among its slot nodes. Clusters without any valid
+ * nodes (covered slots or customs) are skipped.
+ *
+ * "常亮但低调" opacity (baked into color for arrow marker parity):
+ *   - no selection  → 35 %
+ *   - incident      → 90 %
+ *   - non-incident  → 10 %
+ */
+function computeCanvasEdges(
+  projection: CanvasProjection,
+  selection: CanvasSelection | null
+): Edge[] {
+  // ── Build ordered cluster list by canonical execution order ─────
+  type ClusterEntry = { rfNodeId: string; minOrder: number };
+  const validClusters: ClusterEntry[] = [];
+
+  for (const group of projection.groups) {
+    if (group.allNodes.length === 0) continue;
+    let minOrder = Infinity;
+    let hasValid = false;
+    for (const node of group.allNodes) {
+      if (node.kind === "slot") {
+        minOrder = Math.min(minOrder, node.order);
+        if (node.coverage.count > 0) hasValid = true;
+      } else if (node.kind === "custom") {
+        hasValid = true;
+      }
+    }
+    if (!hasValid) continue;
+    validClusters.push({
+      rfNodeId: `group:${group.docSlug}`,
+      minOrder: minOrder === Infinity ? 0 : minOrder
+    });
+  }
+
+  validClusters.sort((a, b) => a.minOrder - b.minOrder);
+
+  // ── Create edges ───────────────────────────────────────────────
+  const selCluster = selectedClusterRfId(projection, selection);
+  const edges: Edge[] = [];
+
+  for (let i = 0; i < validClusters.length - 1; i++) {
+    const curr = validClusters[i]!;
+    const next = validClusters[i + 1]!;
+
+    let opacity: number;
+    if (!selCluster) {
+      opacity = 0.35;
+    } else if (curr.rfNodeId === selCluster || next.rfNodeId === selCluster) {
+      opacity = 0.9;
+    } else {
+      opacity = 0.1;
+    }
+
+    const color = rgbaStr(142, 142, 142, opacity);
+
+    edges.push({
+      id: `e:${i}`,
+      source: curr.rfNodeId,
+      sourceHandle: "src",
+      target: next.rfNodeId,
+      targetHandle: "tgt",
+      type: "smoothstep",
+      markerEnd: {
+        type: MarkerType.ArrowClosed,
+        width: 12,
+        height: 12,
+        color
+      },
+      style: {
+        stroke: color,
+        strokeWidth: 1.5
+      }
+    });
+  }
+
+  return edges;
 }
 
 // ──────────────────────────────────────────────────────────────────
@@ -590,6 +676,7 @@ function projectionToNodes(
   for (const group of projection.groups) {
     if (group.allNodes.length === 0) continue;
     const pos = clusterPositions[group.docSlug] ?? defaultPositions[group.docSlug] ?? { x: 0, y: 0 };
+
     nodes.push({
       id: `group:${group.docSlug}`,
       type: "categoryGroup",
@@ -607,31 +694,6 @@ function projectionToNodes(
       selectable: false,
       style: { width: estimateClusterWidth(group) }
     });
-  }
-
-  if (projection.customOnly) {
-    for (const node of projection.customOnly.allNodes) {
-      if (node.kind !== "custom") continue;
-      const pos =
-        canvasState.customPositions[node.arrayIndex] ??
-        computeDefaultCustomPosition(node, clusterPositions, projection.groups);
-      nodes.push({
-        id: `custom:${node.arrayIndex}`,
-        type: "customNode",
-        position: pos,
-        data: {
-          node,
-          selection,
-          lensTokens,
-          onSelectionChange,
-          onOpenFullEditor,
-          onCardContextMenu,
-          profileId
-        } satisfies CustomNodeData,
-        draggable: true,
-        selectable: false
-      });
-    }
   }
 
   return nodes;
@@ -665,8 +727,7 @@ function CanvasFreeformBodyInner({
   onCardContextMenu,
   profileId,
   onViewportChange,
-  onClusterDragEnd,
-  onCustomDragEnd
+  onClusterDragEnd
 }: CanvasFreeformBodyProps) {
   if (!projection) {
     return <div className="canvas-view-empty-hint">尚无可用数据。</div>;
@@ -685,6 +746,13 @@ function CanvasFreeformBodyInner({
         profileId
       ),
     [projection, canvasState, selection, lensTokens, onSelectionChange, onOpenFullEditor, onCardContextMenu, profileId]
+  );
+
+  // Phase 3: cluster-to-cluster canonical-order edges. Depends on
+  // projection (cluster set + canonical order) and selection (opacity).
+  const rfEdges = useMemo(
+    () => computeCanvasEdges(projection, selection),
+    [projection, selection]
   );
 
   const [nodes, setNodes, onNodesChange] = useNodesState(rfNodes);
@@ -758,14 +826,9 @@ function CanvasFreeformBodyInner({
         } else {
           onClusterDragEnd(slug, { x: node.position.x, y: node.position.y });
         }
-      } else if (node.id.startsWith("custom:")) {
-        const idx = parseInt(node.id.slice("custom:".length), 10);
-        if (!isNaN(idx)) {
-          onCustomDragEnd(idx, { x: node.position.x, y: node.position.y });
-        }
       }
     },
-    [clusterDimensions, onClusterDragEnd, onCustomDragEnd, setNodes]
+    [clusterDimensions, onClusterDragEnd, setNodes]
   );
 
   const defaultViewport: Viewport = canvasState.viewport ?? DEFAULT_VIEWPORT;
@@ -777,7 +840,7 @@ function CanvasFreeformBodyInner({
   return (
     <ReactFlow
       nodes={nodes}
-      edges={[]}
+      edges={rfEdges}
       nodeTypes={nodeTypes}
       onNodesChange={onNodesChange}
       onNodeDragStart={handleNodeDragStart}

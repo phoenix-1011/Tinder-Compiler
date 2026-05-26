@@ -257,8 +257,24 @@ export function buildCanvasProjection(
         }
       }
     }
-    // Unanchored or anchored to an unknown chain id → custom-only.
+    // Unanchored or anchored to an unknown chain id — collect and
+    // merge into the last occupied cluster below (no free-floating
+    // custom-only group).
     customOnlyRows.push(row);
+  }
+
+  // Merge unanchored customs into the last non-empty canonical
+  // bucket so every custom lives inside a real cluster.
+  if (customOnlyRows.length > 0) {
+    let lastSlug: string | null = null;
+    for (const slug of orderedSlugs) {
+      if ((buckets.get(slug)?.length ?? 0) > 0) lastSlug = slug;
+    }
+    if (lastSlug) {
+      const target = buckets.get(lastSlug)!;
+      for (const row of customOnlyRows) target.push(row);
+    }
+    // else: entire chain is empty — silently drop the customs.
   }
 
   const groups: CanvasGroup[] = orderedSlugs.map((slug) => {
@@ -298,21 +314,10 @@ export function buildCanvasProjection(
 
   const finalGroups = applyUiGroupOverrides(groups, coverageFilter);
 
-  const customOnly =
-    customOnlyRows.length > 0
-      ? {
-          docSlug: "__custom_only__",
-          docTitle: "Custom-only anchors",
-          isCustomOnly: true,
-          allNodes: customOnlyRows.map(rowToNodeWithOrphans),
-          visibleNodes: customOnlyRows.map(rowToNodeWithOrphans),
-          coveredSlotCount: 0,
-          totalSlotCount: 0,
-          hiddenSlotCount: 0
-        }
-      : null;
-
-  return { groups: finalGroups, customOnly };
+  // customOnly is always null — unanchored customs have been merged
+  // into the last cluster above. The field is kept for back-compat
+  // with callers that check `projection.customOnly`.
+  return { groups: finalGroups, customOnly: null };
 }
 
 // ──────────────────────────────────────────────────────────────────────
