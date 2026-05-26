@@ -1,0 +1,246 @@
+{
+	"$schema": "vscode://schemas/color-theme",
+	"name": "Light MATLAB",
+	"include": "./light_plus.json",
+	"colors": {
+		"activityBar.activeBorder": "#C79100",
+		"activityBar.background": "#F0EDE6",
+		"activityBar.border": "#D8D5CD",
+		"activityBar.foreground": "#212121",
+		"activityBar.inactiveForeground": "#6B6B6B",
+		"activityBarBadge.background": "#C79100",
+		"activityBarBadge.foreground": "#FFFFFF",
+		"badge.background": "#D1CEC6",
+		"badge.foreground": "#333333",
+		"button.background": "#C79100",
+		"button.border": "#0000001a",
+		"button.foreground": "#FFFFFF",
+		"button.hoverBackground": "#B08200",
+		"button.secondaryBackground": "#E0DDD5",
+		"button.secondaryForeground": "#333333",
+		"button.secondaryHoverBackground": "#D1CEC6",
+		"checkbox.background": "#F5F3EF",
+		"checkbox.border": "#B5B0A5",
+		"descriptionForeground": "#4A4A4A",
+		"dropdown.background": "#FFFFFF",
+		"dropdown.border": "#C8C3B8",
+		"dropdown.foreground": "#333333",
+		"dropdown.listBackground": "#FFFFFF",
+		"editor.background": "#F5F3EF",
+		"editor.foreground": "#212121",
+		"editor.inactiveSelectionBackground": "#EAE4D4",
+		"editor.selectionHighlightBackground": "#EDB12040",
+		"editorGroup.border": "#D8D5CD",
+		"editorGroupHeader.tabsBackground": "#EBE8E0",
+		"editorGroupHeader.tabsBorder": "#D8D5CD",
+		"editorGutter.addedBackground": "#2EA043",
+		"editorGutter.deletedBackground": "#D32F2F",
+		"editorGutter.modifiedBackground": "#C79100",
+		"editorIndentGuide.background1": "#D8D5CD",
+		"editorLineNumber.activeForeground": "#027880",
+		"editorLineNumber.foreground": "#8B8580",
+		"editorOverviewRuler.border": "#D8D5CD",
+		"editorSuggestWidget.background": "#F0EDE6",
+		"editorWidget.background": "#F0EDE6",
+		"editorWidget.border": "#C8C3B8",
+		"errorForeground": "#D32F2F",
+		"focusBorder": "#C79100",
+		"foreground": "#333333",
+		"icon.foreground": "#4A4A4A",
+		"input.background": "#FFFFFF",
+		"input.border": "#C8C3B8",
+		"input.foreground": "#212121",
+		"input.placeholderForeground": "#8B8580",
+		"inputOption.activeBackground": "#FFF5BC",
+		"inputOption.activeBorder": "#C79100",
+		"inputOption.activeForeground": "#212121",
+		"keybindingLabel.foreground": "#333333",
+		"list.activeSelectionBackground": "#EDB12030",
+		"list.activeSelectionForeground": "#212121",
+		"list.activeSelectionIconForeground": "#212121",
+		"list.hoverBackground": "#F0EDE6",
+		"list.focusAndSelectionOutline": "#C79100",
+		"menu.border": "#C8C3B8",
+		"menu.selectionBackground": "#C79100",
+		"menu.selectionForeground": "#FFFFFF",
+		"notebook.cellBorderColor": "#D8D5CD",
+		"notificationCenterHeader.background": "#F5F3EF",
+		"notificationCenterHeader.foreground": "#333333",
+		"notifications.background": "#F5F3EF",
+		"notifications.border": "#D8D5CD",
+		"notifications.foreground": "#333333",
+		"panel.background": "#EBE8E0",
+		"panel.border": "#D8D5CD",
+		"panelInput.border": "#D8D5CD",
+		"panelTitle.activeBorder": "#C79100",
+		"panelTitle.activeForeground": "#212121",
+		"panelTitle.inactiveForeground": "#6B6B6B",
+		"peekViewEditor.matchHighlightBackground": "#EDB12044",
+		"peekViewResult.background": "#F5F3EF",
+		"peekViewResult.matchHighlightBackground": "#EDB12044",
+		"pickerGroup.border": "#D8D5CD",
+		"pickerGroup.foreground": "#8B8580",
+		"ports.iconRunningProcessForeground": "#2EA043",
+		"progressBar.background": "#C79100",
+		"quickInput.background": "#F0EDE6",
+		"quickInput.foreground": "#333333",
+		"searchEditor.textInputBorder": "#C8C3B8",
+		"settings.dropdownBackground": "#FFFFFF",
+		"settings.dropdownBorder": "#C8C3B8",
+		"settings.headerForeground": "#212121",
+		"settings.modifiedItemIndicator": "#EDB12066",
+		"settings.numberInputBorder": "#C8C3B8",
+		"settings.textInputBorder": "#C8C3B8",
+		"sideBar.background": "#EBE8E0",
+		"sideBar.border": "#D8D5CD",
+		"sideBar.foreground": "#333333",
+		"sideBarSectionHeader.background": "#E5E2DA",
+		"sideBarSectionHeader.border": "#D8D5CD",
+		"sideBarSectionHeader.foreground": "#333333",
+		"sideBarTitle.foreground": "#212121",
+		"statusBar.background": "#00695C",
+		"statusBar.foreground": "#FFFFFF",
+		"statusBar.border": "#00574B",
+		"statusBarItem.remoteBackground": "#C79100",
+		"statusBarItem.remoteForeground": "#FFFFFF",
+		"statusBarItem.errorBackground": "#D32F2F",
+		"tab.activeBackground": "#F5F3EF",
+		"tab.activeBorderTop": "#C79100",
+		"tab.activeForeground": "#212121",
+		"tab.border": "#D8D5CD",
+		"tab.hoverBackground": "#F5F3EF",
+		"tab.inactiveBackground": "#EBE8E0",
+		"tab.inactiveForeground": "#8B8580",
+		"tab.lastPinnedBorder": "#C8C3B8",
+		"terminalCursor.foreground": "#C79100",
+		"terminal.foreground": "#212121",
+		"terminal.inactiveSelectionBackground": "#EAE4D4",
+		"terminal.tab.activeBorder": "#C79100",
+		"textBlockQuote.background": "#F0EDE6",
+		"textBlockQuote.border": "#D8D5CD",
+		"textCodeBlock.background": "#F0EDE6",
+		"textLink.activeForeground": "#1171BE",
+		"textLink.foreground": "#1171BE",
+		"textPreformat.foreground": "#333333",
+		"textSeparator.foreground": "#212121",
+		"titleBar.activeBackground": "#E5E2DA",
+		"titleBar.activeForeground": "#212121",
+		"titleBar.border": "#D8D5CD",
+		"titleBar.inactiveBackground": "#EBE8E0",
+		"titleBar.inactiveForeground": "#8B8580",
+		"welcomePage.tileBackground": "#F0EDE6",
+		"widget.border": "#D8D5CD"
+	},
+	"tokenColors": [
+		{
+			"name": "MATLAB: comments — dark green",
+			"scope": "comment",
+			"settings": {
+				"foreground": "#008013"
+			}
+		},
+		{
+			"name": "MATLAB: strings — vivid purple",
+			"scope": [
+				"string",
+				"meta.embedded.assembly"
+			],
+			"settings": {
+				"foreground": "#A709F5"
+			}
+		},
+		{
+			"name": "MATLAB: keywords — bright blue",
+			"scope": [
+				"keyword",
+				"keyword.control",
+				"storage",
+				"storage.type",
+				"storage.modifier",
+				"constant.language",
+				"variable.language"
+			],
+			"settings": {
+				"foreground": "#0E00FF"
+			}
+		},
+		{
+			"name": "MATLAB: control flow — teal",
+			"scope": [
+				"keyword.control",
+				"keyword.other.using",
+				"keyword.other.directive.using",
+				"keyword.other.operator",
+				"entity.name.operator"
+			],
+			"settings": {
+				"foreground": "#027880"
+			}
+		},
+		{
+			"name": "MATLAB: numbers — dark green",
+			"scope": [
+				"constant.numeric",
+				"variable.other.enummember",
+				"keyword.operator.plus.exponent",
+				"keyword.operator.minus.exponent"
+			],
+			"settings": {
+				"foreground": "#098658"
+			}
+		},
+		{
+			"name": "MATLAB: functions — brown/sienna",
+			"scope": [
+				"entity.name.function",
+				"support.function",
+				"support.constant.handlebars",
+				"entity.name.operator.custom-literal"
+			],
+			"settings": {
+				"foreground": "#8B6606"
+			}
+		},
+		{
+			"name": "MATLAB: types — teal",
+			"scope": [
+				"support.class",
+				"support.type",
+				"entity.name.type",
+				"entity.name.namespace",
+				"entity.name.class",
+				"entity.name.scope-resolution"
+			],
+			"settings": {
+				"foreground": "#027880"
+			}
+		},
+		{
+			"name": "MATLAB: variables — navy",
+			"scope": [
+				"variable",
+				"meta.definition.variable.name",
+				"support.variable",
+				"entity.name.variable",
+				"constant.other.placeholder"
+			],
+			"settings": {
+				"foreground": "#212121"
+			}
+		},
+		{
+			"name": "MATLAB: errors / invalid",
+			"scope": "invalid",
+			"settings": {
+				"foreground": "#B7312C"
+			}
+		}
+	],
+	"semanticHighlighting": true,
+	"semanticTokenColors": {
+		"newOperator": "#0E00FF",
+		"stringLiteral": "#A709F5",
+		"customLiteral": "#8B6606",
+		"numberLiteral": "#098658"
+	}
+}

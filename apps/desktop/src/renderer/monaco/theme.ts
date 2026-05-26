@@ -5,6 +5,7 @@ import darkModern from "../themes/dark_modern.json";
 import lightVs from "../themes/light_vs.json";
 import lightPlus from "../themes/light_plus.json";
 import lightModern from "../themes/light_modern.json";
+import lightMatlab from "../themes/light_matlab.json";
 
 interface RawTheme {
   name?: string;
@@ -51,6 +52,13 @@ export const THEMES: ThemeDefinition[] = [
     variant: "light",
     base: "vs",
     sources: [lightVs as RawTheme, lightPlus as RawTheme, lightModern as RawTheme]
+  },
+  {
+    id: "tinder-light-matlab",
+    label: "Light MATLAB",
+    variant: "light",
+    base: "vs",
+    sources: [lightVs as RawTheme, lightPlus as RawTheme, lightMatlab as RawTheme]
   }
 ];
 
