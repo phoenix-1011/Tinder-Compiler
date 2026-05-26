@@ -16,7 +16,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import React, { useCallback, useEffect, useImperativeHandle, useMemo, useRef } from "react";
 import {
   canvasNodeIdentity,
   type CanvasCustomNode,
@@ -124,7 +124,7 @@ type OpenFullEditorFn = (target: {
 function CategoryGroupNodeComponent({ data }: { data: CategoryGroupData }) {
   const { group, selection, lensTokens, onSelectionChange, onOpenFullEditor, onCardContextMenu, profileId } = data;
   return (
-    <div className="rf-category-group">
+    <div className="rf-category-group" role="group" aria-label={`簇: ${group.docTitle}`}>
       <Handle
         type="target"
         position={Position.Left}
@@ -193,7 +193,7 @@ interface FloatingCustomNodeData {
 
 function FloatingCustomNodeComponent({ data }: { data: FloatingCustomNodeData }) {
   return (
-    <div className="rf-floating-custom">
+    <div className="rf-floating-custom" role="group" aria-label={`未锚定节点: ${data.node.displayName}`}>
       <CustomCardInline
         node={data.node}
         selection={data.selection}
@@ -918,6 +918,17 @@ function projectionToNodes(
 }
 
 // ──────────────────────────────────────────────────────────────────
+// Imperative handle — exposed to CanvasView for toolbar actions
+// ──────────────────────────────────────────────────────────────────
+
+export interface CanvasFreeformHandle {
+  /** Fit all clusters + floating customs into view with padding. */
+  fitAll(): void;
+  /** Fit only the selected entity's cluster (or the node itself) into view. */
+  fitSelection(): void;
+}
+
+// ──────────────────────────────────────────────────────────────────
 // Main freeform body component
 // ──────────────────────────────────────────────────────────────────
 
@@ -933,6 +944,8 @@ interface CanvasFreeformBodyProps {
   onViewportChange: (viewport: Viewport) => void;
   onClusterDragEnd: (docSlug: string, position: { x: number; y: number }) => void;
   onCustomDragEnd: (arrayIndex: number, position: { x: number; y: number }) => void;
+  /** Imperative handle for toolbar actions (fit-all, fit-selection). */
+  freeformRef?: React.Ref<CanvasFreeformHandle>;
 }
 
 function CanvasFreeformBodyInner({
@@ -946,11 +959,17 @@ function CanvasFreeformBodyInner({
   profileId,
   onViewportChange,
   onClusterDragEnd,
-  onCustomDragEnd
+  onCustomDragEnd,
+  freeformRef
 }: CanvasFreeformBodyProps) {
   // Phase 5: hooks must be called unconditionally (before the early return)
   const ca = useCa();
   const rf = useReactFlow();
+
+  // Phase 6: overlap warning — flash the colliding cluster red momentarily.
+  // Uses direct DOM manipulation (like drop highlight) to avoid triggering
+  // react-flow node re-computation.
+  const overlapTimerRef = useRef<number | null>(null);
 
   // Phase 5 bug-fix: use a ref instead of useState for the drop target
   // to avoid triggering rfNodes re-computation (which caused screen flash).
@@ -998,6 +1017,53 @@ function CanvasFreeformBodyInner({
     }
     return set;
   }, [projection, canvasState.customPositions]);
+
+  // ─── Phase 6: imperative handle for fit-all / fit-selection ──────
+  useImperativeHandle(
+    freeformRef,
+    () => ({
+      fitAll() {
+        rf.fitView({ padding: 0.12, duration: 300 });
+      },
+      fitSelection() {
+        if (!selection || !projection) {
+          // No selection — fall back to fit-all
+          rf.fitView({ padding: 0.12, duration: 300 });
+          return;
+        }
+        // Resolve which react-flow node(s) to focus
+        const nodeIds: string[] = [];
+        if (selection.kind === "custom" && floatingCustomIdxs.has(selection.usageArrayIndex)) {
+          nodeIds.push(`floating:${selection.usageArrayIndex}`);
+        } else {
+          // Find the cluster that contains the selection
+          for (const group of projection.groups) {
+            for (const node of group.allNodes) {
+              if (
+                (selection.kind === "slot" || selection.kind === "coverage") &&
+                node.kind === "slot" && node.nodeId === selection.chainNodeId
+              ) {
+                nodeIds.push(`group:${group.docSlug}`);
+              }
+              if (
+                selection.kind === "custom" &&
+                node.kind === "custom" &&
+                node.arrayIndex === selection.usageArrayIndex
+              ) {
+                nodeIds.push(`group:${group.docSlug}`);
+              }
+            }
+          }
+        }
+        if (nodeIds.length === 0) {
+          rf.fitView({ padding: 0.12, duration: 300 });
+          return;
+        }
+        rf.fitView({ nodes: nodeIds.map((id) => ({ id })), padding: 0.25, duration: 300 });
+      }
+    }),
+    [rf, selection, projection, floatingCustomIdxs]
+  );
 
   const rfNodes = useMemo(
     () =>
@@ -1159,9 +1225,22 @@ function CanvasFreeformBodyInner({
         }
 
         if (hasOverlap && startPos) {
+          // Phase 6: revert position AND flash the dragged cluster red
           setNodes(nds =>
             nds.map(n => (n.id === node.id ? { ...n, position: startPos } : n))
           );
+          // DOM flash — add/remove .is-overlap-flash on the cluster element
+          const flashEl = document.querySelector(
+            `[data-id="${node.id}"] .rf-category-group`
+          ) as HTMLElement | null;
+          if (flashEl) {
+            flashEl.classList.add("is-overlap-flash");
+            if (overlapTimerRef.current != null) window.clearTimeout(overlapTimerRef.current);
+            overlapTimerRef.current = window.setTimeout(() => {
+              flashEl.classList.remove("is-overlap-flash");
+              overlapTimerRef.current = null;
+            }, 600);
+          }
         } else {
           onClusterDragEnd(slug, { x: node.position.x, y: node.position.y });
         }
@@ -1421,12 +1500,18 @@ function CanvasFreeformBodyInner({
         size={1}
         color="var(--tc-canvas-grid-color, rgba(255,255,255,0.04))"
       />
-      <Controls showInteractive={false} />
+      <Controls showInteractive={false} aria-label="画布缩放控件" />
       <MiniMap
         pannable
         zoomable
         style={{ background: "var(--tc-canvas-bg, #1e1e1e)" }}
         maskColor="rgba(0,0,0,0.6)"
+        nodeColor={(n) =>
+          n.id.startsWith("floating:")
+            ? "var(--tc-accent, #007acc)"
+            : "var(--tc-surface-strong, rgba(255,255,255,0.18))"
+        }
+        aria-label="画布小地图"
       />
     </ReactFlow>
   );
@@ -1439,3 +1524,5 @@ export function CanvasFreeformBody(props: CanvasFreeformBodyProps) {
     </ReactFlowProvider>
   );
 }
+
+export type { CanvasFreeformBodyProps };

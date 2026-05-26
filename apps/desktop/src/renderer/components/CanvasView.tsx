@@ -20,7 +20,7 @@ import { profileResourceBranchId } from "@tinder/nextstep";
 import { CanvasInspector } from "./CanvasInspector";
 import { CanvasBatchCandidatePanel } from "./CanvasBatchCandidatePanel";
 import { CanvasSharedBranchDialog } from "./CanvasSharedBranchDialog";
-import { CanvasFreeformBody } from "./CanvasFreeformBody";
+import { CanvasFreeformBody, type CanvasFreeformHandle } from "./CanvasFreeformBody";
 import { ContextMenu, useContextMenu, type ContextMenuItem } from "./ContextMenu";
 
 /**
@@ -36,6 +36,7 @@ export function CanvasView() {
   const ca = useCa();
   const { disk } = ca;
   const cm = useContextMenu();
+  const freeformRef = useRef<CanvasFreeformHandle>(null);
   const [batchOpen, setBatchOpen] = useState(false);
 
   // Shared-branch guard pending state — non-null while the dialog
@@ -223,6 +224,20 @@ export function CanvasView() {
     (event: React.KeyboardEvent) => {
       if (event.key === "Escape") {
         setSelection(null);
+        return;
+      }
+      const mod = event.ctrlKey || event.metaKey;
+      // Ctrl+Shift+F — fit all nodes into view
+      if (mod && event.shiftKey && event.key === "F") {
+        event.preventDefault();
+        freeformRef.current?.fitAll();
+        return;
+      }
+      // Ctrl+Shift+S — fit selected node / cluster into view
+      if (mod && event.shiftKey && event.key === "S") {
+        event.preventDefault();
+        freeformRef.current?.fitSelection();
+        return;
       }
     },
     [setSelection]
@@ -507,6 +522,26 @@ export function CanvasView() {
 
         {/* ─── Right: actions + save/reset ────────────────────── */}
         <div className="canvas-view-topbar-actions">
+          {/* Phase 6: fit-all / fit-selection */}
+          <button
+            type="button"
+            className="canvas-view-icon-btn"
+            onClick={() => freeformRef.current?.fitAll()}
+            title="适应全部 (Ctrl+Shift+F)"
+            aria-label="适应全部"
+          >
+            <span className="codicon codicon-screen-full" aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className="canvas-view-icon-btn"
+            onClick={() => freeformRef.current?.fitSelection()}
+            title="适应选中 (Ctrl+Shift+S)"
+            aria-label="适应选中"
+          >
+            <span className="codicon codicon-target" aria-hidden="true" />
+          </button>
+
           <button
             type="button"
             className="canvas-view-action-btn"
@@ -547,7 +582,7 @@ export function CanvasView() {
       </div>
 
       <div className={bodyClass}>
-        <div className="canvas-view-main rf-canvas-host">
+        <div className="canvas-view-main rf-canvas-host" role="region" aria-label="画布视口">
           {!loaded ? (
             <div className="canvas-view-empty-hint">读取画布状态…</div>
           ) : (
@@ -563,6 +598,7 @@ export function CanvasView() {
               onViewportChange={onViewportChange}
               onClusterDragEnd={onClusterDragEnd}
               onCustomDragEnd={onCustomDragEnd}
+              freeformRef={freeformRef}
             />
           )}
         </div>

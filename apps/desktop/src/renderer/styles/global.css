@@ -6151,6 +6151,17 @@ kbd {
   pointer-events: none;
 }
 
+/* ─── Phase 6: overlap collision flash ─────────────────────────── */
+/* Brief red flash when a cluster drag is rejected due to overlap.
+   Toggled via direct DOM class manipulation from handleNodeDragStop. */
+@keyframes overlap-flash {
+  0%   { border-color: #ef4444; box-shadow: 0 0 0 2px #ef4444, 0 0 16px rgba(239, 68, 68, 0.4); }
+  100% { border-color: var(--tc-canvas-cluster-border); box-shadow: none; }
+}
+.rf-category-group.is-overlap-flash {
+  animation: overlap-flash 0.6s ease-out forwards;
+}
+
 /* Draggable custom card cursor affordance */
 .rf-custom-card[draggable="true"] {
   cursor: grab;
