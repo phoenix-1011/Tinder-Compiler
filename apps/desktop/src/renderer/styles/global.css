@@ -63,6 +63,13 @@ body,
   padding: 0;
 }
 
+/* Force dark color-scheme globally so native controls (<select> dropdown
+   popups, scrollbars, form elements) render dark backgrounds instead of
+   the Windows-default white popup. */
+html {
+  color-scheme: dark;
+}
+
 body {
   font-family: var(--tc-font-ui);
   font-size: 13px;
@@ -72,22 +79,39 @@ body {
   user-select: none;
 }
 
+/* ── Global focus outline reset ────────────────────────────────────
+   Chromium's default :focus-visible is an orange 3px outline that
+   clashes with the dark theme. Replace it globally with a subtle
+   accent ring. Individual components can override as needed. */
+:focus {
+  outline: none;
+}
+:focus-visible {
+  outline: 1px solid var(--tc-accent);
+  outline-offset: -1px;
+}
+
 button {
   font: inherit;
   color: inherit;
   background: transparent;
   border: none;
   cursor: pointer;
-  outline: none;
 }
 
-button:focus {
-  outline: none;
+/* Base select styling — ensure native <option> dropdown renders in dark
+   mode. `color-scheme: dark` on <html> handles the popup background;
+   these rules cover foreground consistency. */
+select {
+  font: inherit;
+  color: inherit;
+  background-color: var(--tc-bg-input, #3c3c3c);
+  border: 1px solid var(--tc-border-popup);
+  border-radius: 3px;
 }
-
-button:focus-visible {
-  outline: 1px solid var(--tc-accent);
-  outline-offset: -1px;
+select option {
+  background: var(--tc-bg-popup, #252526);
+  color: var(--tc-fg-default, #cccccc);
 }
 
 /* Codicons — 统一图标基线尺寸 */
@@ -98,15 +122,6 @@ button:focus-visible {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-}
-
-button:focus {
-  outline: none;
-}
-
-button:focus-visible {
-  outline: 1px solid var(--tc-accent);
-  outline-offset: -1px;
 }
 
 /* Codicon base sizing (override package default 16px when needed) */
