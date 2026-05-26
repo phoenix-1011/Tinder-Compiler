@@ -4,6 +4,7 @@ import {
   Background,
   Controls,
   MiniMap,
+  Panel,
   Handle,
   Position,
   MarkerType,
@@ -16,7 +17,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
-import React, { useCallback, useEffect, useImperativeHandle, useMemo, useRef } from "react";
+import React, { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import {
   canvasNodeIdentity,
   type CanvasCustomNode,
@@ -971,6 +972,9 @@ function CanvasFreeformBodyInner({
   // react-flow node re-computation.
   const overlapTimerRef = useRef<number | null>(null);
 
+  // Phase 6: minimap toggle — local state (no persistence needed).
+  const [minimapVisible, setMinimapVisible] = useState(true);
+
   // Phase 6: imperative handle MUST be called before the early return so
   // hook call order is stable regardless of `projection` being null.
   useImperativeHandle(
@@ -1517,19 +1521,34 @@ function CanvasFreeformBodyInner({
         size={1}
         color="var(--tc-canvas-grid-color, rgba(255,255,255,0.04))"
       />
-      <Controls showInteractive={false} aria-label="画布缩放控件" />
-      <MiniMap
-        pannable
-        zoomable
-        style={{ background: "var(--tc-canvas-bg, #1e1e1e)" }}
-        maskColor="rgba(0,0,0,0.6)"
-        nodeColor={(n) =>
-          n.id.startsWith("floating:")
-            ? "var(--tc-accent, #007acc)"
-            : "var(--tc-surface-strong, rgba(255,255,255,0.18))"
-        }
-        aria-label="画布小地图"
-      />
+      {/* ── Bottom-left control strip: zoom ± fit + minimap toggle ── */}
+      <Panel position="bottom-left" className="rf-controls-panel">
+        <Controls showInteractive={false} aria-label="画布缩放控件" />
+        <button
+          type="button"
+          className="rf-minimap-toggle"
+          onClick={() => setMinimapVisible((v) => !v)}
+          title={minimapVisible ? "隐藏小地图" : "显示小地图"}
+          aria-label={minimapVisible ? "隐藏小地图" : "显示小地图"}
+          aria-pressed={minimapVisible}
+        >
+          <span className="codicon codicon-map" aria-hidden="true" />
+        </button>
+      </Panel>
+      {minimapVisible && (
+        <MiniMap
+          pannable
+          zoomable
+          style={{ background: "var(--tc-canvas-bg, #1e1e1e)" }}
+          maskColor="rgba(0,0,0,0.6)"
+          nodeColor={(n) =>
+            n.id.startsWith("floating:")
+              ? "var(--tc-accent, #007acc)"
+              : "var(--tc-surface-strong, rgba(255,255,255,0.18))"
+          }
+          aria-label="画布小地图"
+        />
+      )}
     </ReactFlow>
   );
 }
