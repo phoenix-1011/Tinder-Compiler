@@ -2,6 +2,9 @@ import * as monaco from "monaco-editor";
 import darkPlus from "../themes/dark_plus.json";
 import darkVs from "../themes/dark_vs.json";
 import darkModern from "../themes/dark_modern.json";
+import lightVs from "../themes/light_vs.json";
+import lightPlus from "../themes/light_plus.json";
+import lightModern from "../themes/light_modern.json";
 
 interface RawTheme {
   name?: string;
@@ -41,6 +44,13 @@ export const THEMES: ThemeDefinition[] = [
     variant: "dark",
     base: "vs-dark",
     sources: [darkModern as RawTheme]
+  },
+  {
+    id: "tinder-light-modern",
+    label: "Light Modern",
+    variant: "light",
+    base: "vs",
+    sources: [lightVs as RawTheme, lightPlus as RawTheme, lightModern as RawTheme]
   }
 ];
 
@@ -95,6 +105,7 @@ function toMonacoColors(themes: RawTheme[]): Record<string, string> {
  */
 const COLOR_VAR_MAP: Record<string, string[]> = {
   // Editor / app shell
+  foreground: ["--tc-fg-default"],
   "editor.background": ["--tc-bg-app", "--tc-bg-editor", "--tc-bg-tab-active"],
   "editor.foreground": ["--tc-fg-default"],
   "editorWidget.background": ["--tc-bg-popup"],
