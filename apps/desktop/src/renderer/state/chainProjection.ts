@@ -43,6 +43,8 @@ export interface CustomUsageRow {
   displayName: string;
   /** Position relative to its anchor: anchor's node id, or `null` for tail. */
   anchorChainId: string | null;
+  /** Original builtin_core_chain anchor when it no longer exists in CHAIN_CATALOG. */
+  missingAnchorChainId?: string;
   resourceDisplayName?: string;
   branchId?: string;
   branchDisplayName?: string;
@@ -124,6 +126,7 @@ export function buildChainProjection(
   customLeaves: CustomNodeConfig[]
 ): ChainProjectionRow[] {
   const orderedNodes = CHAIN_CATALOG.orderedNodes;
+  const validChainIds = new Set(orderedNodes.map((n) => n.nodeId));
 
   // Index active standard refs by the canonical node ids selected by their
   // branch-effective variant. Unselected candidates stay in resource metadata
@@ -160,9 +163,14 @@ export function buildChainProjection(
   }
   const usagesByAnchor = new Map<string, IndexedUsage[]>();
   const tailUsages: IndexedUsage[] = [];
+  const missingAnchorUsages: IndexedUsage[] = [];
   (profile.custom_node_usages ?? []).forEach((usage, arrayIndex) => {
     const indexed: IndexedUsage = { usage, arrayIndex };
     if (usage.insert_before && usage.insert_before.kind === "builtin_core_chain") {
+      if (!validChainIds.has(usage.insert_before.chain_id)) {
+        missingAnchorUsages.push(indexed);
+        return;
+      }
       const key = usage.insert_before.chain_id;
       const list = usagesByAnchor.get(key) ?? [];
       list.push(indexed);
@@ -175,6 +183,7 @@ export function buildChainProjection(
     list.sort((a, b) => a.usage.order - b.usage.order);
   }
   tailUsages.sort((a, b) => a.usage.order - b.usage.order);
+  missingAnchorUsages.sort((a, b) => a.usage.order - b.usage.order);
 
   const customDisplayName = customDisplayNameResolver(
     profileResources,
@@ -225,6 +234,19 @@ export function buildChainProjection(
       anchorChainId: null
     });
   }
+  for (const { usage, arrayIndex } of missingAnchorUsages) {
+    rows.push({
+      kind: "custom",
+      usage,
+      arrayIndex,
+      ...customUsageFields(usage, customDisplayName, profileResources, profile),
+      anchorChainId: null,
+      missingAnchorChainId:
+        usage.insert_before?.kind === "builtin_core_chain"
+          ? usage.insert_before.chain_id
+          : undefined
+    });
+  }
   return rows;
 }
 
@@ -248,6 +270,7 @@ export function buildExecutionProjection(
   customLeaves: CustomNodeConfig[]
 ): ExecutionRow[] {
   const orderedNodes = CHAIN_CATALOG.orderedNodes;
+  const validChainIds = new Set(orderedNodes.map((n) => n.nodeId));
 
   const activeStandardRefs = (profile.resources ?? []).filter(
     (r): r is ProfileStandardVariantRef => r.kind === "standard" && r.enabled
@@ -286,6 +309,7 @@ export function buildExecutionProjection(
   }
   const usagesByAnchor = new Map<string, IndexedUsage[]>();
   const tailUsages: IndexedUsage[] = [];
+  const missingAnchorUsages: IndexedUsage[] = [];
   (profile.custom_node_usages ?? []).forEach((usage, arrayIndex) => {
     if (!usage.enabled) return;
     const indexed: IndexedUsage = { usage, arrayIndex };
@@ -293,6 +317,10 @@ export function buildExecutionProjection(
       usage.insert_before &&
       usage.insert_before.kind === "builtin_core_chain"
     ) {
+      if (!validChainIds.has(usage.insert_before.chain_id)) {
+        missingAnchorUsages.push(indexed);
+        return;
+      }
       const key = usage.insert_before.chain_id;
       const list = usagesByAnchor.get(key) ?? [];
       list.push(indexed);
@@ -305,6 +333,7 @@ export function buildExecutionProjection(
     list.sort((a, b) => a.usage.order - b.usage.order);
   }
   tailUsages.sort((a, b) => a.usage.order - b.usage.order);
+  missingAnchorUsages.sort((a, b) => a.usage.order - b.usage.order);
 
   const customDisplayName = customDisplayNameResolver(
     profileResources,
@@ -365,6 +394,19 @@ export function buildExecutionProjection(
       arrayIndex,
       ...customUsageFields(usage, customDisplayName, profileResources, profile),
       anchorChainId: null
+    });
+  }
+  for (const { usage, arrayIndex } of missingAnchorUsages) {
+    rows.push({
+      kind: "custom",
+      usage,
+      arrayIndex,
+      ...customUsageFields(usage, customDisplayName, profileResources, profile),
+      anchorChainId: null,
+      missingAnchorChainId:
+        usage.insert_before?.kind === "builtin_core_chain"
+          ? usage.insert_before.chain_id
+          : undefined
     });
   }
   return rows;

@@ -36,6 +36,16 @@ chain-contract/
 
 每个节点章节必须包含：目的、位置、输入、输出、运行时契约、回退策略、状态与保留、实现映射、验证。
 
+可选的 `UI 策略` 章节用于声明编辑器行为，不改变 runtime ordered execution。格式如下：
+
+| 字段 | 值 |
+|---|---|
+| `resource_binding_policy` | `resource_bindable` 或 `builtin_only` |
+| `ui_tags` | 逗号或顿号分隔的短标签 |
+| `ui_notice` | 面向 UI 的简短说明 |
+
+未声明 `resource_binding_policy` 的节点默认视为 `resource_bindable`。`builtin_only` 只限制标准资源能力绑定，不影响链路展示、帮助文档、custom node 锚点选择或 runtime ordered execution。
+
 ## Row Contract 规则
 
 - `shared.*` 是跨提交边界可见的权威行。

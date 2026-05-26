@@ -1,4 +1,5 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { Viewport } from "@xyflow/react";
 import { useCa } from "../state/ChainAssemblyContext";
 import { useUI } from "../state/UIContext";
 import { useWorkspace } from "../state/WorkspaceContext";
@@ -7,37 +8,26 @@ import {
   flattenLeaves
 } from "../state/chainAssemblyStorage";
 import {
-  applyLockedFocus,
   buildCanvasProjection,
-  canvasNodeIdentity,
   lensNeighborTokens,
-  type CanvasCustomNode,
-  type CanvasGroup,
-  type CanvasNode,
-  type CanvasProjection,
-  type CanvasSlotNode
+  type CanvasProjection
 } from "../state/canvasProjection";
 import {
   useCanvasPersistedState,
   type CanvasSelection
 } from "../state/canvasState";
-import { canvasDragState } from "../state/canvasDrag";
 import { profileResourceBranchId } from "@tinder/nextstep";
 import { CanvasInspector } from "./CanvasInspector";
 import { CanvasBatchCandidatePanel } from "./CanvasBatchCandidatePanel";
 import { CanvasSharedBranchDialog } from "./CanvasSharedBranchDialog";
+import { CanvasFreeformBody } from "./CanvasFreeformBody";
 import { ContextMenu, useContextMenu, type ContextMenuItem } from "./ContextMenu";
 
 /**
- * Phase 3 canvas: same read-only projection as Phase 2 plus a real
- * inspector panel (dockable right ↔ bottom, collapsible) backed by
- * canvas.json (C15), click-to-select with persisted selection (C11),
- * right-click activate/deactivate menus on cards (C24b), and the C21
- * code-edit / C13-style jump-out for opening the full ResourceBranchView
- * tab outside canvas mode.
- *
- * Library pin interactivity (C25) lives in CanvasLibrary; this file
- * stays focused on canvas-area rendering + inspector orchestration.
+ * Freeform canvas (D-series): @xyflow/react viewport with draggable
+ * category clusters, free-positioned custom nodes, pan/zoom, and
+ * the existing inspector / library / checkpoint semantics carried
+ * from the C-series phases.
  */
 export function CanvasView() {
   const { canvasProfileId, enterCanvasMode, exitCanvasMode, openResourceBranch } =
@@ -47,34 +37,6 @@ export function CanvasView() {
   const { disk } = ca;
   const cm = useContextMenu();
   const [batchOpen, setBatchOpen] = useState(false);
-  // Transient drag-active state. Used to (S10) auto-show the flow
-  // line for the entire track while dragging — not just the hovered
-  // edge — and (S11) temporarily reveal coverage-filtered slots so
-  // the user can drop on a slot that would otherwise be hidden.
-  // Updated via document-level dragstart/dragend listeners so we
-  // catch every canvas-mode drag without each source needing to
-  // wire a callback.
-  const [isDragActive, setIsDragActive] = useState(false);
-  useEffect(() => {
-    const onStart = () => {
-      // Only react to drags that actually carry a canvas payload —
-      // dragStart fires for arbitrary draggables elsewhere in the
-      // window and we don't want those to perturb the canvas.
-      if (canvasDragState.value) setIsDragActive(true);
-    };
-    const onEnd = () => setIsDragActive(false);
-    document.addEventListener("dragstart", onStart);
-    document.addEventListener("dragend", onEnd);
-    // dragend fires on the source; drop fires on the target. We
-    // need a backstop in case drop completes without dragend
-    // bubbling (Esc-cancelled native drag).
-    document.addEventListener("drop", onEnd);
-    return () => {
-      document.removeEventListener("dragstart", onStart);
-      document.removeEventListener("dragend", onEnd);
-      document.removeEventListener("drop", onEnd);
-    };
-  }, []);
 
   // Shared-branch guard pending state — non-null while the dialog
   // is open. Carries the requested jump target so accepting either
@@ -216,7 +178,7 @@ export function CanvasView() {
   );
 
   const tinderDir = disk?.paths.tinderDir ?? null;
-  const { state, setState, loaded } = useCanvasPersistedState(
+  const { state, setState, pruneStalePositions, loaded } = useCanvasPersistedState(
     tinderDir,
     profile?.id ?? null
   );
@@ -231,54 +193,24 @@ export function CanvasView() {
     [disk]
   );
 
-  const projectionBase = useMemo(() => {
+  // D6: coverage filter withdrawn — always show all 84 chain nodes.
+  const projection = useMemo<CanvasProjection | null>(() => {
     if (!profile) return null;
-    // S11: while a drag is active, temporarily ignore the coverage
-    // filter so the user can drop on slots that would otherwise be
-    // hidden. The filter snaps back on drop / dragend / cancel.
-    const effectiveCoverageFilter = state.coverageFilter && !isDragActive;
     return buildCanvasProjection(
       profile.project,
       v2Resources,
       flatCustom,
-      effectiveCoverageFilter
+      false
     );
-  }, [profile, v2Resources, flatCustom, state.coverageFilter, isDragActive]);
+  }, [profile, v2Resources, flatCustom]);
 
-  // Locked focus (C10) windows the projection to ±radius around the
-  // focus target. Composed AFTER the coverage filter per Resolved
-  // Edge Cases. When unlocked or target missing, projection === base.
-  const projection = useMemo<CanvasProjection | null>(() => {
-    if (!projectionBase) return null;
-    if (!state.focus.locked || !state.focus.target) return projectionBase;
-    return applyLockedFocus(
-      projectionBase,
-      state.focus.target,
-      state.focus.radius
-    );
-  }, [projectionBase, state.focus.locked, state.focus.target, state.focus.radius]);
-
-  // Lens highlight (C10 light layer). null when no selection — the
-  // FlowTrack treats null as "no fade applied".
   const lensTokens = useMemo(
     () =>
-      projectionBase
-        ? lensNeighborTokens(projectionBase, state.selection)
+      projection
+        ? lensNeighborTokens(projection, state.selection)
         : null,
-    [projectionBase, state.selection]
+    [projection, state.selection]
   );
-
-  const collapsedGroupSet = useMemo(
-    () => new Set(state.collapsedGroups),
-    [state.collapsedGroups]
-  );
-
-  const toggleGroup = (docSlug: string) => {
-    const next = collapsedGroupSet.has(docSlug)
-      ? state.collapsedGroups.filter((s) => s !== docSlug)
-      : [...state.collapsedGroups, docSlug];
-    setState({ collapsedGroups: next });
-  };
 
   const setSelection = useCallback(
     (next: CanvasSelection | null) => {
@@ -287,59 +219,13 @@ export function CanvasView() {
     [setState]
   );
 
-  /**
-   * Enter / exit / toggle locked focus (C10 heavy layer).
-   *   - enterLockedFocus(target): explicit set, used by double-click
-   *   - toggleLockedFocus(): F shortcut — locks on current selection,
-   *     or unlocks if already locked
-   *   - exitLockedFocus(): explicit unlock, used by Esc and the
-   *     unlock button on the canvas top bar.
-   */
-  const enterLockedFocus = useCallback(
-    (target: CanvasSelection) => {
-      setState({ focus: { locked: true, target } });
-    },
-    [setState]
-  );
-  const exitLockedFocus = useCallback(() => {
-    setState({ focus: { locked: false } });
-  }, [setState]);
-  const toggleLockedFocus = useCallback(() => {
-    if (state.focus.locked) {
-      exitLockedFocus();
-      return;
-    }
-    if (!state.selection) return;
-    enterLockedFocus(state.selection);
-  }, [state.focus.locked, state.selection, enterLockedFocus, exitLockedFocus]);
-
   const onCanvasKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
-      // Esc: unlock focus first, then clear selection. Pressing
-      // twice in a row gets the user back to the default view.
       if (event.key === "Escape") {
-        if (state.focus.locked) exitLockedFocus();
-        else setSelection(null);
-        return;
-      }
-      // F: toggle locked focus on the current selection (C10).
-      // Ignore when an editable element is focused so it doesn't
-      // hijack typing in form fields (the inspector has dropdowns
-      // and the batch panel has selects).
-      if (event.key === "f" || event.key === "F") {
-        const tag = (event.target as HTMLElement | null)?.tagName ?? "";
-        if (
-          tag === "INPUT" ||
-          tag === "TEXTAREA" ||
-          tag === "SELECT"
-        ) {
-          return;
-        }
-        event.preventDefault();
-        toggleLockedFocus();
+        setSelection(null);
       }
     },
-    [state.focus.locked, exitLockedFocus, setSelection, toggleLockedFocus]
+    [setSelection]
   );
 
   /**
@@ -480,6 +366,52 @@ export function CanvasView() {
     void guardedExit(() => exitCanvasMode());
   }, [guardedExit, exitCanvasMode]);
 
+  // Stable callback ref for context menu — avoids a new arrow on
+  // every render that would invalidate the rfNodes useMemo in
+  // CanvasFreeformBody and trigger a full node-tree rebuild (A1).
+  const onCardContextMenu = useCallback(
+    (e: React.MouseEvent, items: ContextMenuItem[]) => cm.open(e, items),
+    [cm]
+  );
+
+  const onClusterDragEnd = useCallback(
+    (docSlug: string, position: { x: number; y: number }) => {
+      setState({ clusterPositions: { [docSlug]: position } });
+    },
+    [setState]
+  );
+
+  const onCustomDragEnd = useCallback(
+    (arrayIndex: number, position: { x: number; y: number }) => {
+      setState({ customPositions: { [arrayIndex]: position } });
+    },
+    [setState]
+  );
+
+  const onViewportChange = useCallback(
+    (viewport: Viewport) => {
+      setState({ viewport });
+    },
+    [setState]
+  );
+
+  // A3: prune stale position keys from canvas.json when the
+  // projection changes (e.g. a cluster slug is removed from the
+  // override table, or a custom usage is deleted outside the canvas).
+  // Uses `pruneStalePositions` which does a full-replace (not
+  // additive merge) so deleted keys don't reappear.
+  useEffect(() => {
+    if (!projection) return;
+    const validSlugs = new Set(projection.groups.map((g) => g.docSlug));
+    const validCustomIdxs = new Set(
+      (projection.customOnly?.allNodes ?? [])
+        .filter((n): n is Extract<typeof n, { kind: "custom" }> => n.kind === "custom")
+        .map((n) => n.arrayIndex)
+    );
+    pruneStalePositions(validSlugs, validCustomIdxs);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projection]);
+
   // Profile not loaded: render the same minimal apologetic shell as
   // earlier phases so the back button is always reachable.
   if (!profile) {
@@ -567,34 +499,8 @@ export function CanvasView() {
           {dirty ? "未保存" : "已保存"}
         </span>
 
-        {/* ─── Right: toggles + actions + save/reset ─────────── */}
+        {/* ─── Right: actions + save/reset ────────────────────── */}
         <div className="canvas-view-topbar-actions">
-          {state.focus.locked && (
-            <button
-              type="button"
-              className="canvas-view-action-btn is-active"
-              onClick={exitLockedFocus}
-              title="退出聚焦（Esc / F）"
-            >
-              聚焦中：± {state.focus.radius} ×
-            </button>
-          )}
-
-          {/* iOS-style toggles for view-state flags */}
-          <ToggleSwitch
-            label="未配置过滤"
-            on={state.coverageFilter}
-            onChange={(next) => setState({ coverageFilter: next })}
-            title="切换未覆盖槽位的显示（C6 默认隐藏）"
-          />
-          <ToggleSwitch
-            label="流程线"
-            on={state.flowLineVisible}
-            onChange={(next) => setState({ flowLineVisible: next })}
-            title="切换有向流程线的显示（C23 默认显示）"
-          />
-
-          {/* Action buttons */}
           <button
             type="button"
             className="canvas-view-action-btn"
@@ -635,34 +541,22 @@ export function CanvasView() {
       </div>
 
       <div className={bodyClass}>
-        <div
-          className="canvas-view-main"
-          onClick={(e) => {
-            // Click on empty canvas background = clear selection. Only
-            // fires when the click didn't land on (or bubble from) a
-            // card; cards stop propagation in their own handlers.
-            if (e.target === e.currentTarget) setSelection(null);
-          }}
-        >
+        <div className="canvas-view-main rf-canvas-host">
           {!loaded ? (
             <div className="canvas-view-empty-hint">读取画布状态…</div>
           ) : (
-            <CanvasBody
+            <CanvasFreeformBody
               projection={projection}
-              // S10: while dragging, force the flow line on so every
-              // edge is a visible drop target — not just the one
-              // currently hovered.
-              flowLineVisible={state.flowLineVisible || isDragActive}
-              collapsedGroups={collapsedGroupSet}
-              onToggleGroup={toggleGroup}
+              canvasState={state}
               selection={state.selection}
-              onSelectionChange={setSelection}
-              onEnterLockedFocus={enterLockedFocus}
-              onOpenFullEditor={onOpenFullEditor}
-              focusLocked={state.focus.locked}
               lensTokens={lensTokens}
-              onCardContextMenu={(e, items) => cm.open(e, items)}
+              onSelectionChange={setSelection}
+              onOpenFullEditor={onOpenFullEditor}
+              onCardContextMenu={onCardContextMenu}
               profileId={profile.id}
+              onViewportChange={onViewportChange}
+              onClusterDragEnd={onClusterDragEnd}
+              onCustomDragEnd={onCustomDragEnd}
             />
           )}
         </div>
@@ -718,797 +612,3 @@ export function CanvasView() {
   );
 }
 
-// ──────────────────────────────────────────────────────────────────
-// Body: group panels
-// ──────────────────────────────────────────────────────────────────
-
-/**
- * Shared open-full-editor signature, threaded from CanvasView down
- * to slot / coverage / custom cards so a double-click on a
- * resource-bearing card can dispatch the C13 shared-branch guard +
- * C21 jump-out without each card needing to know the implementation.
- */
-type OpenFullEditorFn = (target: {
-  resourceKind: "standard" | "custom";
-  resourceInstanceId: string;
-  branchId: string;
-}) => void;
-
-interface CanvasBodyProps {
-  projection: ReturnType<typeof buildCanvasProjection> | null;
-  flowLineVisible: boolean;
-  collapsedGroups: Set<string>;
-  onToggleGroup: (docSlug: string) => void;
-  selection: CanvasSelection | null;
-  onSelectionChange: (next: CanvasSelection | null) => void;
-  onEnterLockedFocus: (target: CanvasSelection) => void;
-  onOpenFullEditor: OpenFullEditorFn;
-  focusLocked: boolean;
-  lensTokens: Set<string> | null;
-  onCardContextMenu: (event: React.MouseEvent, items: ContextMenuItem[]) => void;
-  profileId: string;
-}
-
-function CanvasBody({
-  projection,
-  flowLineVisible,
-  collapsedGroups,
-  onToggleGroup,
-  selection,
-  onSelectionChange,
-  onEnterLockedFocus,
-  onOpenFullEditor,
-  focusLocked,
-  lensTokens,
-  onCardContextMenu,
-  profileId
-}: CanvasBodyProps) {
-  if (!projection) {
-    return <div className="canvas-view-empty-hint">尚无可用数据。</div>;
-  }
-
-  const allGroups: CanvasGroup[] = projection.customOnly
-    ? [...projection.groups, projection.customOnly]
-    : projection.groups;
-
-  const visibleGroups = allGroups.filter((g) => g.allNodes.length > 0);
-
-  if (visibleGroups.length === 0) {
-    return (
-      <div className="canvas-view-empty-hint">
-        此档案目前没有可显示的链路节点。<br />
-        在左侧库中 pin 标准资源以覆盖槽位，或拖入自定义节点。
-      </div>
-    );
-  }
-
-  return (
-    <div className={`canvas-groups${focusLocked ? " is-focus-locked" : ""}`}>
-      {visibleGroups.map((group) => {
-        // When locked focus is on, groups outside the radius window
-        // have empty visibleNodes — render them as collapsed title
-        // strips (no body) regardless of the user's per-group
-        // collapsed preference. This satisfies the C10 "fold other
-        // group panels to title strips" rule.
-        const isFolded =
-          focusLocked && group.visibleNodes.length === 0
-            ? true
-            : collapsedGroups.has(group.docSlug);
-        return (
-          <GroupPanel
-            key={group.docSlug}
-            group={group}
-            collapsed={isFolded}
-            forceFold={focusLocked && group.visibleNodes.length === 0}
-            flowLineVisible={flowLineVisible}
-            onToggle={() => onToggleGroup(group.docSlug)}
-            selection={selection}
-            onSelectionChange={onSelectionChange}
-            onEnterLockedFocus={onEnterLockedFocus}
-            onOpenFullEditor={onOpenFullEditor}
-            lensTokens={lensTokens}
-            onCardContextMenu={onCardContextMenu}
-            profileId={profileId}
-          />
-        );
-      })}
-    </div>
-  );
-}
-
-function GroupPanel({
-  group,
-  collapsed,
-  forceFold,
-  flowLineVisible,
-  onToggle,
-  selection,
-  onSelectionChange,
-  onEnterLockedFocus,
-  onOpenFullEditor,
-  lensTokens,
-  onCardContextMenu,
-  profileId
-}: {
-  group: CanvasGroup;
-  collapsed: boolean;
-  /**
-   * Set to true when the group was folded by locked focus (not by
-   * the user's collapsed-groups list). Used for a subtle visual
-   * cue: title appears semi-transparent so the user can tell it's
-   * folded by focus rather than by their own collapse.
-   */
-  forceFold: boolean;
-  flowLineVisible: boolean;
-  onToggle: () => void;
-  selection: CanvasSelection | null;
-  onSelectionChange: (next: CanvasSelection | null) => void;
-  onEnterLockedFocus: (target: CanvasSelection) => void;
-  onOpenFullEditor: OpenFullEditorFn;
-  lensTokens: Set<string> | null;
-  onCardContextMenu: (event: React.MouseEvent, items: ContextMenuItem[]) => void;
-  profileId: string;
-}) {
-  return (
-    <section
-      className={`canvas-group${group.isCustomOnly ? " is-custom-only" : ""}${
-        forceFold ? " is-force-folded" : ""
-      }`}
-    >
-      <button
-        type="button"
-        className="canvas-group-header"
-        onClick={onToggle}
-        title={group.docSlug}
-      >
-        <span
-          className={`codicon canvas-group-chevron codicon-${
-            collapsed ? "chevron-right" : "chevron-down"
-          }`}
-          aria-hidden="true"
-        />
-        <span className="canvas-group-title">{group.docTitle}</span>
-        {!group.isCustomOnly && (
-          <span className="canvas-group-counts">
-            覆盖 {group.coveredSlotCount} / {group.totalSlotCount}
-            {group.hiddenSlotCount > 0 && (
-              <> · 隐藏 {group.hiddenSlotCount}</>
-            )}
-            {forceFold && <> · 聚焦外</>}
-          </span>
-        )}
-      </button>
-      {!collapsed && (
-        <div className="canvas-group-track">
-          <FlowTrack
-            nodes={group.visibleNodes}
-            flowLineVisible={flowLineVisible}
-            selection={selection}
-            onSelectionChange={onSelectionChange}
-            onEnterLockedFocus={onEnterLockedFocus}
-            onOpenFullEditor={onOpenFullEditor}
-            lensTokens={lensTokens}
-            onCardContextMenu={onCardContextMenu}
-            profileId={profileId}
-          />
-        </div>
-      )}
-    </section>
-  );
-}
-
-// ──────────────────────────────────────────────────────────────────
-// Flow track: nodes + edges
-// ──────────────────────────────────────────────────────────────────
-
-function FlowTrack({
-  nodes,
-  flowLineVisible,
-  selection,
-  onSelectionChange,
-  onEnterLockedFocus,
-  onOpenFullEditor,
-  lensTokens,
-  onCardContextMenu,
-  profileId
-}: {
-  nodes: CanvasNode[];
-  flowLineVisible: boolean;
-  selection: CanvasSelection | null;
-  onSelectionChange: (next: CanvasSelection | null) => void;
-  onEnterLockedFocus: (target: CanvasSelection) => void;
-  onOpenFullEditor: OpenFullEditorFn;
-  lensTokens: Set<string> | null;
-  onCardContextMenu: (event: React.MouseEvent, items: ContextMenuItem[]) => void;
-  profileId: string;
-}) {
-  const ca = useCa();
-  const [dragOverEdgeIdx, setDragOverEdgeIdx] = useState<number | null>(null);
-
-  if (nodes.length === 0) {
-    return <div className="canvas-flow-empty">（空）</div>;
-  }
-
-  /**
-   * Resolve the drop position from an "edge index" — the edge BETWEEN
-   * nodes[idx-1] and nodes[idx]. The anchor is the chain id of the
-   * first slot/anchor at or after nodes[idx]; when no such anchor
-   * exists (drop on a trailing edge of the group), fall back to
-   * scanning *backwards* from nodes[idx-1] for the most recent
-   * anchor so the new custom stays in the same group instead of
-   * silently landing in the custom-only virtual group (G7).
-   *
-   * The before-custom hint is set when nodes[idx] is a custom in
-   * the same anchor bucket — preserves precise within-bucket
-   * positioning for reorder.
-   */
-  const positionForEdge = (
-    edgeIdx: number
-  ): {
-    anchorChainId: string | null;
-    beforeCustomArrayIndex?: number;
-  } => {
-    let anchorChainId: string | null = null;
-    // Forward scan from the drop position. This picks up the natural
-    // "insert before X" anchor when there's a slot/anchored custom
-    // following the drop point.
-    for (let i = edgeIdx; i < nodes.length; i++) {
-      const n = nodes[i]!;
-      if (n.kind === "slot") {
-        anchorChainId = n.nodeId;
-        break;
-      }
-      if (n.kind === "custom" && n.anchorChainId) {
-        anchorChainId = n.anchorChainId;
-        break;
-      }
-    }
-    // Fallback for tail-of-group drops: nothing follows the drop
-    // point in this group's visible nodes, so the forward scan
-    // produced null. The user clearly meant to add to THIS group,
-    // not the custom-only catch-all — so reuse the preceding
-    // slot's anchor (with insert_before that slot's downstream
-    // sibling implicitly via the order-allocator).
-    if (anchorChainId === null) {
-      for (let i = edgeIdx - 1; i >= 0; i--) {
-        const n = nodes[i]!;
-        if (n.kind === "slot") {
-          anchorChainId = n.nodeId;
-          break;
-        }
-        if (n.kind === "custom" && n.anchorChainId) {
-          anchorChainId = n.anchorChainId;
-          break;
-        }
-      }
-    }
-    const nextNode = nodes[edgeIdx];
-    if (nextNode?.kind === "custom") {
-      return {
-        anchorChainId,
-        beforeCustomArrayIndex: nextNode.arrayIndex
-      };
-    }
-    return { anchorChainId };
-  };
-
-  const onEdgeDragOver = (edgeIdx: number) => (e: React.DragEvent) => {
-    if (!canvasDragState.value) return;
-    e.preventDefault();
-    e.dataTransfer.dropEffect =
-      canvasDragState.value.kind === "library-custom-node" ? "copy" : "move";
-    setDragOverEdgeIdx(edgeIdx);
-  };
-  const onEdgeDragLeave = () => {
-    setDragOverEdgeIdx((cur) => (cur != null ? null : cur));
-  };
-  const onEdgeDrop = (edgeIdx: number) => async (e: React.DragEvent) => {
-    e.preventDefault();
-    setDragOverEdgeIdx(null);
-    const payload = canvasDragState.value;
-    canvasDragState.value = null;
-    if (!payload) return;
-    const position = positionForEdge(edgeIdx);
-    const anchor = position.anchorChainId
-      ? ({
-          kind: "builtin_core_chain" as const,
-          chain_id: position.anchorChainId
-        })
-      : null;
-    if (payload.kind === "library-custom-node") {
-      // Auto-pin (no-op if already pinned) then append the new
-      // usage to the target anchor's bucket. Precise within-bucket
-      // positioning is a Phase 4+ follow-up.
-      const pinned = await ca.pinBranch(
-        profileId,
-        "custom",
-        payload.resourceInstanceId,
-        payload.branchId
-      );
-      if (!pinned) return;
-      await ca.addCustomUsage(
-        profileId,
-        payload.resourceInstanceId,
-        payload.nodeId,
-        anchor
-      );
-      return;
-    }
-    // canvas-custom: re-anchor / reorder.
-    await ca.moveCustomUsage(profileId, payload.arrayIndex, {
-      anchorChainId: position.anchorChainId,
-      beforeCustomArrayIndex: position.beforeCustomArrayIndex
-    });
-  };
-
-  return (
-    <div className="canvas-flow-track">
-      {nodes.map((node, idx) => {
-        const prev = idx > 0 ? nodes[idx - 1] : null;
-        const edgeDashed = !!prev && (isDisabledCustom(prev) || isDisabledCustom(node));
-        const isDragOver = dragOverEdgeIdx === idx;
-        return (
-          <Fragment key={canvasNodeKey(node, idx)}>
-            {prev && (
-              // Edge is drawn entirely via CSS (::before line + ::after
-              // arrowhead). State classes recolor / hide; no Unicode
-              // text content needed.
-              <span
-                className={`canvas-edge${edgeDashed ? " is-dashed" : ""}${
-                  isDragOver ? " is-drop-over" : ""
-                }${!flowLineVisible && !isDragOver ? " is-line-hidden" : ""}`}
-                aria-hidden="true"
-                onDragOver={onEdgeDragOver(idx)}
-                onDragLeave={onEdgeDragLeave}
-                onDrop={onEdgeDrop(idx)}
-              />
-            )}
-            {node.kind === "slot" ? (
-              <SlotCard
-                node={node}
-                selection={selection}
-                onSelectionChange={onSelectionChange}
-                onEnterLockedFocus={onEnterLockedFocus}
-                onOpenFullEditor={onOpenFullEditor}
-                lensTokens={lensTokens}
-                onCardContextMenu={onCardContextMenu}
-                profileId={profileId}
-              />
-            ) : (
-              <CustomCard
-                node={node}
-                selection={selection}
-                onSelectionChange={onSelectionChange}
-                onOpenFullEditor={onOpenFullEditor}
-                lensTokens={lensTokens}
-                onCardContextMenu={onCardContextMenu}
-                profileId={profileId}
-              />
-            )}
-          </Fragment>
-        );
-      })}
-    </div>
-  );
-}
-
-function isDisabledCustom(node: CanvasNode): boolean {
-  return node.kind === "custom" && !node.enabled;
-}
-
-function canvasNodeKey(node: CanvasNode, idx: number): string {
-  if (node.kind === "slot") return `slot:${node.nodeId}`;
-  return `cus:${node.arrayIndex}:${idx}`;
-}
-
-// ──────────────────────────────────────────────────────────────────
-// Slot card (with stacked standard coverage cards)
-// ──────────────────────────────────────────────────────────────────
-
-function SlotCard({
-  node,
-  selection,
-  onSelectionChange,
-  onEnterLockedFocus,
-  onOpenFullEditor,
-  lensTokens,
-  onCardContextMenu,
-  profileId
-}: {
-  node: CanvasSlotNode;
-  selection: CanvasSelection | null;
-  onSelectionChange: (next: CanvasSelection | null) => void;
-  onEnterLockedFocus: (target: CanvasSelection) => void;
-  onOpenFullEditor: OpenFullEditorFn;
-  lensTokens: Set<string> | null;
-  onCardContextMenu: (e: React.MouseEvent, items: ContextMenuItem[]) => void;
-  profileId: string;
-}) {
-  const ca = useCa();
-  const cov = node.coverage;
-  const STACK_LIMIT = 3;
-  const [overflowOpen, setOverflowOpen] = useState(false);
-  const visible = overflowOpen
-    ? cov.resources
-    : cov.resources.slice(0, STACK_LIMIT);
-  const overflow = cov.resources.length - visible.length;
-  const slotSelected =
-    selection?.kind === "slot" && selection.chainNodeId === node.nodeId;
-  // Lens classification (C10 light layer). When `lensTokens` is null
-  // no selection exists — render normally. Otherwise the selected
-  // node + its first-degree neighbors are "near"; everything else
-  // fades.
-  const lensClass = lensTokens
-    ? lensTokens.has(canvasNodeIdentity(node))
-      ? "is-lens-near"
-      : "is-lens-far"
-    : "";
-  const slotClass = [
-    "canvas-slot",
-    cov.count === 0 ? "is-uncovered" : "",
-    cov.count > 1 ? "is-multi" : "",
-    slotSelected ? "is-selected" : "",
-    lensClass
-  ]
-    .filter(Boolean)
-    .join(" ");
-
-  const onSlotClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    onSelectionChange({ kind: "slot", chainNodeId: node.nodeId });
-  };
-  const onSlotDoubleClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    onEnterLockedFocus({ kind: "slot", chainNodeId: node.nodeId });
-  };
-
-  return (
-    <div className={slotClass} title={`${node.nodeId} · order ${node.order}`}>
-      <header
-        className="canvas-slot-header"
-        onClick={onSlotClick}
-        onDoubleClick={onSlotDoubleClick}
-        role="button"
-        tabIndex={0}
-        title="单击选中 · 双击聚焦（F 切换）"
-      >
-        <span className="canvas-slot-order">{node.order}</span>
-        <span className="canvas-slot-name">{node.displayName}</span>
-      </header>
-      <div className="canvas-slot-cards">
-        {cov.count === 0 ? (
-          <div className="canvas-slot-empty">未覆盖</div>
-        ) : (
-          <>
-            {visible.map((r, idx) => {
-              const coverageSelected =
-                selection?.kind === "coverage" &&
-                selection.chainNodeId === node.nodeId &&
-                selection.resourceInstanceId === r.resourceId &&
-                selection.variantId === r.variantId;
-              const onCoverageClick = (e: React.MouseEvent) => {
-                e.stopPropagation();
-                onSelectionChange({
-                  kind: "coverage",
-                  chainNodeId: node.nodeId,
-                  resourceInstanceId: r.resourceId,
-                  variantId: r.variantId
-                });
-              };
-              const onCoverageDoubleClick = (e: React.MouseEvent) => {
-                e.stopPropagation();
-                // C11: double-click on a card opens the standalone
-                // ResourceBranchView (after C13 shared-branch guard
-                // + C21 jump-out confirmation, both handled by
-                // onOpenFullEditor in CanvasView).
-                onOpenFullEditor({
-                  resourceKind: "standard",
-                  resourceInstanceId: r.resourceId,
-                  branchId: r.variantId
-                });
-              };
-              const onCoverageContextMenu = (e: React.MouseEvent) => {
-                e.preventDefault();
-                e.stopPropagation();
-                // Helper for the two select-then-act items that
-                // need this card selected first so the inspector
-                // shows the right context.
-                const selectThis = () =>
-                  onSelectionChange({
-                    kind: "coverage",
-                    chainNodeId: node.nodeId,
-                    resourceInstanceId: r.resourceId,
-                    variantId: r.variantId
-                  });
-                onCardContextMenu(e, [
-                  {
-                    // S3: spec calls for `切换分支…` here. Branch
-                    // switching is the pin metaphor (C25), which
-                    // lives in the library sidebar — selecting the
-                    // coverage card draws the user's eye to the
-                    // inspector's branch label, and the library
-                    // shows the family with the current pin.
-                    id: "switch-branch",
-                    label: "切换分支…（在左侧库中 pin 其它分支）",
-                    run: selectThis
-                  },
-                  {
-                    // S3: `候选实现…` — select to reveal the
-                    // candidate dropdown in the inspector (C24c
-                    // single-slot variant).
-                    id: "switch-candidate",
-                    label: "候选实现…",
-                    run: selectThis
-                  },
-                  { separator: true },
-                  {
-                    id: "deactivate",
-                    label: "停用此覆盖",
-                    run: () =>
-                      void ca.setProfileResourceEnabled(
-                        profileId,
-                        {
-                          id: `canvas::${r.resourceId}`,
-                          label: r.displayName,
-                          kind: "standard",
-                          source: "binding",
-                          resourceId: r.resourceId,
-                          branchId: r.variantId,
-                          enabled: true
-                        },
-                        false
-                      )
-                  },
-                  {
-                    id: "remove",
-                    label: "从档案中移除",
-                    run: () =>
-                      void ca.unpinFamily(profileId, "standard", r.resourceId)
-                  }
-                ]);
-              };
-              return (
-                <div
-                  key={`${r.resourceId}:${r.variantId}:${idx}`}
-                  className={`canvas-coverage-card${
-                    coverageSelected ? " is-selected" : ""
-                  }`}
-                  title={`${r.resourceId} · ${r.variantId} · 双击打开完整编辑`}
-                  onClick={onCoverageClick}
-                  onDoubleClick={onCoverageDoubleClick}
-                  onContextMenu={onCoverageContextMenu}
-                  role="button"
-                  tabIndex={0}
-                >
-                  <span className="canvas-coverage-marker" aria-hidden="true">
-                    ⊞
-                  </span>
-                  <span className="canvas-coverage-label">
-                    {r.displayName}
-                    <span className="canvas-coverage-branch"> · {r.variantId}</span>
-                  </span>
-                </div>
-              );
-            })}
-            {overflow > 0 && (
-              <button
-                type="button"
-                className="canvas-coverage-overflow"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setOverflowOpen(true);
-                }}
-                title={cov.resources
-                  .slice(STACK_LIMIT)
-                  .map((r) => `${r.displayName} · ${r.variantId}`)
-                  .join("\n")}
-              >
-                +{overflow}
-              </button>
-            )}
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ──────────────────────────────────────────────────────────────────
-// Custom node card (lives between slots on the flow line)
-// ──────────────────────────────────────────────────────────────────
-
-function CustomCard({
-  node,
-  selection,
-  onSelectionChange,
-  onOpenFullEditor,
-  lensTokens,
-  onCardContextMenu,
-  profileId
-}: {
-  node: CanvasCustomNode;
-  selection: CanvasSelection | null;
-  onSelectionChange: (next: CanvasSelection | null) => void;
-  onOpenFullEditor: OpenFullEditorFn;
-  lensTokens: Set<string> | null;
-  onCardContextMenu: (e: React.MouseEvent, items: ContextMenuItem[]) => void;
-  profileId: string;
-}) {
-  const ca = useCa();
-  const isSelected =
-    selection?.kind === "custom" && selection.usageArrayIndex === node.arrayIndex;
-  const lensClass = lensTokens
-    ? lensTokens.has(canvasNodeIdentity(node))
-      ? "is-lens-near"
-      : "is-lens-far"
-    : "";
-  const cls = [
-    "canvas-custom",
-    node.enabled ? "is-enabled" : "is-disabled",
-    isSelected ? "is-selected" : "",
-    node.isOrphan ? "is-orphan" : "",
-    lensClass
-  ]
-    .filter(Boolean)
-    .join(" ");
-  const onClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    onSelectionChange({
-      kind: "custom",
-      usageArrayIndex: node.arrayIndex
-    });
-  };
-  const onDoubleClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    // C11: double-click opens the standalone ResourceBranchView
-    // tab for this custom node's resource + branch. Falls back to
-    // a no-op when branchId hasn't resolved (orphan / unresolved
-    // resource — the inspector still works in that case).
-    if (!node.branchId) return;
-    onOpenFullEditor({
-      resourceKind: "custom",
-      resourceInstanceId: node.usage.resource_instance_id,
-      branchId: node.branchId
-    });
-  };
-  const onDragStart = (e: React.DragEvent) => {
-    e.stopPropagation();
-    canvasDragState.value = {
-      kind: "canvas-custom",
-      arrayIndex: node.arrayIndex
-    };
-    e.dataTransfer.effectAllowed = "move";
-    try {
-      e.dataTransfer.setData(
-        "application/x-tinder-canvas-custom",
-        String(node.arrayIndex)
-      );
-    } catch {
-      /* ignore */
-    }
-  };
-  const onDragEnd = () => {
-    canvasDragState.value = null;
-  };
-  const onContextMenu = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    onCardContextMenu(e, [
-      // S4: parity with the list-view custom row menu
-      // (上移 / 下移 / 移到段… / 停用 / 移出链路).
-      {
-        id: "up",
-        label: "上移",
-        run: () => void ca.shiftCustomUsage(profileId, node.arrayIndex, -1)
-      },
-      {
-        id: "down",
-        label: "下移",
-        run: () => void ca.shiftCustomUsage(profileId, node.arrayIndex, 1)
-      },
-      {
-        id: "move",
-        label: "移到段…",
-        run: () => void ca.promptMoveCustomUsage(profileId, node.arrayIndex)
-      },
-      { separator: true },
-      node.enabled
-        ? {
-            id: "deactivate",
-            label: "停用",
-            run: () =>
-              void ca.setCustomUsageEnabled(profileId, node.arrayIndex, false)
-          }
-        : {
-            id: "activate",
-            label: "激活",
-            run: () =>
-              void ca.setCustomUsageEnabled(profileId, node.arrayIndex, true)
-          },
-      {
-        id: "remove",
-        label: "移出链路",
-        run: () => void ca.removeCustomUsage(profileId, node.arrayIndex)
-      }
-    ]);
-  };
-  const titleParts: string[] = [
-    `${node.resourceDisplayName ?? ""} / ${node.usage.node_id}`
-  ];
-  if (!node.enabled) titleParts.push("停用");
-  if (node.isOrphan)
-    titleParts.push(
-      "孤立 (orphan)：当前分支不再声明此节点。可删除此放置或切回原分支。"
-    );
-  titleParts.push(
-    node.branchId ? "单击选中 · 双击打开完整编辑" : "单击选中"
-  );
-  return (
-    <div
-      className={cls}
-      onClick={onClick}
-      onDoubleClick={onDoubleClick}
-      onContextMenu={onContextMenu}
-      draggable
-      onDragStart={onDragStart}
-      onDragEnd={onDragEnd}
-      role="button"
-      tabIndex={0}
-      title={titleParts.join(" · ")}
-    >
-      <span className="canvas-custom-marker" aria-hidden="true">
-        ⌬
-      </span>
-      <span className="canvas-custom-label">{node.displayName}</span>
-      {node.branchId && (
-        <span className="canvas-custom-branch">· {node.branchId}</span>
-      )}
-      {node.isOrphan && (
-        <span
-          className="canvas-custom-orphan-chip"
-          title="孤立 usage（C26 soft-orphan）"
-        >
-          ⚠
-        </span>
-      )}
-    </div>
-  );
-}
-
-// ──────────────────────────────────────────────────────────────────
-// Top-bar toggle switch (iOS-style)
-// ──────────────────────────────────────────────────────────────────
-
-/**
- * Compact pill switch used for view-state toggles in the canvas
- * top bar (coverage filter, flow line). Reads as a horizontal
- * track with an animated knob — visually obvious on/off without
- * spelling out 开/关. Label sits before the switch.
- */
-function ToggleSwitch({
-  label,
-  on,
-  onChange,
-  title
-}: {
-  label: string;
-  on: boolean;
-  onChange: (next: boolean) => void;
-  title?: string;
-}) {
-  return (
-    <button
-      type="button"
-      className={`canvas-toggle${on ? " is-on" : ""}`}
-      onClick={() => onChange(!on)}
-      title={title}
-      aria-pressed={on}
-      role="switch"
-    >
-      <span className="canvas-toggle-label">{label}</span>
-      <span className="canvas-toggle-track" aria-hidden="true">
-        <span className="canvas-toggle-knob" />
-      </span>
-    </button>
-  );
-}

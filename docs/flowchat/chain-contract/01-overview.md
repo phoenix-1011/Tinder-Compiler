@@ -2,7 +2,7 @@
 
 ## 结论
 
-当前 Model-P 统一入口的核心流程链路由 81 个 canonical core chain 节点组成。运行时 ordered execution 先执行域节点和可选 custom invocation 节点，再进入 core chain 边界；core chain 边界之后只能执行 core chain 节点或 post-commit custom invocation 节点。
+当前 Model-P 统一入口的核心流程链路由 84 个 canonical core chain 节点组成。运行时 ordered execution 先执行域节点和可选 custom invocation 节点，再进入 core chain 边界；core chain 边界之后只能执行 core chain 节点或 post-commit custom invocation 节点。
 
 ## SSOT
 
@@ -24,9 +24,9 @@
 
 | 设备链路 | `20-device-chain.md` | 3 | 设备状态、空间状态、性能联合提交 |
 
-| 信号环境 | `30-signal-environment-chain.md` | 13 | 静态信号、软杀伤、信号环境传播、环境特征生成/维护/传播 |
+| 信号环境 | `30-signal-environment-chain.md` | 15 | 静态信号、信号事实、回波事实、数字化观测、软杀伤、信号环境传播、环境特征生成/维护/传播 |
 
-| 感知链路 | `40-sense-chain.md` | 11 | signature receive、signal intake 到 awareness maintain |
+| 感知链路 | `40-sense-chain.md` | 12 | signature receive、signal intake 到 awareness maintain |
 
 | 导航链路 | `50-navigation-chain.md` | 5 | 导航链路 指令维护、解析、移动、修正、坐标提交 |
 
@@ -68,7 +68,7 @@
 
 | 按 UTF-8 解码全部 Markdown | 无解码错误，无替换字符 |
 
-| 对比本文档顺序与 `kCoreChainOrder` | 81 个节点完全一致 |
+| 对比本文档顺序与 `kCoreChainOrder` | 84 个节点完全一致 |
 
 | 统一通信链路 contract | `75-communication-chain.md` 已进入 `kCoreChainOrder`，接收前段和发送后段均为 core chain |
 

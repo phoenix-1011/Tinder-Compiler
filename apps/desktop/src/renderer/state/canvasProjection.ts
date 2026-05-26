@@ -106,6 +106,68 @@ export interface CanvasProjection {
   customOnly: CanvasGroup | null;
 }
 
+// ──────────────────────────────────────────────────────────────────
+// UI group overrides — canvas-only split of large canonical groups.
+// The chain-catalog and chain-contract docs stay at 10 canonical
+// groups; this table re-buckets specific nodeIds into smaller visual
+// clusters for the freeform canvas.  Slug numbering (31, 32, 61, 62)
+// controls sort position relative to canonical slugs.
+// ──────────────────────────────────────────────────────────────────
+
+const UI_GROUP_OVERRIDES: ReadonlyArray<{
+  uiSlug: string;
+  uiTitle: string;
+  nodeIds: ReadonlyArray<string>;
+}> = [
+  {
+    uiSlug: "31-softkill",
+    uiTitle: "软杀伤",
+    nodeIds: [
+      "device.softkill.emission.generate",
+      "softkill.propagation.resolve",
+      "platform.softkill.effect.resolve",
+      "device.softkill.effect.process"
+    ]
+  },
+  {
+    uiSlug: "32-signature",
+    uiTitle: "特征",
+    nodeIds: [
+      "environment.signature.generate",
+      "environment.signature.lifecycle.manage",
+      "environment.signature.propagation.resolve",
+      "device.signature.receive.process",
+      "sense.detection.from_signature"
+    ]
+  },
+  {
+    uiSlug: "61-cooperation",
+    uiTitle: "协同与通信",
+    nodeIds: [
+      "platform.cooperation.message_sync",
+      "platform.cooperation.leader_update",
+      "platform.cooperation.member_update",
+      "platform.cooperation.communication_record"
+    ]
+  },
+  {
+    uiSlug: "62-inventory",
+    uiTitle: "库存与监督",
+    nodeIds: [
+      "platform.decoy_inventory.update",
+      "platform.bullet_inventory.update",
+      "platform.missile_inventory.update",
+      "platform.ammunitor_inventory.update",
+      "platform.carriee_inventory.update",
+      "platform.supervise_carriee.update",
+      "platform.supervise_missile.update",
+      "platform.supervise_canonball.update",
+      "platform.supervise_tunnel.update",
+      "platform.homeport.update"
+    ]
+  }
+];
+
 /**
  * Build a canvas projection for `profile`.
  *
@@ -234,6 +296,8 @@ export function buildCanvasProjection(
     };
   });
 
+  const finalGroups = applyUiGroupOverrides(groups, coverageFilter);
+
   const customOnly =
     customOnlyRows.length > 0
       ? {
@@ -248,7 +312,7 @@ export function buildCanvasProjection(
         }
       : null;
 
-  return { groups, customOnly };
+  return { groups: finalGroups, customOnly };
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -311,6 +375,118 @@ function filterVisible(
     if (customsBySlotAnchor.has(n.nodeId)) return true;
     return false;
   });
+}
+
+function buildGroupFromNodes(
+  docSlug: string,
+  docTitle: string,
+  allNodes: CanvasNode[],
+  coverageFilter: boolean
+): CanvasGroup {
+  const slotsInGroup = allNodes.filter(
+    (n): n is CanvasSlotNode => n.kind === "slot"
+  );
+  const anchors = customAnchorSet(allNodes);
+  const visibleNodes = coverageFilter
+    ? filterVisible(allNodes, anchors)
+    : allNodes;
+  const coveredSlotCount = slotsInGroup.reduce(
+    (acc, s) => (s.coverage.count > 0 ? acc + 1 : acc),
+    0
+  );
+  const visibleSlotCount = visibleNodes.filter(
+    (n) => n.kind === "slot"
+  ).length;
+  return {
+    docSlug,
+    docTitle,
+    isCustomOnly: false,
+    allNodes,
+    visibleNodes,
+    coveredSlotCount,
+    totalSlotCount: slotsInGroup.length,
+    hiddenSlotCount: slotsInGroup.length - visibleSlotCount
+  };
+}
+
+function applyUiGroupOverrides(
+  groups: CanvasGroup[],
+  coverageFilter: boolean
+): CanvasGroup[] {
+  if (UI_GROUP_OVERRIDES.length === 0) return groups;
+
+  // C7: validate override nodeIds against the canonical groups so
+  // typos / stale ids surface during development instead of silently
+  // producing smaller-than-expected override clusters.
+  if (process.env.NODE_ENV !== "production") {
+    const allSlotIds = new Set<string>();
+    for (const g of groups) {
+      for (const n of g.allNodes) {
+        if (n.kind === "slot") allSlotIds.add(n.nodeId);
+      }
+    }
+    for (const ov of UI_GROUP_OVERRIDES) {
+      for (const id of ov.nodeIds) {
+        if (!allSlotIds.has(id)) {
+          console.warn(
+            `[canvasProjection] UI_GROUP_OVERRIDES: nodeId "${id}" ` +
+            `in override "${ov.uiSlug}" not found in any canonical group`
+          );
+        }
+      }
+    }
+  }
+
+  const nodeIdTarget = new Map<string, string>();
+  for (const ov of UI_GROUP_OVERRIDES) {
+    for (const id of ov.nodeIds) {
+      nodeIdTarget.set(id, ov.uiSlug);
+    }
+  }
+  const extracted = new Map<string, CanvasNode[]>();
+  for (const ov of UI_GROUP_OVERRIDES) {
+    extracted.set(ov.uiSlug, []);
+  }
+  const stripped = groups.map((group) => {
+    const keep: CanvasNode[] = [];
+    for (const node of group.allNodes) {
+      let target: string | undefined;
+      if (node.kind === "slot") {
+        target = nodeIdTarget.get(node.nodeId);
+      } else if (node.anchorChainId) {
+        target = nodeIdTarget.get(node.anchorChainId);
+      }
+      if (target) {
+        extracted.get(target)!.push(node);
+      } else {
+        keep.push(node);
+      }
+    }
+    if (keep.length === group.allNodes.length) return group;
+    return buildGroupFromNodes(
+      group.docSlug,
+      group.docTitle,
+      keep,
+      coverageFilter
+    );
+  });
+  const overrideGroups = UI_GROUP_OVERRIDES.map((ov) =>
+    buildGroupFromNodes(
+      ov.uiSlug,
+      ov.uiTitle,
+      extracted.get(ov.uiSlug) ?? [],
+      coverageFilter
+    )
+  );
+  const all = [...stripped, ...overrideGroups].filter(
+    (g) => g.allNodes.length > 0
+  );
+  all.sort((a, b) => {
+    const na = parseInt(a.docSlug, 10) || 0;
+    const nb = parseInt(b.docSlug, 10) || 0;
+    return na - nb;
+  });
+  return all;
 }
 
 // ──────────────────────────────────────────────────────────────────

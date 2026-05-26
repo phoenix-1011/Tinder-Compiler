@@ -88,6 +88,7 @@ avigation.perception_correction.update` | 导航误差或修正状态 |
 | `shared.device.performance` | `device.performance.update` | 设备性能权威状态 |
 
 | `shared.signal.records` | `signal.static_generation.update` | 静态信号权威池 |
+| `shared.signal.entity_features` | `signal.fact.generate` | 信号域实体特征池，覆盖几何、散射中心、材料、姿态和响应摘要 |
 | `shared.environment.signature.records` | `environment.signature.lifecycle.manage` | 环境特征权威池，覆盖尾流、磁异常、热迹、化学痕迹和自定义特征 |
 
 | `shared.sense.signal` | `sense.signal.preprocess` | 接收侧信号结果 |
@@ -108,6 +109,8 @@ avigation.perception_correction.update` | 导航误差或修正状态 |
 
 |---|---|---|---|
 
+| `runtime.signal.parameterized_facts` | `signal.fact.generate` | `signal.echo.generate`、`signal.observable.materialize`、post-commit custom nodes | 当前 tick，执行为空也提交 |
+| `runtime.signal.digitized_observables` | `signal.observable.materialize` | `sense.signal.intake`、post-commit custom nodes | 当前 tick，执行为空也提交 |
 | `runtime.environment.signal.propagated_local_candidates` | `environment.signal.transform` | `sense.signal.intake`、post-commit custom nodes | 当前 tick |
 | `runtime.environment.signature.propagated_candidates` | `environment.signature.propagation.resolve` | `device.signature.receive.process`、post-commit custom nodes | 当前 tick |
 

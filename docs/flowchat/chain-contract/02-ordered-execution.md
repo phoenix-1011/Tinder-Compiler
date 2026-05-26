@@ -10,7 +10,7 @@
 |---|---|---|
 | `builtin_domain_node` | core chain 前 | 执行 Environment、Platform、Signal 三个域运行时节点。 |
 | `custom_invocation_node` | core chain 前或后 | 由 runtime config 显式声明和排序。 |
-| `builtin_core_chain` | core chain 边界后 | 本文档列出的 81 个 canonical 节点。 |
+| `builtin_core_chain` | core chain 边界后 | 本文档列出的 84 个 canonical 节点。 |
 
 ## Canonical Core Chain Order
 
@@ -70,30 +70,33 @@
 | 52 | 设备状态 | `device.status.update` | device | `platform.status.update` | `device.spatial_state.update` |
 | 53 | 设备空间 | `device.spatial_state.update` | device | `device.status.update` | `device.performance.update` |
 | 54 | 设备性能 | `device.performance.update` | device | `device.spatial_state.update` | `signal.static_generation.update` |
-| 55 | 静态信号 | `signal.static_generation.update` | signal-environment | `device.performance.update` | `device.softkill.emission.generate` |
-| 56 | 软杀发射 | `device.softkill.emission.generate` | signal-environment | `signal.static_generation.update` | `environment.signal.lifecycle.manage` |
-| 57 | 信号生命周期 | `environment.signal.lifecycle.manage` | signal-environment | `device.softkill.emission.generate` | `environment.signal.generate` |
-| 58 | 环境生成 | `environment.signal.generate` | signal-environment | `environment.signal.lifecycle.manage` | `environment.signal.echo_generate` |
-| 59 | 回波生成 | `environment.signal.echo_generate` | signal-environment | `environment.signal.generate` | `environment.signal.transform` |
-| 60 | 传播转换 | `environment.signal.transform` | signal-environment | `environment.signal.echo_generate` | `softkill.propagation.resolve` |
-| 61 | 软杀传播 | `softkill.propagation.resolve` | signal-environment | `environment.signal.transform` | `platform.softkill.effect.resolve` |
-| 62 | 平台软杀 | `platform.softkill.effect.resolve` | signal-environment | `softkill.propagation.resolve` | `device.softkill.effect.process` |
-| 63 | 设备软杀 | `device.softkill.effect.process` | signal-environment | `platform.softkill.effect.resolve` | `environment.signature.generate` |
-| 64 | 特征生成 | `environment.signature.generate` | signal-environment | `device.softkill.effect.process` | `environment.signature.lifecycle.manage` |
-| 65 | 特征维护 | `environment.signature.lifecycle.manage` | signal-environment | `environment.signature.generate` | `environment.signature.propagation.resolve` |
-| 66 | 特征传播 | `environment.signature.propagation.resolve` | signal-environment | `environment.signature.lifecycle.manage` | `device.signature.receive.process` |
-| 67 | 特征接收 | `device.signature.receive.process` | sense | `environment.signature.propagation.resolve` | `sense.signal.intake` |
-| 68 | 信号传入 | `sense.signal.intake` | sense | `device.signature.receive.process` | `sense.signal.preprocess` |
-| 69 | 信号预处理 | `sense.signal.preprocess` | sense | `sense.signal.intake` | `sense.detection.from_signal` |
-| 70 | 信号成检 | `sense.detection.from_signal` | sense | `sense.signal.preprocess` | `sense.detection.from_signature` |
-| 71 | 特征成检 | `sense.detection.from_signature` | sense | `sense.detection.from_signal` | `sense.detection.artifact.update` |
-| 72 | 假警维护 | `sense.detection.artifact.update` | sense | `sense.detection.from_signature` | `sense.detection.update` |
-| 73 | 探测更新 | `sense.detection.update` | sense | `sense.detection.artifact.update` | `sense.observation.from_detection` |
-| 74 | 探测成观 | `sense.observation.from_detection` | sense | `sense.detection.update` | `sense.observation.update` |
-| 75 | 观测更新 | `sense.observation.update` | sense | `sense.observation.from_detection` | `sense.track.update` |
-| 76 | 航迹更新 | `sense.track.update` | sense | `sense.observation.update` | `sense.awareness.update` |
-| 77 | 态势融合 | `sense.awareness.update` | sense | `sense.track.update` | `sense.awareness.maintain` |
-| 78 | 态势维护 | `sense.awareness.maintain` | sense | `sense.awareness.update` | `communication.request.collect` |
-| 79 | 请求汇集 | `communication.request.collect` | communication | `sense.awareness.maintain` | `communication.send.resolve` |
-| 80 | 发送解析 | `communication.send.resolve` | communication | `communication.request.collect` | `communication.dispatch.update` |
-| 81 | 通信发送 | `communication.dispatch.update` | communication | `communication.send.resolve` | `core chain 结束` |
+| 55 | 静态信号 | `signal.static_generation.update` | signal-environment | `device.performance.update` | `signal.fact.generate` |
+| 56 | 信号事实 | `signal.fact.generate` | signal-environment | `signal.static_generation.update` | `device.softkill.emission.generate` |
+| 57 | 软杀发射 | `device.softkill.emission.generate` | signal-environment | `signal.fact.generate` | `environment.signal.lifecycle.manage` |
+| 58 | 信号生命周期 | `environment.signal.lifecycle.manage` | signal-environment | `device.softkill.emission.generate` | `environment.signal.generate` |
+| 59 | 环境生成 | `environment.signal.generate` | signal-environment | `environment.signal.lifecycle.manage` | `environment.signal.echo_generate` |
+| 60 | 环境兼容回波 | `environment.signal.echo_generate` | signal-environment | `environment.signal.generate` | `signal.echo.generate` |
+| 61 | 回波事实 | `signal.echo.generate` | signal-environment | `environment.signal.echo_generate` | `signal.observable.materialize` |
+| 62 | 信号观测 | `signal.observable.materialize` | signal-environment | `signal.echo.generate` | `environment.signal.transform` |
+| 63 | 传播转换 | `environment.signal.transform` | signal-environment | `signal.observable.materialize` | `softkill.propagation.resolve` |
+| 64 | 软杀传播 | `softkill.propagation.resolve` | signal-environment | `environment.signal.transform` | `platform.softkill.effect.resolve` |
+| 65 | 平台软杀 | `platform.softkill.effect.resolve` | signal-environment | `softkill.propagation.resolve` | `device.softkill.effect.process` |
+| 66 | 设备软杀 | `device.softkill.effect.process` | signal-environment | `platform.softkill.effect.resolve` | `environment.signature.generate` |
+| 67 | 特征生成 | `environment.signature.generate` | signal-environment | `device.softkill.effect.process` | `environment.signature.lifecycle.manage` |
+| 68 | 特征维护 | `environment.signature.lifecycle.manage` | signal-environment | `environment.signature.generate` | `environment.signature.propagation.resolve` |
+| 69 | 特征传播 | `environment.signature.propagation.resolve` | signal-environment | `environment.signature.lifecycle.manage` | `device.signature.receive.process` |
+| 70 | 特征接收 | `device.signature.receive.process` | sense | `environment.signature.propagation.resolve` | `sense.signal.intake` |
+| 71 | 信号传入 | `sense.signal.intake` | sense | `device.signature.receive.process` | `sense.signal.preprocess` |
+| 72 | 信号预处理 | `sense.signal.preprocess` | sense | `sense.signal.intake` | `sense.detection.from_signal` |
+| 73 | 信号成检 | `sense.detection.from_signal` | sense | `sense.signal.preprocess` | `sense.detection.from_signature` |
+| 74 | 特征成检 | `sense.detection.from_signature` | sense | `sense.detection.from_signal` | `sense.detection.artifact.update` |
+| 75 | 假警维护 | `sense.detection.artifact.update` | sense | `sense.detection.from_signature` | `sense.detection.update` |
+| 76 | 探测更新 | `sense.detection.update` | sense | `sense.detection.artifact.update` | `sense.observation.from_detection` |
+| 77 | 探测成观 | `sense.observation.from_detection` | sense | `sense.detection.update` | `sense.observation.update` |
+| 78 | 观测更新 | `sense.observation.update` | sense | `sense.observation.from_detection` | `sense.track.update` |
+| 79 | 航迹更新 | `sense.track.update` | sense | `sense.observation.update` | `sense.awareness.update` |
+| 80 | 态势融合 | `sense.awareness.update` | sense | `sense.track.update` | `sense.awareness.maintain` |
+| 81 | 态势维护 | `sense.awareness.maintain` | sense | `sense.awareness.update` | `communication.request.collect` |
+| 82 | 请求汇集 | `communication.request.collect` | communication | `sense.awareness.maintain` | `communication.send.resolve` |
+| 83 | 发送解析 | `communication.send.resolve` | communication | `communication.request.collect` | `communication.dispatch.update` |
+| 84 | 通信发送 | `communication.dispatch.update` | communication | `communication.send.resolve` | `core chain 结束` |

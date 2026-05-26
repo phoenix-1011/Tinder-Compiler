@@ -6,11 +6,11 @@ import { ensureDir, join } from "./chainAssemblyStorage";
  * `<dataRoot>/.tinder/state/canvas.json` (C1, C15). This file is a
  * pure UI projection and never enters profile JSON or runtime export.
  *
- * Phase 2 persists a minimal subset of the requirement.md schema:
- * `coverageFilter`, `flowLineVisible`, `collapsedGroups`, and the
- * inspector dock/collapsed state (Phase 3 will use the dock fields).
- * Other fields (focus, scroll, selection, collapsedSlots) are added
- * in later phases.
+ * Persisted fields: `inspector` (dock + collapsed), `selection`,
+ * `focus` (deprecated D6), `viewport` (pan + zoom), `clusterPositions`
+ * (per-cluster drag coords), `customPositions` (per-custom-usage drag
+ * coords). Legacy fields `coverageFilter`, `flowLineVisible`,
+ * `collapsedGroups` are retained for back-compat with older files.
  *
  * Loss-tolerant: missing or invalid file → defaults. Never blocks
  * profile loading.
@@ -57,15 +57,59 @@ export interface CanvasFocusState {
   radius: number;
 }
 
+/**
+ * react-flow viewport (pan + zoom). Persisted so the user re-enters
+ * the same view they left. New profiles default to the
+ * DEFAULT_VIEWPORT below (a near-origin position at 85 % zoom that
+ * fits the first row of the default swimlane in a standard editor
+ * window). Per D5 / D12 of profile-canvas-freeform-uiux.
+ */
+export interface CanvasViewportState {
+  x: number;
+  y: number;
+  zoom: number;
+}
+
 export interface CanvasPerProfileState {
+  /**
+   * @deprecated D6 — coverage filter is withdrawn in the freeform
+   * canvas. Kept in the schema only for back-compat with canvas.json
+   * files written by the previous canvas. Always treated as `false`.
+   */
   coverageFilter: boolean;
+  /**
+   * @deprecated D6 — flow-line visibility toggle is withdrawn (the
+   * directional edges are always shown). Kept for back-compat.
+   */
   flowLineVisible: boolean;
   collapsedGroups: string[];
   inspector: CanvasInspectorState;
   /** Currently selected canvas entity; null when nothing is selected. */
   selection: CanvasSelection | null;
-  /** Locked focus state (C10); see CanvasFocusState. */
+  /**
+   * @deprecated D6 — locked focus heavy layer is withdrawn (pan +
+   * zoom replaces it). Kept for back-compat; future writes leave
+   * the default values.
+   */
   focus: CanvasFocusState;
+  /**
+   * react-flow viewport (pan + zoom). Persisted per profile per D5.
+   * `onViewportChange` writes here through the debounced setter.
+   */
+  viewport: CanvasViewportState;
+  /**
+   * Per-cluster (x, y) keyed by docSlug — D5. Clusters absent from
+   * the map fall back to the default horizontal-swimlane layout
+   * computed at projection time.
+   */
+  clusterPositions: Record<string, { x: number; y: number }>;
+  /**
+   * Per-custom-usage (x, y) keyed by the usage's array index in
+   * `profile.custom_node_usages` (the same stable id used by
+   * reorder mutations) — D5. Entries absent from the map fall back
+   * to a default position next to the canonical anchor's cluster.
+   */
+  customPositions: Record<number, { x: number; y: number }>;
 }
 
 interface CanvasStateFile {
@@ -75,6 +119,17 @@ interface CanvasStateFile {
 
 export const CANVAS_STATE_DIR = "state";
 export const CANVAS_STATE_FILE = "canvas.json";
+
+/**
+ * Default viewport — chosen to fit the first row of the default
+ * horizontal swimlane (~2000 px wide at zoom 1) inside a standard
+ * editor window. The user can pan / zoom from there.
+ */
+export const DEFAULT_VIEWPORT: CanvasViewportState = {
+  x: 0,
+  y: 0,
+  zoom: 0.85
+};
 
 export const DEFAULT_CANVAS_PER_PROFILE: CanvasPerProfileState = {
   coverageFilter: true,
@@ -86,7 +141,10 @@ export const DEFAULT_CANVAS_PER_PROFILE: CanvasPerProfileState = {
   // useful initial state per the C4 "self-sufficient canvas" intent.
   inspector: { dock: "right", collapsed: false },
   selection: null,
-  focus: { locked: false, target: null, radius: 2 }
+  focus: { locked: false, target: null, radius: 2 },
+  viewport: DEFAULT_VIEWPORT,
+  clusterPositions: {},
+  customPositions: {}
 };
 
 const DEBOUNCE_MS = 250;
@@ -124,6 +182,18 @@ function isPerProfileState(value: unknown): value is CanvasPerProfileState {
   if (v.focus !== undefined && v.focus !== null) {
     if (typeof v.focus !== "object") return false;
   }
+  // Freeform-canvas additions (D5) — all three are additive and
+  // back-compat: older files written by the previous canvas have
+  // none of these and hydrate to defaults via normalization below.
+  if (v.viewport !== undefined && v.viewport !== null) {
+    if (typeof v.viewport !== "object") return false;
+  }
+  if (v.clusterPositions !== undefined && v.clusterPositions !== null) {
+    if (typeof v.clusterPositions !== "object") return false;
+  }
+  if (v.customPositions !== undefined && v.customPositions !== null) {
+    if (typeof v.customPositions !== "object") return false;
+  }
   return true;
 }
 
@@ -144,10 +214,25 @@ function normalizePerProfileState(
         ? rawFocus.radius
         : 2
   };
+  const rawViewport = raw.viewport as
+    | Partial<CanvasViewportState>
+    | undefined
+    | null;
+  const viewport: CanvasViewportState = {
+    x: typeof rawViewport?.x === "number" ? rawViewport.x : DEFAULT_VIEWPORT.x,
+    y: typeof rawViewport?.y === "number" ? rawViewport.y : DEFAULT_VIEWPORT.y,
+    zoom:
+      typeof rawViewport?.zoom === "number" && rawViewport.zoom > 0
+        ? rawViewport.zoom
+        : DEFAULT_VIEWPORT.zoom
+  };
   return {
     ...raw,
     selection: raw.selection ?? null,
-    focus
+    focus,
+    viewport,
+    clusterPositions: raw.clusterPositions ?? {},
+    customPositions: raw.customPositions ?? {}
   };
 }
 
@@ -188,6 +273,20 @@ async function writeCanvasFile(
 }
 
 /**
+ * Patch shape accepted by `setState`. Nested objects (`inspector`,
+ * `focus`) are themselves Partial so callers can update a single
+ * sub-field without re-specifying the full sub-object.
+ * `clusterPositions` and `customPositions` merge additively
+ * (spread prev + patch) — use `pruneStalePositions` for key removal.
+ */
+export type CanvasStatePatch = Partial<
+  Omit<CanvasPerProfileState, "inspector" | "focus">
+> & {
+  inspector?: Partial<CanvasInspectorState>;
+  focus?: Partial<CanvasFocusState>;
+};
+
+/**
  * Load + persist canvas state for a single profile.
  *
  * - On mount (and whenever `profileId` / `tinderDir` change): reads
@@ -203,24 +302,21 @@ async function writeCanvasFile(
  * the first read has resolved; callers can render skeleton UI before
  * that to avoid a brief flash of default state.
  */
-/**
- * Patch shape accepted by `setState`. Nested objects (`inspector`,
- * `focus`) are themselves Partial so callers can update a single
- * sub-field without re-specifying the full sub-object.
- */
-export type CanvasStatePatch = Partial<
-  Omit<CanvasPerProfileState, "inspector" | "focus">
-> & {
-  inspector?: Partial<CanvasInspectorState>;
-  focus?: Partial<CanvasFocusState>;
-};
-
 export function useCanvasPersistedState(
   tinderDir: string | null,
   profileId: string | null
 ): {
   state: CanvasPerProfileState;
   setState: (patch: CanvasStatePatch) => void;
+  /**
+   * Remove position keys that no longer map to a live projection
+   * entity. Unlike `setState` (which merges positions additively),
+   * this replaces both position maps with the pruned copies.
+   */
+  pruneStalePositions: (
+    validClusterSlugs: Set<string>,
+    validCustomIdxs: Set<number>
+  ) => void;
   loaded: boolean;
 } {
   const [state, _setState] = useState<CanvasPerProfileState>(
@@ -337,7 +433,9 @@ export function useCanvasPersistedState(
           ...prev,
           ...patch,
           inspector: { ...prev.inspector, ...(patch.inspector ?? {}) },
-          focus: { ...prev.focus, ...(patch.focus ?? {}) }
+          focus: { ...prev.focus, ...(patch.focus ?? {}) },
+          clusterPositions: { ...prev.clusterPositions, ...(patch.clusterPositions ?? {}) },
+          customPositions: { ...prev.customPositions, ...(patch.customPositions ?? {}) }
         };
         if (tinderDir && profileId) {
           // Capture profileId NOW so the write — possibly fired after
@@ -358,5 +456,48 @@ export function useCanvasPersistedState(
     [tinderDir, profileId, flushPending]
   );
 
-  return { state, setState, loaded };
+  const pruneStalePositions = useCallback(
+    (validClusterSlugs: Set<string>, validCustomIdxs: Set<number>) => {
+      _setState((prev) => {
+        let changed = false;
+        const nextCluster: Record<string, { x: number; y: number }> = {};
+        for (const [k, v] of Object.entries(prev.clusterPositions)) {
+          if (validClusterSlugs.has(k)) {
+            nextCluster[k] = v;
+          } else {
+            changed = true;
+          }
+        }
+        const nextCustom: Record<number, { x: number; y: number }> = {};
+        for (const [k, v] of Object.entries(prev.customPositions)) {
+          const idx = Number(k);
+          if (validCustomIdxs.has(idx)) {
+            nextCustom[idx] = v;
+          } else {
+            changed = true;
+          }
+        }
+        if (!changed) return prev;
+        const merged: CanvasPerProfileState = {
+          ...prev,
+          clusterPositions: nextCluster,
+          customPositions: nextCustom
+        };
+        if (tinderDir && profileId) {
+          pendingWriteRef.current = { tinderDir, profileId, state: merged };
+          if (writeTimerRef.current != null) {
+            window.clearTimeout(writeTimerRef.current);
+          }
+          writeTimerRef.current = window.setTimeout(() => {
+            writeTimerRef.current = null;
+            void flushPending();
+          }, DEBOUNCE_MS);
+        }
+        return merged;
+      });
+    },
+    [tinderDir, profileId, flushPending]
+  );
+
+  return { state, setState, pruneStalePositions, loaded };
 }

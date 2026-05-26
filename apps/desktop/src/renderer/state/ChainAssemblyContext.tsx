@@ -48,6 +48,7 @@ import {
 } from "./interfaceGeneration";
 import { installTestData, TEST_DATA_FILE_COUNT } from "./testData";
 import { CHAIN_CATALOG } from "../help/chain-catalog.generated";
+import { isResourceBindableChainNode } from "../help/chainCatalogUi";
 import {
   EXTRAS_FILE,
   TINDER_DIR,
@@ -3168,13 +3169,15 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
           : null;
         const suggestedCandidates: StandardComputeCandidate[] = (
           template?.suggested_standard_node_ids ?? []
-        ).map((nodeId, i) => ({
-          node_id: nodeId,
-          display_name: nodeId,
-          node_type: "pathway",
-          candidate_id: `${slugify(nodeId)}-c${i + 1}`,
-          status: "draft"
-        }));
+        )
+          .filter(isResourceBindableChainNode)
+          .map((nodeId, i) => ({
+            node_id: nodeId,
+            display_name: nodeId,
+            node_type: "pathway",
+            candidate_id: `${slugify(nodeId)}-c${i + 1}`,
+            status: "draft"
+          }));
         resource = {
           schema_version: 2,
           resource_kind: "standard",

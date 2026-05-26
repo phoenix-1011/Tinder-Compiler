@@ -24,7 +24,7 @@ const OUT_FILE = join(
   "chain-catalog.generated.ts"
 );
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 /** Slugs of the foundation docs (no per-node sections). */
 const FOUNDATION_SLUGS = [
@@ -368,6 +368,7 @@ function parseNodeSection(nodeId, bodyLines) {
     }
   }
 
+  const uiPolicy = sub["UI 策略"] ? parseUiPolicyTable(sub["UI 策略"]) : {};
   const markdown = bodyLines.join("\n").trim();
 
   return {
@@ -380,8 +381,34 @@ function parseNodeSection(nodeId, bodyLines) {
     state,
     implementation,
     validation,
+    ...uiPolicy,
     markdown
   };
+}
+
+function parseUiPolicyTable(bodyLines) {
+  const rows = findTable(bodyLines, (cells) => cells.length >= 2);
+  if (!rows) return {};
+  const out = {};
+  for (const r of rows) {
+    if (r.length < 2 || r[0] === "字段" || /^[-:\s|]+$/.test(r[0])) continue;
+    const key = unwrapCell(r[0]);
+    const value = unwrapCell(r[1]);
+    if (key === "resource_binding_policy") {
+      if (value === "resource_bindable" || value === "builtin_only") {
+        out.resourceBindingPolicy = value;
+      }
+    } else if (key === "ui_tags") {
+      const tags = value
+        .split(/[、,，]/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (tags.length > 0) out.uiTags = tags;
+    } else if (key === "ui_notice" && value) {
+      out.uiNotice = value;
+    }
+  }
+  return out;
 }
 
 /**

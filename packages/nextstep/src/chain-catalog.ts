@@ -33,6 +33,8 @@ export interface ChainContractRow {
   note?: string;
 }
 
+export type ChainResourceBindingPolicy = "resource_bindable" | "builtin_only";
+
 /** Single row of the canonical ordered execution table. */
 export interface ChainOrderedEntry {
   order: number;
@@ -69,6 +71,12 @@ export interface ChainNodeEntry {
   implementation?: Array<{ layer: string; target: string }>;
   /** "验证" rows: check → expected. */
   validation?: Array<{ check: string; expected: string }>;
+  /** Whether standard compute resources may bind candidates to this node. */
+  resourceBindingPolicy?: ChainResourceBindingPolicy;
+  /** Short UI labels surfaced around the chain/resource editors. */
+  uiTags?: string[];
+  /** Optional UI-facing note for constrained or structural nodes. */
+  uiNotice?: string;
   /** Markdown body for just this node section, when extractable. */
   markdown?: string;
 }

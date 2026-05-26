@@ -27,6 +27,11 @@ import {
 } from "./ResourceCapabilityTab";
 import { ContextMenu, useContextMenu } from "./ContextMenu";
 import { CHAIN_CATALOG } from "../help/chain-catalog.generated";
+import {
+  chainNodeUiNotice,
+  chainNodeUiTags,
+  isResourceBindableChainNode
+} from "../help/chainCatalogUi";
 
 interface ResourceBranchViewProps {
   tabUri: string;
@@ -954,6 +959,7 @@ function ProfileEffectiveCandidateTable({
         </thead>
         <tbody>
           {[...candidatesByNode.entries()].map(([nodeId, group]) => {
+            const isBindable = isResourceBindableChainNode(nodeId);
             const hasOverride = Object.prototype.hasOwnProperty.call(
               overrides ?? {},
               nodeId
@@ -964,8 +970,21 @@ function ProfileEffectiveCandidateTable({
               : branchDefault;
             return (
               <tr key={nodeId}>
-                <td>{CHAIN_CATALOG.nodes[nodeId]?.displayName ?? nodeId}</td>
+                <td title={chainNodeUiNotice(nodeId)}>
+                  {CHAIN_CATALOG.nodes[nodeId]?.displayName ?? nodeId}
+                  {!isBindable && (
+                    <>
+                      <br />
+                      <span className="sidebar-hint">
+                        {chainNodeUiTags(nodeId)[0] ?? "内建结构节点"}
+                      </span>
+                    </>
+                  )}
+                </td>
                 <td>
+                  {!isBindable ? (
+                    <span className="sidebar-hint">不可在档案中选择</span>
+                  ) : (
                   <select
                     className="resource-editor-input"
                     value={value}
@@ -999,6 +1018,7 @@ function ProfileEffectiveCandidateTable({
                       );
                     })}
                   </select>
+                  )}
                 </td>
               </tr>
             );

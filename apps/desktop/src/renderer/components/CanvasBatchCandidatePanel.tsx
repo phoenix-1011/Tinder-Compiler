@@ -3,6 +3,11 @@ import { profileResourceBranchId } from "@tinder/nextstep";
 import type { ProfileEntry } from "../state/chainAssemblyStorage";
 import { useCa } from "../state/ChainAssemblyContext";
 import { CHAIN_CATALOG } from "../help/chain-catalog.generated";
+import {
+  chainNodeUiNotice,
+  chainNodeUiTags,
+  isResourceBindableChainNode
+} from "../help/chainCatalogUi";
 
 /**
  * Phase 4 — batch candidate (`实现函数`) panel (C24c).
@@ -42,6 +47,17 @@ interface BatchRow {
   profileOverride: string | null | undefined;
 }
 
+type BuiltinOnlyBatchRow = Pick<
+  BatchRow,
+  | "chainNodeId"
+  | "chainDisplayName"
+  | "order"
+  | "docTitle"
+  | "resourceInstanceId"
+  | "resourceDisplayName"
+  | "branchId"
+> & { tag: string; notice?: string };
+
 export function CanvasBatchCandidatePanel({
   profile,
   open,
@@ -80,6 +96,7 @@ export function CanvasBatchCandidatePanel({
       const profileOverrides = ref.overrides?.effective_candidates ?? {};
 
       for (const node of orderedNodes) {
+        if (!isResourceBindableChainNode(node.nodeId)) continue;
         const candidates = branch.compute_nodes.filter(
           (c) => c.node_id === node.nodeId && c.status !== "disabled"
         );
@@ -112,6 +129,11 @@ export function CanvasBatchCandidatePanel({
     }
     return out;
   }, [open, ca.disk, profile.project.resources]);
+
+  const builtinOnlyRows = useMemo(
+    () => activeBuiltinOnlyRows(profile, ca.disk),
+    [ca.disk, profile]
+  );
 
   if (!open) return null;
 
@@ -150,7 +172,7 @@ export function CanvasBatchCandidatePanel({
             ×
           </button>
         </header>
-        {rows.length === 0 ? (
+        {rows.length === 0 && builtinOnlyRows.length === 0 ? (
           <div className="canvas-batch-empty">
             档案目前没有被任何标准分支覆盖的 chain node 可供批量切换候选。
           </div>
@@ -209,9 +231,79 @@ export function CanvasBatchCandidatePanel({
                 </div>
               );
             })}
+            {builtinOnlyRows.map((row) => (
+              <div
+                key={`builtin-only::${row.resourceInstanceId}::${row.chainNodeId}`}
+                className="canvas-batch-row"
+                role="row"
+                title={row.notice}
+              >
+                <span className="canvas-batch-order">{row.order}</span>
+                <span className="canvas-batch-chain">
+                  {row.chainDisplayName}
+                  <code className="canvas-batch-chain-id">
+                    {row.chainNodeId}
+                  </code>
+                </span>
+                <span className="canvas-batch-source">
+                  {row.resourceDisplayName}
+                  <span className="canvas-batch-branch"> · {row.branchId}</span>
+                </span>
+                <span className="canvas-batch-doctitle">{row.docTitle}</span>
+                <span className="sidebar-hint">
+                  {row.tag}，不可在此选择
+                </span>
+              </div>
+            ))}
           </div>
         )}
       </div>
     </div>
   );
+}
+
+function activeBuiltinOnlyRows(
+  profile: ProfileEntry,
+  disk: ReturnType<typeof useCa>["disk"]
+): BuiltinOnlyBatchRow[] {
+  if (!disk) return [];
+  const out: BuiltinOnlyBatchRow[] = [];
+  const seen = new Set<string>();
+  const groupBySlug = new Map(
+    CHAIN_CATALOG.groups.map((g) => [g.docSlug, g.title] as const)
+  );
+  const activeStandardRefs = (profile.project.resources ?? []).filter(
+    (r) => r.kind === "standard" && r.enabled
+  );
+  for (const ref of activeStandardRefs) {
+    if (ref.kind !== "standard") continue;
+    const family = disk.resourceIndex.familyByKey.get(
+      `standard:${ref.resource_instance_id}`
+    );
+    if (!family) continue;
+    const branchId = profileResourceBranchId(ref);
+    const branchEntry = family.branches.find(
+      (b) => b.branch.branch_id === branchId
+    );
+    if (!branchEntry || branchEntry.branch.resource_kind !== "standard") continue;
+    for (const candidate of branchEntry.branch.compute_nodes) {
+      if (isResourceBindableChainNode(candidate.node_id)) continue;
+      const key = `${ref.resource_instance_id}:${branchId}:${candidate.node_id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const node = CHAIN_CATALOG.nodes[candidate.node_id];
+      out.push({
+        chainNodeId: candidate.node_id,
+        chainDisplayName: node?.displayName ?? candidate.node_id,
+        order: node?.order ?? 0,
+        docTitle: node ? groupBySlug.get(node.docSlug) ?? node.docSlug : "-",
+        resourceInstanceId: ref.resource_instance_id,
+        resourceDisplayName: family.family.display_name,
+        branchId,
+        tag: chainNodeUiTags(candidate.node_id)[0] ?? "内建结构节点",
+        notice: chainNodeUiNotice(candidate.node_id)
+      });
+    }
+  }
+  return out;
 }

@@ -214,7 +214,7 @@ export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
       },
       {
         id: "move",
-        label: "移到锚点…",
+        label: row.missingAnchorChainId ? "重选锚点…" : "移到锚点…",
         run: () => ca.promptMoveCustomUsage(profile.id, row.arrayIndex)
       },
       { separator: true },
@@ -448,6 +448,9 @@ export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
             onToggleEnabled={(row, enabled) =>
               void ca.setCustomUsageEnabled(profile.id, row.arrayIndex, enabled)
             }
+            onMove={(row) =>
+              void ca.promptMoveCustomUsage(profile.id, row.arrayIndex)
+            }
             onRemove={(row) => void ca.removeCustomUsage(profile.id, row.arrayIndex)}
           />
         )}
@@ -632,6 +635,7 @@ function CustomNodePool({
   onToggle,
   onLocate,
   onToggleEnabled,
+  onMove,
   onRemove
 }: {
   rows: Array<ChainProjectionRow & { kind: "custom" }>;
@@ -644,6 +648,7 @@ function CustomNodePool({
     row: ChainProjectionRow & { kind: "custom" },
     enabled: boolean
   ) => void;
+  onMove: (row: ChainProjectionRow & { kind: "custom" }) => void;
   onRemove: (row: ChainProjectionRow & { kind: "custom" }) => void;
 }) {
   return (
@@ -681,6 +686,7 @@ function CustomNodePool({
                 chainNodeNameById={chainNodeNameById}
                 onLocate={onLocate}
                 onToggleEnabled={onToggleEnabled}
+                onMove={onMove}
                 onRemove={onRemove}
               />
             ))
@@ -697,6 +703,7 @@ function CustomNodePoolRow({
   chainNodeNameById,
   onLocate,
   onToggleEnabled,
+  onMove,
   onRemove
 }: {
   row: ChainProjectionRow & { kind: "custom" };
@@ -707,9 +714,12 @@ function CustomNodePoolRow({
     row: ChainProjectionRow & { kind: "custom" },
     enabled: boolean
   ) => void;
+  onMove: (row: ChainProjectionRow & { kind: "custom" }) => void;
   onRemove: (row: ChainProjectionRow & { kind: "custom" }) => void;
 }) {
-  const location = row.anchorChainId
+  const location = row.missingAnchorChainId
+    ? `锚点缺失: ${row.missingAnchorChainId}`
+    : row.anchorChainId
     ? `${chainNodeNameById.get(row.anchorChainId) ?? row.anchorChainId} 前`
     : "链路末尾";
   const branchId = row.branchDisplayName ?? row.branchId ?? "default";
@@ -749,6 +759,11 @@ function CustomNodePoolRow({
         <button type="button" onClick={() => onLocate(row.arrayIndex)}>
           定位
         </button>
+        {row.missingAnchorChainId && (
+          <button type="button" onClick={() => onMove(row)}>
+            重选
+          </button>
+        )}
         <button
           type="button"
           onClick={() => onToggleEnabled(row, !row.usage.enabled)}
@@ -799,9 +814,11 @@ function renderFullRow(
         onDragEnd={drag.onDragEnd}
         onContextMenu={(e) => customMenu(e, row)}
         title={
-          row.usage.enabled
-            ? `${row.usage.resource_instance_id}/${row.usage.node_id}`
-            : `${row.usage.resource_instance_id}/${row.usage.node_id} · 停用`
+          row.missingAnchorChainId
+            ? `${row.usage.resource_instance_id}/${row.usage.node_id} · 锚点缺失: ${row.missingAnchorChainId}`
+            : row.usage.enabled
+              ? `${row.usage.resource_instance_id}/${row.usage.node_id}`
+              : `${row.usage.resource_instance_id}/${row.usage.node_id} · 停用`
         }
       >
         <div className="chain-editor-row-order-cell">
@@ -813,8 +830,13 @@ function renderFullRow(
           </span>
         </div>
         <span className="chain-editor-row-label">{row.displayName}</span>
-        <span className="chain-editor-row-label" title={row.anchorChainId ?? undefined}>
-          自定义节点
+        <span
+          className="chain-editor-row-label"
+          title={row.missingAnchorChainId ?? row.anchorChainId ?? undefined}
+        >
+          {row.missingAnchorChainId
+            ? `锚点缺失: ${row.missingAnchorChainId}`
+            : "自定义节点"}
         </span>
         <span className="chain-editor-row-type is-custom">自定义</span>
         <span className="chain-editor-row-info-actions" />
@@ -887,7 +909,11 @@ function renderExecutionRow(
         key={`exec-custom-${idx}-${row.arrayIndex}`}
         className={`chain-editor-row is-custom${row.usage.enabled ? "" : " is-disabled"}`}
         onContextMenu={(e) => customMenu(e, row)}
-        title={`${row.usage.resource_instance_id}/${row.usage.node_id}`}
+        title={
+          row.missingAnchorChainId
+            ? `${row.usage.resource_instance_id}/${row.usage.node_id} · 锚点缺失: ${row.missingAnchorChainId}`
+            : `${row.usage.resource_instance_id}/${row.usage.node_id}`
+        }
       >
         <div className="chain-editor-row-order-cell">
           <span className="chain-editor-row-order">{executionOrder}</span>
@@ -901,8 +927,13 @@ function renderExecutionRow(
           branchDisplayName: row.branchDisplayName ?? branchId,
           openActiveResource
         })}
-        <span className="chain-editor-row-label" title={row.anchorChainId ?? undefined}>
-          自定义节点
+        <span
+          className="chain-editor-row-label"
+          title={row.missingAnchorChainId ?? row.anchorChainId ?? undefined}
+        >
+          {row.missingAnchorChainId
+            ? `锚点缺失: ${row.missingAnchorChainId}`
+            : "自定义节点"}
         </span>
         <span className="chain-editor-row-type is-custom">自定义</span>
         {renderCustomExecutionInfoButtons(row, openMethodInfo, openCustomMethodCode)}

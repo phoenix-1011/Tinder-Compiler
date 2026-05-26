@@ -1,4 +1,5 @@
 import type {
+  BuiltinDomainExecutionItem,
   BuiltinNodeConfig,
   CatalogBuiltinNode,
   ComputeResourceBranch,
@@ -10,6 +11,7 @@ import type {
   CustomComputeNodeDef,
   CustomComputeResourceBranch,
   CustomComputeResource,
+  CustomExecutionItem,
   CustomNodeConfig,
   ExecutionItem,
   GuiProjectFile,
@@ -76,32 +78,135 @@ export function nextCustomActionIndex(nodes: CustomNodeConfig[]): number {
   return next;
 }
 
-export const CORE_CHAIN_IDS = [
-  "P-01",
-  "P-03",
-  "P-04",
-  "P-05",
-  "P-06",
-  "P-07",
-  "P-08",
-  "P-09",
-  "P-10",
-  "P-11",
-  "P-13",
-  "P-14",
-  "P-15",
-  "P-16",
-  "P-17",
-  "P-12",
-  "P-02",
-  "D-01",
-  "D-02",
-  "S-GEN-01",
-  "S-01",
-  "S-03",
-  "S-02",
-  "S-04",
+export const CANONICAL_CORE_CHAIN_IDS = [
+  "platform.judge.effect.resolve",
+  "device.judge.effect.process",
+  "platform.entity.update",
+  "platform.outlook.update",
+  "platform.environment.update",
+  "communication.network.update",
+  "communication.receive.intake",
+  "communication.receive.resolve",
+  "device.control.intake",
+  "device.control.maintain",
+  "device.control.resolve",
+  "device.control.switch.resolve",
+  "device.control.extend.resolve",
+  "device.control.emit_beam.resolve",
+  "device.control.dispatch.resolve",
+  "device.control.discharge.resolve",
+  "device.control.inform.resolve",
+  "device.control.strike.resolve",
+  "strike.route.resolve",
+  "strike.channel.prepare",
+  "strike.launch.execute",
+  "strike.autonomous.spawn",
+  "strike.ballistic.spawn",
+  "strike.barrage.emit",
+  "strike.supervise.update",
+  "strike.judge.submit",
+  "platform.navigation.command.maintain",
+  "platform.navigation.command.resolve",
+  "device.mobile_navigation.execute",
+  "navigation.perception_correction.update",
+  "platform.coordinate.commit",
+  "platform.cooperation.message_sync",
+  "platform.cooperation.leader_update",
+  "platform.cooperation.member_update",
+  "platform.cooperation.communication_record",
+  "platform.decoy_inventory.update",
+  "platform.bullet_inventory.update",
+  "platform.missile_inventory.update",
+  "platform.ammunitor_inventory.update",
+  "platform.carriee_inventory.update",
+  "platform.supervise_carriee.update",
+  "platform.supervise_missile.update",
+  "platform.supervise_canonball.update",
+  "platform.tracking_request.maintain",
+  "platform.tracking_target_key.maintain",
+  "platform.tracking_device.resolve",
+  "platform.tracking_fact.resolve",
+  "platform.supervise_tracking.update",
+  "platform.homeport.update",
+  "platform.supervise_tunnel.update",
+  "platform.status.update",
+  "device.status.update",
+  "device.spatial_state.update",
+  "device.performance.update",
+  "signal.static_generation.update",
+  "signal.fact.generate",
+  "device.softkill.emission.generate",
+  "environment.signal.lifecycle.manage",
+  "environment.signal.generate",
+  "environment.signal.echo_generate",
+  "signal.echo.generate",
+  "signal.observable.materialize",
+  "environment.signal.transform",
+  "softkill.propagation.resolve",
+  "platform.softkill.effect.resolve",
+  "device.softkill.effect.process",
+  "environment.signature.generate",
+  "environment.signature.lifecycle.manage",
+  "environment.signature.propagation.resolve",
+  "device.signature.receive.process",
+  "sense.signal.intake",
+  "sense.signal.preprocess",
+  "sense.detection.from_signal",
+  "sense.detection.from_signature",
+  "sense.detection.artifact.update",
+  "sense.detection.update",
+  "sense.observation.from_detection",
+  "sense.observation.update",
+  "sense.track.update",
+  "sense.awareness.update",
+  "sense.awareness.maintain",
+  "communication.request.collect",
+  "communication.send.resolve",
+  "communication.dispatch.update",
 ] as const;
+
+const CANONICAL_CORE_CHAIN_ID_SET = new Set<string>(CANONICAL_CORE_CHAIN_IDS);
+
+function normalizeOrderedExecutionListForRuntime(
+  items: ExecutionItem[],
+): ExecutionItem[] {
+  const domainItems = items.filter(
+    (item): item is BuiltinDomainExecutionItem =>
+      item.kind === "builtin_domain_node",
+  );
+  const customByAnchor = new Map<string, CustomExecutionItem[]>();
+  const tailCustomItems: CustomExecutionItem[] = [];
+  let pendingCustomItems: CustomExecutionItem[] = [];
+
+  for (const item of items) {
+    if (item.kind === "custom_invocation_node") {
+      pendingCustomItems.push(item);
+      continue;
+    }
+    if (
+      item.kind === "builtin_core_chain" &&
+      CANONICAL_CORE_CHAIN_ID_SET.has(item.chain_id)
+    ) {
+      if (pendingCustomItems.length > 0) {
+        const anchored = customByAnchor.get(item.chain_id) ?? [];
+        anchored.push(...pendingCustomItems);
+        customByAnchor.set(item.chain_id, anchored);
+        pendingCustomItems = [];
+      }
+    }
+  }
+  tailCustomItems.push(...pendingCustomItems);
+
+  const coreItems = CANONICAL_CORE_CHAIN_IDS.flatMap<ExecutionItem>((chainId) => [
+    ...(customByAnchor.get(chainId) ?? []),
+    {
+      kind: "builtin_core_chain",
+      chain_id: chainId,
+    },
+  ]);
+
+  return [...domainItems, ...coreItems, ...tailCustomItems];
+}
 
 export function buildNodeRef(domain: string, nodeId: string): string {
   return `${domain}.${nodeId}`;
@@ -123,7 +228,7 @@ export function buildDefaultExecutionList(
       kind: "custom_invocation_node",
       custom_node_id: node.custom_node_id,
     })),
-    ...CORE_CHAIN_IDS.map<ExecutionItem>((chainId) => ({
+    ...CANONICAL_CORE_CHAIN_IDS.map<ExecutionItem>((chainId) => ({
       kind: "builtin_core_chain",
       chain_id: chainId,
     })),
@@ -395,7 +500,9 @@ export function projectToRuntimeConfig(project: GuiProjectFile): RuntimeConfigFi
   return {
     version: 1,
     init_values: initValues,
-    ordered_execution_list: project.ordered_execution_list,
+    ordered_execution_list: normalizeOrderedExecutionListForRuntime(
+      project.ordered_execution_list,
+    ),
     custom_nodes: project.custom_nodes.map(runtimeCustomNode),
   };
 }

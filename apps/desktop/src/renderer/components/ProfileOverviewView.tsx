@@ -33,9 +33,20 @@ interface ResourceSlotRow {
 
 function anchorLabel(anchor?: BuiltinExecutionAnchor | null): string {
   if (!anchor) return "末尾";
-  if (anchor.kind === "builtin_core_chain") return anchor.chain_id;
+  if (anchor.kind === "builtin_core_chain") {
+    const node = CHAIN_CATALOG.nodes[anchor.chain_id];
+    return node?.displayName ?? `锚点缺失: ${anchor.chain_id}`;
+  }
   const node = CHAIN_CATALOG.nodes[anchor.node_id];
   return node?.displayName ?? `${anchor.domain}/${anchor.node_id}`;
+}
+
+function isMissingCoreAnchor(anchor?: BuiltinExecutionAnchor | null): boolean {
+  return (
+    !!anchor &&
+    anchor.kind === "builtin_core_chain" &&
+    !CHAIN_CATALOG.nodes[anchor.chain_id]
+  );
 }
 
 export function ProfileOverviewView({ profileId }: ProfileOverviewViewProps) {
@@ -216,27 +227,46 @@ export function ProfileOverviewView({ profileId }: ProfileOverviewViewProps) {
                   <th>节点</th>
                   <th>插入位置</th>
                   <th>Order</th>
+                  <th>操作</th>
                 </tr>
               </thead>
               <tbody>
-                {customUsages.map((usage: CustomNodeUsage, index: number) => (
-                  <tr
-                    key={`${usage.resource_instance_id}:${usage.node_id}:${index}`}
-                  >
-                    <td>{usage.enabled ? "活跃" : "停用"}</td>
-                    <td>
-                      <code>{usage.resource_instance_id}</code>
-                    </td>
-                    <td>
-                      <code>{usage.node_id}</code>
-                    </td>
-                    <td>{anchorLabel(usage.insert_before)}</td>
-                    <td>{usage.order}</td>
-                  </tr>
-                ))}
+                {customUsages.map((usage: CustomNodeUsage, index: number) => {
+                  const missingAnchor = isMissingCoreAnchor(usage.insert_before);
+                  return (
+                    <tr
+                      key={`${usage.resource_instance_id}:${usage.node_id}:${index}`}
+                    >
+                      <td>{usage.enabled ? "活跃" : "停用"}</td>
+                      <td>
+                        <code>{usage.resource_instance_id}</code>
+                      </td>
+                      <td>
+                        <code>{usage.node_id}</code>
+                      </td>
+                      <td>{anchorLabel(usage.insert_before)}</td>
+                      <td>{usage.order}</td>
+                      <td>
+                        {missingAnchor ? (
+                          <button
+                            type="button"
+                            className="chain-editor-action-btn"
+                            onClick={() =>
+                              void ca.promptMoveCustomUsage(profile.id, index)
+                            }
+                          >
+                            重选锚点
+                          </button>
+                        ) : (
+                          "-"
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
                 {customUsages.length === 0 && (
                   <tr>
-                    <td colSpan={5}>暂无自定义节点用法。</td>
+                    <td colSpan={6}>暂无自定义节点用法。</td>
                   </tr>
                 )}
               </tbody>

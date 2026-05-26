@@ -9,6 +9,7 @@ import type {
 } from "@tinder/nextstep";
 import { profileResourceBranchId } from "@tinder/nextstep";
 import { CHAIN_CATALOG } from "../help/chain-catalog.generated";
+import { isResourceBindableChainNode } from "../help/chainCatalogUi";
 
 /**
  * Validation + export model for `生成运行配置`.
@@ -313,7 +314,7 @@ export function buildRuntimeReport(
           id: `usage-unknown-anchor-${usage.resource_instance_id}-${usage.node_id}`,
           title: `自定义节点的链路锚点已不存在`,
           detail: `${usage.resource_instance_id}/${usage.node_id} → ${anchor.chain_id}`,
-          locator: `chain:${anchor.chain_id}`
+          locator: `usage:${usage.resource_instance_id}/${usage.node_id}`
         });
       }
     } else if (anchor && anchor.kind === "builtin_domain_node") {
@@ -340,6 +341,18 @@ export function buildRuntimeReport(
   info.push({
     id: "summary-chain",
     title: `内建核心链路 ${CHAIN_CATALOG.orderedNodes.length} 个节点`
+  });
+  info.push({
+    id: "t007-empty-handoff",
+    title: "T-007 空 handoff 视为已执行提交",
+    detail:
+      "`runtime.signal.parameterized_facts` 与 `runtime.signal.digitized_observables` 即使为空也代表对应节点已执行。"
+  });
+  info.push({
+    id: "t007-provenance",
+    title: "T-007 provenance 使用 source_observable_ids",
+    detail:
+      "digitized observable 下游写入 `source_observable_ids`，不得混入 `source_candidate_ids`。"
   });
 
   return { blocking, warning, info };
@@ -406,6 +419,15 @@ function validateResourceForExport(
         });
       }
       for (const [nodeId, candidateId] of effectiveEntries) {
+        if (!isResourceBindableChainNode(nodeId)) {
+          const catalogNode = CHAIN_CATALOG.nodes[nodeId];
+          blocking.push({
+            id: `builtin-only-effective-candidate-${resource.resource_instance_id}-${selectedVariantId}-${nodeId}`,
+            title: `标准节点绑定到了内建结构节点`,
+            detail: `资源「${resource.display_name}」分支「${variant.display_name}」选择了 ${catalogNode?.displayName ?? nodeId} (${nodeId})`,
+            locator: `resource:${resource.resource_instance_id}`
+          });
+        }
         const candidate = standardCandidateFor(resource, nodeId, candidateId);
         if (!candidate) {
           blocking.push({
@@ -458,11 +480,12 @@ export function buildRuntimeConfig(
   // Group usages by insert_before anchor key. The same grouping logic as the
   // sidebar projection so the exported order matches what the user sees.
   type KeyedUsage = { usage: CustomNodeUsage; anchorChainId: string | null };
+  const validChainIds = new Set(CHAIN_CATALOG.orderedNodes.map((n) => n.nodeId));
   const usagesByAnchor = new Map<string, KeyedUsage[]>();
   const tail: KeyedUsage[] = [];
   for (const usage of usages) {
     const a = usage.insert_before;
-    if (a && a.kind === "builtin_core_chain") {
+    if (a && a.kind === "builtin_core_chain" && validChainIds.has(a.chain_id)) {
       const list = usagesByAnchor.get(a.chain_id) ?? [];
       list.push({ usage, anchorChainId: a.chain_id });
       usagesByAnchor.set(a.chain_id, list);
@@ -506,6 +529,7 @@ export function buildRuntimeConfig(
       variant.effective_candidates ?? {}
     )) {
       if (!candidateId.trim()) continue;
+      if (!isResourceBindableChainNode(nodeId)) continue;
       const candidate = standardCandidateFor(resource, nodeId, candidateId);
       if (!candidate || candidate.status === "disabled") continue;
       standard_nodes.push({

@@ -5215,6 +5215,7 @@ kbd {
   border-radius: 12px;
   padding: 4px 10px;
   font-size: 12px;
+  overflow: hidden;
 }
 .canvas-custom.is-disabled {
   opacity: 0.55;
@@ -5225,6 +5226,9 @@ kbd {
 }
 .canvas-custom-label {
   color: var(--tc-fg-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .canvas-custom-branch {
   color: var(--tc-fg-muted);
@@ -5944,4 +5948,123 @@ kbd {
 .canvas-view-action-btn:disabled {
   opacity: 0.45;
   cursor: default;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Freeform Canvas (D-series) — @xyflow/react integration
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* CSS variables for canvas theming (D8) */
+:root {
+  --tc-canvas-bg:               #1e1e1e;
+  --tc-canvas-grid-color:       rgba(255,255,255,0.04);
+  --tc-canvas-cluster-bg:       rgba(255,255,255,0.025);
+  --tc-canvas-cluster-border:   var(--tc-border-soft);
+  --tc-canvas-node-bg:          var(--tc-bg-editor);
+  --tc-canvas-edge-color:       var(--tc-fg-muted);
+  --tc-canvas-selected:         var(--tc-accent, #007acc);
+  --tc-canvas-lens-far-opacity: 0.45;
+}
+
+/* Host element: fill its grid cell, give react-flow a sizing context */
+.rf-canvas-host {
+  position: relative;
+  overflow: hidden;
+  background: var(--tc-canvas-bg);
+  padding: 0;
+}
+
+/* Override react-flow defaults to match our dark theme */
+.rf-canvas-host .react-flow {
+  background: var(--tc-canvas-bg);
+}
+.rf-canvas-host .react-flow__node {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  font-size: inherit;
+  color: inherit;
+}
+.rf-canvas-host .react-flow__controls {
+  background: var(--tc-bg-sidebar);
+  border: 1px solid var(--tc-border-soft);
+  border-radius: 4px;
+  box-shadow: none;
+}
+.rf-canvas-host .react-flow__controls-button {
+  background: var(--tc-bg-sidebar);
+  border-bottom: 1px solid var(--tc-border-soft);
+  color: var(--tc-fg-muted);
+  fill: var(--tc-fg-muted);
+  width: 24px;
+  height: 24px;
+}
+.rf-canvas-host .react-flow__controls-button:hover {
+  background: var(--tc-bg-hover);
+  color: var(--tc-fg-strong);
+  fill: var(--tc-fg-strong);
+}
+.rf-canvas-host .react-flow__controls-button svg {
+  fill: currentColor;
+}
+.rf-canvas-host .react-flow__minimap {
+  background: var(--tc-canvas-bg);
+  border: 1px solid var(--tc-border-soft);
+  border-radius: 4px;
+}
+
+/* ─── Category group node — horizontal swimlane ────────────────── */
+.rf-category-group {
+  background: var(--tc-canvas-cluster-bg);
+  border: 1px solid var(--tc-canvas-cluster-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.rf-category-group-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--tc-canvas-cluster-border);
+  background: rgba(255,255,255,0.02);
+}
+.rf-category-group-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--tc-fg-strong);
+  white-space: nowrap;
+}
+.rf-category-group-count {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--tc-fg-muted);
+  white-space: nowrap;
+}
+.rf-category-group-body {
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+  padding: 12px;
+  align-items: flex-start;
+}
+
+/* Chain node column inside a horizontal cluster */
+.rf-slot {
+  width: 148px;
+  min-width: 0;
+  max-width: none;
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+.rf-slot .canvas-slot-header {
+  margin-bottom: 4px;
+}
+
+/* Custom card column */
+.rf-custom-card {
+  width: 148px;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  overflow: hidden;
 }

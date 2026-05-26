@@ -11,6 +11,11 @@ import type {
 } from "@tinder/nextstep";
 import { nextFreeIndex } from "@tinder/nextstep";
 import { CHAIN_CATALOG } from "../help/chain-catalog.generated";
+import {
+  chainNodeUiNotice,
+  chainNodeUiTags,
+  isResourceBindableChainNode
+} from "../help/chainCatalogUi";
 import { useCa } from "../state/ChainAssemblyContext";
 import { collectAllCustomActionIndexes } from "../state/chainAssemblyStorage";
 import { ContextMenu, useContextMenu } from "./ContextMenu";
@@ -90,6 +95,10 @@ export function StandardCapabilityTab({
   const catalogNameOf = useCallback((nodeId: string): string => {
     const entry = CHAIN_CATALOG.nodes[nodeId];
     return entry?.displayName ?? nodeId;
+  }, []);
+  const policyLabelOf = useCallback((nodeId: string): string | null => {
+    if (isResourceBindableChainNode(nodeId)) return null;
+    return chainNodeUiTags(nodeId)[0] ?? "内建结构节点";
   }, []);
   // Column-header filter popup + variant-management "more" menu. Both
   // use the shared `useContextMenu` pattern from elsewhere in the app.
@@ -270,7 +279,10 @@ export function StandardCapabilityTab({
 
   // ─── Candidate operations ──────────────────────────────────────────────
   const handleAddCandidate = useCallback(async () => {
-    const options = CHAIN_CATALOG.orderedNodes.map((n) => ({
+    const bindableNodes = CHAIN_CATALOG.orderedNodes.filter((n) =>
+      isResourceBindableChainNode(n.nodeId)
+    );
+    const options = bindableNodes.map((n) => ({
       id: n.nodeId,
       label: `${n.order}. ${n.displayName}`,
       hint: n.nodeId,
@@ -471,9 +483,19 @@ export function StandardCapabilityTab({
                     (c) => (c.candidate_id ?? "") === effective
                   );
                   const funcName = effectiveCand?.function_name?.trim() ?? "";
+                  const policyLabel = policyLabelOf(nodeId);
+                  const policyNotice = chainNodeUiNotice(nodeId);
                   return (
                     <tr key={nodeId}>
-                      <td>{catalogNameOf(nodeId)}</td>
+                      <td title={policyNotice}>
+                        {catalogNameOf(nodeId)}
+                        {policyLabel && (
+                          <>
+                            <br />
+                            <span className="sidebar-hint">{policyLabel}</span>
+                          </>
+                        )}
+                      </td>
                       <td>
                         <select
                           className="resource-editor-input"
@@ -617,7 +639,17 @@ export function StandardCapabilityTab({
                             }
                           />
                         </td>
-                        <td>{catalogNameOf(cand.node_id)}</td>
+                        <td title={chainNodeUiNotice(cand.node_id)}>
+                          {catalogNameOf(cand.node_id)}
+                          {policyLabelOf(cand.node_id) && (
+                            <>
+                              <br />
+                              <span className="sidebar-hint">
+                                {policyLabelOf(cand.node_id)}
+                              </span>
+                            </>
+                          )}
+                        </td>
                         <td>
                           <input
                             className="resource-editor-input"

@@ -8,6 +8,11 @@ import type {
   CanvasSlotNode
 } from "../state/canvasProjection";
 import { useCa } from "../state/ChainAssemblyContext";
+import {
+  chainNodeUiNotice,
+  chainNodeUiTags,
+  isResourceBindableChainNode
+} from "../help/chainCatalogUi";
 
 /**
  * Canvas-mode inspector panel (Phase 3).
@@ -440,6 +445,7 @@ function CandidateDropdown({
 }) {
   const ca = useCa();
   const { disk } = ca;
+  const isBindable = isResourceBindableChainNode(chainNodeId);
 
   // Resolve candidates declared by the covering branch's
   // compute_nodes filtered to this chain node. Without v2 family
@@ -477,6 +483,17 @@ function CandidateDropdown({
     if (!ref || ref.kind !== "standard") return undefined;
     return ref.overrides?.effective_candidates?.[chainNodeId];
   }, [profile, resourceInstanceId, chainNodeId]);
+
+  if (!isBindable) {
+    return (
+      <span
+        className="canvas-inspector-candidate-na"
+        title={chainNodeUiNotice(chainNodeId)}
+      >
+        {chainNodeUiTags(chainNodeId)[0] ?? "内建结构节点"}
+      </span>
+    );
+  }
 
   if (!data) {
     return (
@@ -685,4 +702,3 @@ function findSlotByChainNodeId(
   }
   return null;
 }
-
