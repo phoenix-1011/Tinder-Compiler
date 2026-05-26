@@ -381,12 +381,14 @@ export function CanvasView() {
     [setState]
   );
 
-  // Custom drag is no longer possible — customs are DOM children
-  // inside clusters. The prop is kept in CanvasFreeformBodyProps for
-  // forward-compat; this no-op satisfies the type.
+  // Phase 5: persist floating custom node position. Called when a
+  // library item is dropped far from any cluster (initial position)
+  // or when a floating custom is dragged to a new position.
   const onCustomDragEnd = useCallback(
-    (_arrayIndex: number, _position: { x: number; y: number }) => {},
-    []
+    (arrayIndex: number, position: { x: number; y: number }) => {
+      setState({ customPositions: { [arrayIndex]: position } });
+    },
+    [setState]
   );
 
   const onViewportChange = useCallback(
@@ -398,14 +400,21 @@ export function CanvasView() {
 
   // A3: prune stale position keys from canvas.json when the
   // projection changes (e.g. a cluster slug is removed from the
-  // override table). Uses `pruneStalePositions` which does a
-  // full-replace (not additive merge) so deleted keys don't reappear.
-  // Custom positions are always empty — customs are DOM children
-  // inside clusters now, not free-positioned react-flow nodes.
+  // override table, or a custom usage is deleted). Uses
+  // `pruneStalePositions` which does a full-replace (not additive
+  // merge) so deleted keys don't reappear.
   useEffect(() => {
     if (!projection) return;
     const validSlugs = new Set(projection.groups.map((g) => g.docSlug));
-    pruneStalePositions(validSlugs, new Set());
+    // Phase 5: collect valid custom arrayIndices so floating custom
+    // positions survive pruning.
+    const validCustomIdxs = new Set<number>();
+    for (const g of projection.groups) {
+      for (const n of g.allNodes) {
+        if (n.kind === "custom") validCustomIdxs.add(n.arrayIndex);
+      }
+    }
+    pruneStalePositions(validSlugs, validCustomIdxs);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projection]);
 
