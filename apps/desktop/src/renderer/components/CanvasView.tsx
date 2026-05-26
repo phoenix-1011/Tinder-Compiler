@@ -227,14 +227,14 @@ export function CanvasView() {
         return;
       }
       const mod = event.ctrlKey || event.metaKey;
-      // Ctrl+Shift+F — fit all nodes into view
-      if (mod && event.shiftKey && event.key === "F") {
+      // Ctrl+\ — fit all nodes into view
+      if (mod && event.key === "\\") {
         event.preventDefault();
         freeformRef.current?.fitAll();
         return;
       }
-      // Ctrl+Shift+S — fit selected node / cluster into view
-      if (mod && event.shiftKey && event.key === "S") {
+      // Ctrl+Shift+\ — fit selected node / cluster into view
+      if (mod && event.shiftKey && event.key === "|") {
         event.preventDefault();
         freeformRef.current?.fitSelection();
         return;
@@ -527,7 +527,7 @@ export function CanvasView() {
             type="button"
             className="canvas-view-icon-btn"
             onClick={() => freeformRef.current?.fitAll()}
-            title="适应全部 (Ctrl+Shift+F)"
+            title="适应全部 (Ctrl+\)"
             aria-label="适应全部"
           >
             <span className="codicon codicon-screen-full" aria-hidden="true" />
@@ -536,7 +536,7 @@ export function CanvasView() {
             type="button"
             className="canvas-view-icon-btn"
             onClick={() => freeformRef.current?.fitSelection()}
-            title="适应选中 (Ctrl+Shift+S)"
+            title="适应选中 (Ctrl+Shift+\)"
             aria-label="适应选中"
           >
             <span className="codicon codicon-target" aria-hidden="true" />

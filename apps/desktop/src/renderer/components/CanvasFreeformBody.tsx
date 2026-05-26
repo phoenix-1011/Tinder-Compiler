@@ -971,6 +971,70 @@ function CanvasFreeformBodyInner({
   // react-flow node re-computation.
   const overlapTimerRef = useRef<number | null>(null);
 
+  // Phase 6: imperative handle MUST be called before the early return so
+  // hook call order is stable regardless of `projection` being null.
+  useImperativeHandle(
+    freeformRef,
+    () => ({
+      fitAll() {
+        rf.fitView({ padding: 0.12, duration: 300 });
+      },
+      fitSelection() {
+        if (!selection || !projection) {
+          // No selection or no data — fall back to fit-all
+          rf.fitView({ padding: 0.12, duration: 300 });
+          return;
+        }
+        // Resolve which react-flow node(s) to focus
+        const nodeIds: string[] = [];
+        // Identify floating customs for the current state
+        const floatingIdxs = new Set<number>();
+        for (const group of projection.groups) {
+          for (const n of group.allNodes) {
+            if (n.kind === "custom" && n.anchorChainId === null && canvasState.customPositions[n.arrayIndex]) {
+              floatingIdxs.add(n.arrayIndex);
+            }
+          }
+        }
+        if (selection.kind === "custom" && floatingIdxs.has(selection.usageArrayIndex)) {
+          nodeIds.push(`floating:${selection.usageArrayIndex}`);
+        } else {
+          // Find the cluster that contains the selection
+          for (const group of projection.groups) {
+            for (const node of group.allNodes) {
+              if (
+                (selection.kind === "slot" || selection.kind === "coverage") &&
+                node.kind === "slot" && node.nodeId === selection.chainNodeId
+              ) {
+                nodeIds.push(`group:${group.docSlug}`);
+              }
+              if (
+                selection.kind === "custom" &&
+                node.kind === "custom" &&
+                node.arrayIndex === selection.usageArrayIndex
+              ) {
+                nodeIds.push(`group:${group.docSlug}`);
+              }
+            }
+          }
+        }
+        if (nodeIds.length === 0) {
+          rf.fitView({ padding: 0.12, duration: 300 });
+          return;
+        }
+        rf.fitView({ nodes: nodeIds.map((id) => ({ id })), padding: 0.25, duration: 300 });
+      }
+    }),
+    [rf, selection, projection, canvasState.customPositions]
+  );
+
+  // Cleanup overlap flash timer on unmount
+  useEffect(() => {
+    return () => {
+      if (overlapTimerRef.current != null) window.clearTimeout(overlapTimerRef.current);
+    };
+  }, []);
+
   // Phase 5 bug-fix: use a ref instead of useState for the drop target
   // to avoid triggering rfNodes re-computation (which caused screen flash).
   // Highlight/insertion-line are toggled via direct DOM manipulation.
@@ -1017,53 +1081,6 @@ function CanvasFreeformBodyInner({
     }
     return set;
   }, [projection, canvasState.customPositions]);
-
-  // ─── Phase 6: imperative handle for fit-all / fit-selection ──────
-  useImperativeHandle(
-    freeformRef,
-    () => ({
-      fitAll() {
-        rf.fitView({ padding: 0.12, duration: 300 });
-      },
-      fitSelection() {
-        if (!selection || !projection) {
-          // No selection — fall back to fit-all
-          rf.fitView({ padding: 0.12, duration: 300 });
-          return;
-        }
-        // Resolve which react-flow node(s) to focus
-        const nodeIds: string[] = [];
-        if (selection.kind === "custom" && floatingCustomIdxs.has(selection.usageArrayIndex)) {
-          nodeIds.push(`floating:${selection.usageArrayIndex}`);
-        } else {
-          // Find the cluster that contains the selection
-          for (const group of projection.groups) {
-            for (const node of group.allNodes) {
-              if (
-                (selection.kind === "slot" || selection.kind === "coverage") &&
-                node.kind === "slot" && node.nodeId === selection.chainNodeId
-              ) {
-                nodeIds.push(`group:${group.docSlug}`);
-              }
-              if (
-                selection.kind === "custom" &&
-                node.kind === "custom" &&
-                node.arrayIndex === selection.usageArrayIndex
-              ) {
-                nodeIds.push(`group:${group.docSlug}`);
-              }
-            }
-          }
-        }
-        if (nodeIds.length === 0) {
-          rf.fitView({ padding: 0.12, duration: 300 });
-          return;
-        }
-        rf.fitView({ nodes: nodeIds.map((id) => ({ id })), padding: 0.25, duration: 300 });
-      }
-    }),
-    [rf, selection, projection, floatingCustomIdxs]
-  );
 
   const rfNodes = useMemo(
     () =>
@@ -1231,7 +1248,7 @@ function CanvasFreeformBodyInner({
           );
           // DOM flash — add/remove .is-overlap-flash on the cluster element
           const flashEl = document.querySelector(
-            `[data-id="${node.id}"] .rf-category-group`
+            `[data-id="${CSS.escape(node.id)}"] .rf-category-group`
           ) as HTMLElement | null;
           if (flashEl) {
             flashEl.classList.add("is-overlap-flash");
