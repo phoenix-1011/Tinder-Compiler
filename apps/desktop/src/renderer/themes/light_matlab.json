@@ -1,6 +1,6 @@
 {
 	"$schema": "vscode://schemas/color-theme",
-	"name": "Light MATLAB",
+	"name": "Light Warm",
 	"include": "./light_plus.json",
 	"colors": {
 		"activityBar.activeBorder": "#C79100",

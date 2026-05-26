@@ -55,7 +55,7 @@ export const THEMES: ThemeDefinition[] = [
   },
   {
     id: "tinder-light-matlab",
-    label: "Light MATLAB",
+    label: "Light Warm",
     variant: "light",
     base: "vs",
     sources: [lightVs as RawTheme, lightPlus as RawTheme, lightMatlab as RawTheme]
