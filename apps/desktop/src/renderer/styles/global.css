@@ -21,6 +21,7 @@
      visually lift off the page. */
   --tc-bg-card: #2a2a2c;
   --tc-bg-button: #007acc;
+  --tc-button-fg: #ffffff;
   --tc-bg-toggle: rgba(0, 122, 204, 0.45);
   --tc-bg-overlay: rgba(0, 0, 0, 0.5);
 
@@ -146,7 +147,7 @@ select option {
 
 .primary-button {
   background: var(--tc-accent);
-  color: var(--tc-fg-strong);
+  color: var(--tc-button-fg);
   padding: 6px 14px;
   border-radius: 2px;
   font-size: 13px;
@@ -244,7 +245,9 @@ select option {
     calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw) + 8px)
   );
   -webkit-app-region: drag;
-  border-bottom: 1px solid var(--tc-border);
+  /* No border-bottom — the OS-drawn titleBarOverlay region cannot
+     render a matching border, creating a visible gap at the right
+     edge. Removing the line entirely keeps the top bar clean. */
   gap: 16px;
   font-size: 12px;
   color: var(--tc-fg-default);
@@ -308,7 +311,7 @@ select option {
 }
 .titlebar-toggle-btn.is-active {
   background: var(--tc-bg-button);
-  color: var(--tc-fg-strong);
+  color: var(--tc-button-fg);
 }
 .titlebar-toggle-btn .codicon {
   font-size: 14px;
@@ -851,7 +854,7 @@ select option {
 .ca-dialog-btn.is-primary {
   background: var(--tc-accent);
   border-color: var(--tc-accent);
-  color: var(--tc-fg-strong);
+  color: var(--tc-button-fg);
 }
 .ca-dialog-btn.is-primary:hover {
   background: var(--tc-accent-hover);
@@ -859,7 +862,7 @@ select option {
 .ca-dialog-btn.is-destructive {
   background: #c4413a;
   border-color: #c4413a;
-  color: var(--tc-fg-strong);
+  color: var(--tc-button-fg);
 }
 .ca-dialog-btn.is-destructive:hover {
   background: #d94a42;
@@ -912,7 +915,7 @@ select option {
 .chain-editor-action-btn.is-primary {
   background: var(--tc-bg-button);
   border-color: var(--tc-bg-button);
-  color: var(--tc-fg-strong);
+  color: var(--tc-button-fg);
 }
 .chain-editor-action-btn.is-primary:hover:not(:disabled) {
   background: var(--tc-accent-hover, #1177bb);

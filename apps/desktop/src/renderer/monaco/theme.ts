@@ -163,6 +163,7 @@ const COLOR_VAR_MAP: Record<string, string[]> = {
   // Accent / focus
   focusBorder: ["--tc-accent"],
   "button.background": ["--tc-bg-button", "--tc-accent"],
+  "button.foreground": ["--tc-button-fg"],
   "button.hoverBackground": ["--tc-accent-hover"],
   "textLink.foreground": ["--tc-fg-link"],
   "descriptionForeground": ["--tc-fg-muted"],
