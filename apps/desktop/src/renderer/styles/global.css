@@ -6058,6 +6058,9 @@ kbd {
   fill: currentColor;
 }
 /* ── Minimap toggle button — visually part of the control strip ── */
+/* Global * { box-sizing: border-box } is active.
+   Controls container: 24px button (border: none) + 1px container-border
+   each side = 26px outer.  Toggle must match 26×26 outer (border-box). */
 .rf-minimap-toggle {
   display: flex;
   align-items: center;
