@@ -5985,15 +5985,6 @@ kbd {
   padding: 0;
   font-size: inherit;
   color: inherit;
-  /* react-flow sets pointer-events: none on nodes with both
-     selectable + draggable = false (our child nodes). Force
-     pointer-events so card-level click handlers still fire. */
-  pointer-events: all !important;
-}
-/* Suppress react-flow's default selection outline — we manage
-   selection visually at the card level, not the node wrapper. */
-.rf-canvas-host .react-flow__node.selected {
-  box-shadow: none;
 }
 .rf-canvas-host .react-flow__controls {
   background: var(--tc-bg-sidebar);

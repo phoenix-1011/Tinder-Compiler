@@ -20,7 +20,6 @@ import {
   canvasNodeIdentity,
   type CanvasCustomNode,
   type CanvasGroup,
-  type CanvasNode,
   type CanvasProjection,
   type CanvasSlotNode
 } from "../state/canvasProjection";
@@ -623,7 +622,7 @@ function computeCanvasEdges(
     const color = rgbaStr(142, 142, 142, opacity);
 
     edges.push({
-      id: `e:${i}`,
+      id: `e:${curr.rfNodeId}→${next.rfNodeId}`,
       source: curr.rfNodeId,
       sourceHandle: "src",
       target: next.rfNodeId,
@@ -837,6 +836,11 @@ function CanvasFreeformBodyInner({
     onSelectionChange(null);
   }, [onSelectionChange]);
 
+  const handleMove = useCallback(
+    (_event: unknown, viewport: Viewport) => onViewportChange(viewport),
+    [onViewportChange]
+  );
+
   return (
     <ReactFlow
       nodes={nodes}
@@ -845,7 +849,7 @@ function CanvasFreeformBodyInner({
       onNodesChange={onNodesChange}
       onNodeDragStart={handleNodeDragStart}
       onNodeDragStop={handleNodeDragStop}
-      onMove={(_event, viewport) => onViewportChange(viewport)}
+      onMove={handleMove}
       onPaneClick={onPaneClick}
       defaultViewport={defaultViewport}
       fitView={false}
