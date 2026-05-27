@@ -72,9 +72,9 @@ const CLUSTER_PALETTE: Record<string, string> = {
   "20-device-chain":             "#7280B8",  // cool slate
   "30-signal-environment-chain": "#8570C7",  // blue-violet
 
-  /* ── Phase: 对抗 (purple → magenta) ──────────────────────────── */
-  "31-softkill":                 "#A855F7",  // vivid purple
-  "32-signature":                "#D246B0",  // orchid-magenta
+  /* ── Phase: 对抗 (rose — purple reserved for custom nodes) ──── */
+  "31-softkill":                 "#E05577",  // rose-red (active jamming)
+  "32-signature":                "#C74E6C",  // dark rose (passive signature)
 
   /* ── Phase: 感知 (teal) ──────────────────────────────────────── */
   "40-sense-chain":              "#14B8A6",  // turquoise
@@ -93,8 +93,8 @@ const CLUSTER_PALETTE: Record<string, string> = {
   "70-maintenance-chain":        "#2BA88E",  // jade
   "75-communication-chain":      "#3B8FCA",  // cerulean
 
-  /* ── Special ─────────────────────────────────────────────────── */
-  "custom-only":                 "#858585",  // neutral gray
+  /* ── Special — purple = custom node identity ─────────────────── */
+  "custom-only":                 "#A855F7",  // vivid purple (matches custom-node UI)
 };
 
 /** Fall back for any unknown slug — should not happen in practice. */
