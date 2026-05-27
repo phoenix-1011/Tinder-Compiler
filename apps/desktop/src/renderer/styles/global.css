@@ -6016,25 +6016,6 @@ kbd {
   font-size: inherit;
   color: inherit;
 }
-/* ── Bottom-left control strip: wraps Controls + minimap toggle ── */
-.rf-controls-panel {
-  /* The Panel already positions itself at bottom-left; we just stack
-     the Controls block and the toggle button vertically. */
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
-  /* Override ReactFlow's default Panel padding */
-  padding: 0 !important;
-  margin: 10px !important;
-}
-/* When Controls lives inside our Panel it loses the built-in
-   positioning — reset to static so it stacks normally. */
-.rf-controls-panel .react-flow__controls {
-  position: static;
-  /* strip RF's default transform / inset overrides */
-  transform: none;
-}
 .rf-canvas-host .react-flow__controls {
   background: var(--tc-bg-sidebar);
   border: 1px solid var(--tc-border-soft);
@@ -6057,32 +6038,12 @@ kbd {
 .rf-canvas-host .react-flow__controls-button svg {
   fill: currentColor;
 }
-/* ── Minimap toggle button — visually part of the control strip ── */
-/* Global * { box-sizing: border-box } is active.
-   Controls container: 24px button (border: none) + 1px container-border
-   each side = 26px outer.  Toggle must match 26×26 outer (border-box). */
-.rf-minimap-toggle {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  background: var(--tc-bg-sidebar);
-  border: 1px solid var(--tc-border-soft);
-  border-radius: 4px;
-  color: var(--tc-fg-muted);
-  cursor: pointer;
-  padding: 0;
-  font-size: 14px;
-  line-height: 1;
-  transition: background 0.1s, color 0.1s;
-}
-.rf-minimap-toggle:hover {
-  background: var(--tc-bg-hover);
-  color: var(--tc-fg-strong);
-}
+/* ── Minimap toggle — lives inside <Controls> as a child button ── */
+/* Sizing, bg, border all inherited from .react-flow__controls-button.
+   We only add the active-state accent highlight here. */
 .rf-minimap-toggle[aria-pressed="true"] {
   color: var(--tc-accent, #007acc);
+  fill: var(--tc-accent, #007acc);
 }
 .rf-canvas-host .react-flow__minimap {
   background: var(--tc-canvas-bg);
@@ -6325,17 +6286,6 @@ kbd {
   background: #f2f2f2;
   color: #1f1f1f;
   fill: #1f1f1f;
-}
-
-/* ── minimap toggle — light background ────────────────────────── */
-:root[data-theme-variant="light"] .rf-minimap-toggle {
-  background: #ffffff;
-  border-color: var(--tc-border-soft, #e5e5e5);
-  color: #616161;
-}
-:root[data-theme-variant="light"] .rf-minimap-toggle:hover {
-  background: #f2f2f2;
-  color: #1f1f1f;
 }
 
 /* ── react-flow minimap — light background ─────────────────────── */

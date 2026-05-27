@@ -4,7 +4,6 @@ import {
   Background,
   Controls,
   MiniMap,
-  Panel,
   Handle,
   Position,
   MarkerType,
@@ -1521,12 +1520,12 @@ function CanvasFreeformBodyInner({
         size={1}
         color="var(--tc-canvas-grid-color, rgba(255,255,255,0.04))"
       />
-      {/* ── Bottom-left control strip: zoom ± fit + minimap toggle ── */}
-      <Panel position="bottom-left" className="rf-controls-panel">
-        <Controls showInteractive={false} aria-label="画布缩放控件" />
+      <Controls showInteractive={false} aria-label="画布缩放控件">
+        {/* Minimap toggle — rendered inside Controls so it shares the
+            same container border / width, no manual alignment needed. */}
         <button
           type="button"
-          className="rf-minimap-toggle"
+          className="react-flow__controls-button rf-minimap-toggle"
           onClick={() => setMinimapVisible((v) => !v)}
           title={minimapVisible ? "隐藏小地图" : "显示小地图"}
           aria-label={minimapVisible ? "隐藏小地图" : "显示小地图"}
@@ -1534,7 +1533,7 @@ function CanvasFreeformBodyInner({
         >
           <span className="codicon codicon-map" aria-hidden="true" />
         </button>
-      </Panel>
+      </Controls>
       {minimapVisible && (
         <MiniMap
           pannable
