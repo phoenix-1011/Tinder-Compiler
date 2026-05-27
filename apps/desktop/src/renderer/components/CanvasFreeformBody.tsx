@@ -58,6 +58,52 @@ const CLUSTER_GAP = 48;
  */
 const SNAP_THRESHOLD_PX = 80;
 
+// ──────────────────────────────────────────────────────────────────
+// Cluster color palette — deterministic, progression-ordered.
+//
+// Hue arc mirrors the OODA kill-chain: cold blues (infrastructure) →
+// purple (electronic warfare) → teal (perception) → amber (decision)
+// → orange-red (action/strike) → cool return (sustainment).
+// ──────────────────────────────────────────────────────────────────
+
+const CLUSTER_PALETTE: Record<string, string> = {
+  /* ── Phase: 基础 / 环境 (cold blues) ──────────────────────────── */
+  "10-platform-chain":           "#5B93D5",  // steel blue
+  "20-device-chain":             "#7280B8",  // cool slate
+  "30-signal-environment-chain": "#8570C7",  // blue-violet
+
+  /* ── Phase: 对抗 (purple → magenta) ──────────────────────────── */
+  "31-softkill":                 "#A855F7",  // vivid purple
+  "32-signature":                "#D246B0",  // orchid-magenta
+
+  /* ── Phase: 感知 (teal) ──────────────────────────────────────── */
+  "40-sense-chain":              "#14B8A6",  // turquoise
+
+  /* ── Phase: 决策 / 控制 (amber) ──────────────────────────────── */
+  "45-control-chain":            "#CA9B08",  // dark gold
+  "50-navigation-chain":         "#E8B830",  // bright gold
+
+  /* ── Phase: 行动 (orange → red) ──────────────────────────────── */
+  "60-target-action-chain":      "#E87A3A",  // tangerine
+  "61-cooperation":              "#D99050",  // sandy
+  "62-inventory":                "#C46A20",  // burnt orange
+  "65-strike-chain":             "#DC4040",  // crimson
+
+  /* ── Phase: 保障 (cool return) ───────────────────────────────── */
+  "70-maintenance-chain":        "#2BA88E",  // jade
+  "75-communication-chain":      "#3B8FCA",  // cerulean
+
+  /* ── Special ─────────────────────────────────────────────────── */
+  "custom-only":                 "#858585",  // neutral gray
+};
+
+/** Fall back for any unknown slug — should not happen in practice. */
+const PALETTE_FALLBACK = "#858585";
+
+function clusterColor(slug: string): string {
+  return CLUSTER_PALETTE[slug] ?? PALETTE_FALLBACK;
+}
+
 /** Auto-pan: distance (screen px) from viewport edge to start panning. */
 const AUTOPAN_EDGE_PX = 40;
 /** Auto-pan: viewport translation speed per rAF tick (screen px). */
@@ -109,6 +155,8 @@ export interface CategoryGroupData {
   onOpenFullEditor: OpenFullEditorFn;
   onCardContextMenu: (e: React.MouseEvent, items: ContextMenuItem[]) => void;
   profileId: string;
+  /** Deterministic palette color for this cluster (hex). */
+  accentColor: string;
 }
 
 type OpenFullEditorFn = (target: {
@@ -122,9 +170,14 @@ type OpenFullEditorFn = (target: {
 // ──────────────────────────────────────────────────────────────────
 
 function CategoryGroupNodeComponent({ data }: { data: CategoryGroupData }) {
-  const { group, selection, lensTokens, onSelectionChange, onOpenFullEditor, onCardContextMenu, profileId } = data;
+  const { group, selection, lensTokens, onSelectionChange, onOpenFullEditor, onCardContextMenu, profileId, accentColor } = data;
   return (
-    <div className="rf-category-group" role="group" aria-label={`簇: ${group.docTitle}`}>
+    <div
+      className="rf-category-group"
+      role="group"
+      aria-label={`簇: ${group.docTitle}`}
+      style={{ borderLeftColor: accentColor }}
+    >
       <Handle
         type="target"
         position={Position.Left}
@@ -880,7 +933,8 @@ function projectionToNodes(
         onSelectionChange,
         onOpenFullEditor,
         onCardContextMenu,
-        profileId
+        profileId,
+        accentColor: clusterColor(group.docSlug)
       } satisfies CategoryGroupData,
       draggable: true,
       selectable: false,
@@ -1084,6 +1138,28 @@ function CanvasFreeformBodyInner({
     }
     return set;
   }, [projection, canvasState.customPositions]);
+
+  // Precompute the RF node ID that contains the current selection
+  // (for minimap stroke highlight — avoids casting n.data inside the callback).
+  const selectedRfNodeId = useMemo(() => {
+    if (!selection) return null;
+    if (selection.kind === "custom" && floatingCustomIdxs.has(selection.usageArrayIndex)) {
+      return `floating:${selection.usageArrayIndex}`;
+    }
+    for (const group of projection.groups) {
+      for (const node of group.allNodes) {
+        if (
+          (selection.kind === "slot" || selection.kind === "coverage") &&
+          node.kind === "slot" && node.nodeId === selection.chainNodeId
+        ) return `group:${group.docSlug}`;
+        if (
+          selection.kind === "custom" &&
+          node.kind === "custom" && node.arrayIndex === selection.usageArrayIndex
+        ) return `group:${group.docSlug}`;
+      }
+    }
+    return null;
+  }, [selection, projection, floatingCustomIdxs]);
 
   const rfNodes = useMemo(
     () =>
@@ -1540,11 +1616,17 @@ function CanvasFreeformBodyInner({
           zoomable
           style={{ background: "var(--tc-canvas-bg, #1e1e1e)" }}
           maskColor="rgba(0,0,0,0.6)"
-          nodeColor={(n) =>
-            n.id.startsWith("floating:")
-              ? "var(--tc-accent, #007acc)"
-              : "var(--tc-surface-strong, rgba(255,255,255,0.18))"
-          }
+          nodeColor={(n) => {
+            if (n.id.startsWith("floating:")) return "var(--tc-accent, #007acc)";
+            const slug = n.id.replace(/^group:/, "");
+            return clusterColor(slug);
+          }}
+          nodeStrokeColor={(n) => {
+            if (!selection) return "transparent";
+            // Precompute: which RF node ID contains the selection?
+            return n.id === selectedRfNodeId ? clusterColor(n.id.replace(/^group:/, "")) : "transparent";
+          }}
+          nodeStrokeWidth={3}
           aria-label="画布小地图"
         />
       )}

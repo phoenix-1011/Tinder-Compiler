@@ -6055,6 +6055,8 @@ kbd {
 .rf-category-group {
   background: var(--tc-canvas-cluster-bg);
   border: 1px solid var(--tc-canvas-cluster-border);
+  /* Left accent stripe — color is set inline from CLUSTER_PALETTE */
+  border-left: 3px solid var(--tc-canvas-cluster-border);
   border-radius: 6px;
   overflow: hidden;
 }
@@ -6162,8 +6164,18 @@ kbd {
 /* Brief red flash when a cluster drag is rejected due to overlap.
    Toggled via direct DOM class manipulation from handleNodeDragStop. */
 @keyframes overlap-flash {
-  0%   { border-color: #ef4444; box-shadow: 0 0 0 2px #ef4444, 0 0 16px rgba(239, 68, 68, 0.4); }
-  100% { border-color: var(--tc-canvas-cluster-border); box-shadow: none; }
+  0%   {
+    border-top-color: #ef4444;
+    border-right-color: #ef4444;
+    border-bottom-color: #ef4444;
+    box-shadow: 0 0 0 2px #ef4444, 0 0 16px rgba(239, 68, 68, 0.4);
+  }
+  100% {
+    border-top-color: var(--tc-canvas-cluster-border);
+    border-right-color: var(--tc-canvas-cluster-border);
+    border-bottom-color: var(--tc-canvas-cluster-border);
+    box-shadow: none;
+  }
 }
 .rf-category-group.is-overlap-flash {
   animation: overlap-flash 0.6s ease-out forwards;
