@@ -1152,11 +1152,11 @@ function CanvasFreeformBodyInner({
           rf.fitView({ padding: 0.12, duration: 300 });
           return;
         }
-        rf.fitView({ nodes: nodeIds.map((id) => ({ id })), padding: 0.25, duration: 300 });
+        rf.fitView({ nodes: nodeIds.map((id) => ({ id })), padding: 0.08, duration: 300 });
       },
       fitCluster(slug: string) {
         const rfId = `group:${slug}`;
-        rf.fitView({ nodes: [{ id: rfId }], padding: 0.2, duration: 300 });
+        rf.fitView({ nodes: [{ id: rfId }], padding: 0.05, duration: 300 });
       }
     }),
     [rf, selection, projection, canvasState.customPositions]
@@ -1709,7 +1709,7 @@ function CanvasFreeformBodyInner({
             const slug = node.id.startsWith("group:")
               ? node.id.slice("group:".length)
               : null;
-            if (slug) rf.fitView({ nodes: [{ id: node.id }], padding: 0.2, duration: 300 });
+            if (slug) rf.fitView({ nodes: [{ id: node.id }], padding: 0.05, duration: 300 });
           }}
           aria-label="画布小地图"
         />
