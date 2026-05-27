@@ -294,7 +294,7 @@ export function CanvasView() {
   );
 
   const tinderDir = disk?.paths.tinderDir ?? null;
-  const { state, setState, pruneStalePositions, loaded } = useCanvasPersistedState(
+  const { state, setState, pruneStalePositions, resetClusterPositions, loaded } = useCanvasPersistedState(
     tinderDir,
     profile?.id ?? null
   );
@@ -665,6 +665,15 @@ export function CanvasView() {
           >
             <span className="codicon codicon-compass" aria-hidden="true" />
           </button>
+          <button
+            type="button"
+            className="canvas-view-icon-btn"
+            onClick={() => freeformRef.current?.resetLayout()}
+            title="恢复默认布局"
+            aria-label="恢复默认布局"
+          >
+            <span className="codicon codicon-layout" aria-hidden="true" />
+          </button>
 
           <button
             type="button"
@@ -722,6 +731,7 @@ export function CanvasView() {
               onViewportChange={onViewportChange}
               onClusterDragEnd={onClusterDragEnd}
               onCustomDragEnd={onCustomDragEnd}
+              onResetClusterLayout={resetClusterPositions}
               freeformRef={freeformRef}
             />
           )}

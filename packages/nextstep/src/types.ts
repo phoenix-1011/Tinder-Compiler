@@ -196,6 +196,12 @@ export interface CustomNodeUsage {
    * be inserted before. `null` means append after the last built-in item.
    */
   insert_before?: BuiltinExecutionAnchor | null;
+  /**
+   * When `true`, the custom node executes AFTER the anchor specified by
+   * `insert_before` instead of before it. This allows placing a custom
+   * node at the very end of a cluster on the freeform canvas.
+   */
+  insert_after_anchor?: boolean;
   /** Sort key among custom usages sharing the same anchor. */
   order: number;
 }

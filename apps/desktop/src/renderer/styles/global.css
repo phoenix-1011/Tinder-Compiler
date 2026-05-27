@@ -6190,6 +6190,32 @@ kbd {
   padding: 0;
   pointer-events: none;
 }
+/* Pin cluster handles at header center (17px) so edges stay
+   perfectly horizontal regardless of differing cluster heights. */
+.react-flow__node-categoryGroup > .rf-category-group > .react-flow__handle {
+  top: 17px !important;
+}
+/* Sub-section handles override left positioning via inline style;
+   ensure they are also pinned vertically at header center. */
+.react-flow__node-categoryGroup > .rf-category-group > .react-flow__handle.rf-sub-handle {
+  position: absolute !important;
+  top: 17px !important;
+  right: auto !important;
+}
+
+/* ─── Phase 6: execution-order sub-section divider ───────────── */
+/* Vertical dashed line rendered between sub-sections within a
+   cluster to indicate that execution order is non-contiguous
+   (other clusters' nodes execute in between). */
+.rf-sub-divider {
+  align-self: stretch;
+  width: 0;
+  min-width: 0;
+  border-left: 1.5px dashed rgba(142, 142, 142, 0.45);
+  margin: 0 2px;
+  pointer-events: none;
+  flex-shrink: 0;
+}
 
 /* ─── Phase 3: cluster-to-cluster edges ──────────────────────── */
 .rf-canvas-host .react-flow__edge-path {

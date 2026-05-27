@@ -317,6 +317,11 @@ export function useCanvasPersistedState(
     validClusterSlugs: Set<string>,
     validCustomIdxs: Set<number>
   ) => void;
+  /**
+   * Clear all saved cluster positions, reverting to the computed
+   * default layout. Custom node positions are preserved.
+   */
+  resetClusterPositions: () => void;
   loaded: boolean;
 } {
   const [state, _setState] = useState<CanvasPerProfileState>(
@@ -499,5 +504,26 @@ export function useCanvasPersistedState(
     [tinderDir, profileId, flushPending]
   );
 
-  return { state, setState, pruneStalePositions, loaded };
+  const resetClusterPositions = useCallback(() => {
+    _setState((prev) => {
+      if (Object.keys(prev.clusterPositions).length === 0) return prev;
+      const merged: CanvasPerProfileState = {
+        ...prev,
+        clusterPositions: {}
+      };
+      if (tinderDir && profileId) {
+        pendingWriteRef.current = { tinderDir, profileId, state: merged };
+        if (writeTimerRef.current != null) {
+          window.clearTimeout(writeTimerRef.current);
+        }
+        writeTimerRef.current = window.setTimeout(() => {
+          writeTimerRef.current = null;
+          void flushPending();
+        }, DEBOUNCE_MS);
+      }
+      return merged;
+    });
+  }, [tinderDir, profileId, flushPending]);
+
+  return { state, setState, pruneStalePositions, resetClusterPositions, loaded };
 }

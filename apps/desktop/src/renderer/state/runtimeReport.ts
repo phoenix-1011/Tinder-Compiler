@@ -479,28 +479,35 @@ export function buildRuntimeConfig(
 
   // Group usages by insert_before anchor key. The same grouping logic as the
   // sidebar projection so the exported order matches what the user sees.
+  // Usages with `insert_after_anchor` are placed AFTER their chain node.
   type KeyedUsage = { usage: CustomNodeUsage; anchorChainId: string | null };
   const validChainIds = new Set(CHAIN_CATALOG.orderedNodes.map((n) => n.nodeId));
-  const usagesByAnchor = new Map<string, KeyedUsage[]>();
+  const beforeByAnchor = new Map<string, KeyedUsage[]>();
+  const afterByAnchor = new Map<string, KeyedUsage[]>();
   const tail: KeyedUsage[] = [];
   for (const usage of usages) {
     const a = usage.insert_before;
     if (a && a.kind === "builtin_core_chain" && validChainIds.has(a.chain_id)) {
-      const list = usagesByAnchor.get(a.chain_id) ?? [];
+      const map = usage.insert_after_anchor ? afterByAnchor : beforeByAnchor;
+      const list = map.get(a.chain_id) ?? [];
       list.push({ usage, anchorChainId: a.chain_id });
-      usagesByAnchor.set(a.chain_id, list);
+      map.set(a.chain_id, list);
     } else {
       tail.push({ usage, anchorChainId: null });
     }
   }
-  for (const list of usagesByAnchor.values()) {
+  for (const list of beforeByAnchor.values()) {
+    list.sort((a, b) => a.usage.order - b.usage.order);
+  }
+  for (const list of afterByAnchor.values()) {
     list.sort((a, b) => a.usage.order - b.usage.order);
   }
   tail.sort((a, b) => a.usage.order - b.usage.order);
 
   const ordered_execution_list: RuntimeOrderedItem[] = [];
   for (const node of CHAIN_CATALOG.orderedNodes) {
-    for (const { usage } of usagesByAnchor.get(node.nodeId) ?? []) {
+    // "before" customs execute before the chain node
+    for (const { usage } of beforeByAnchor.get(node.nodeId) ?? []) {
       ordered_execution_list.push({
         kind: "custom_invocation_node",
         custom_node_id: `${usage.resource_instance_id}.${usage.node_id}`
@@ -510,6 +517,13 @@ export function buildRuntimeConfig(
       kind: "builtin_core_chain",
       chain_id: node.nodeId
     });
+    // "after" customs execute after the chain node
+    for (const { usage } of afterByAnchor.get(node.nodeId) ?? []) {
+      ordered_execution_list.push({
+        kind: "custom_invocation_node",
+        custom_node_id: `${usage.resource_instance_id}.${usage.node_id}`
+      });
+    }
   }
   for (const { usage } of tail) {
     ordered_execution_list.push({

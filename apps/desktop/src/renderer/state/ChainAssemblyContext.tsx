@@ -280,7 +280,8 @@ export interface ChainAssemblyValue {
     profileId: string,
     customResourceId: string,
     nodeId: string,
-    anchor: BuiltinExecutionAnchor | null
+    anchor: BuiltinExecutionAnchor | null,
+    afterAnchor?: boolean
   ) => Promise<void>;
   /** Open the anchor picker and call addCustomUsage with the choice. */
   promptAddCustomUsage: (
@@ -299,6 +300,7 @@ export interface ChainAssemblyValue {
     arrayIndex: number,
     target: {
       anchorChainId: string | null;
+      afterAnchor?: boolean;
       beforeCustomArrayIndex?: number;
     }
   ) => Promise<void>;
@@ -544,11 +546,18 @@ export class SaveExternallyModifiedError extends Error {
 
 const ANCHOR_TAIL_ID = "__tail__";
 
-/** Stable string key for an anchor — null becomes the tail sentinel. */
-function serializeAnchor(anchor: BuiltinExecutionAnchor | null): string {
-  if (!anchor) return ANCHOR_TAIL_ID;
-  if (anchor.kind === "builtin_core_chain") return `core:${anchor.chain_id}`;
-  return `domain:${anchor.domain}:${anchor.node_id}`;
+/**
+ * Stable string key for an anchor — null becomes the tail sentinel.
+ * `afterAnchor` distinguishes "before X" from "after X" siblings.
+ */
+function serializeAnchor(
+  anchor: BuiltinExecutionAnchor | null,
+  afterAnchor?: boolean
+): string {
+  const suffix = afterAnchor ? ":after" : "";
+  if (!anchor) return ANCHOR_TAIL_ID + suffix;
+  if (anchor.kind === "builtin_core_chain") return `core:${anchor.chain_id}${suffix}`;
+  return `domain:${anchor.domain}:${anchor.node_id}${suffix}`;
 }
 
 /**
@@ -2580,7 +2589,8 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
       profileId: string,
       customResourceId: string,
       nodeId: string,
-      anchor: BuiltinExecutionAnchor | null
+      anchor: BuiltinExecutionAnchor | null,
+      afterAnchor?: boolean
     ) => {
       if (!disk) return;
       const target = disk.profiles.find((p) => p.id === profileId);
@@ -2588,9 +2598,9 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
       const usages = target.project.custom_node_usages ?? [];
       // Allocate order at the end of the same-anchor bucket so the new
       // usage appears last under its anchor without disturbing siblings.
-      const anchorKey = serializeAnchor(anchor);
+      const anchorKey = serializeAnchor(anchor, afterAnchor);
       const sameAnchorOrders = usages
-        .filter((u) => serializeAnchor(u.insert_before ?? null) === anchorKey)
+        .filter((u) => serializeAnchor(u.insert_before ?? null, !!u.insert_after_anchor) === anchorKey)
         .map((u) => u.order);
       const nextOrder =
         sameAnchorOrders.length > 0 ? Math.max(...sameAnchorOrders) + 1 : 0;
@@ -2599,6 +2609,7 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
         node_id: nodeId,
         enabled: true,
         insert_before: anchor,
+        insert_after_anchor: afterAnchor || undefined,
         order: nextOrder
       };
       const updated: GuiProjectFile = {
@@ -2643,14 +2654,14 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
         .filter(
           (u, i) =>
             i !== arrayIndex &&
-            serializeAnchor(u.insert_before ?? null) === anchorKey
+            serializeAnchor(u.insert_before ?? null, !!u.insert_after_anchor) === anchorKey
         )
         .map((u) => u.order);
       const nextOrder =
         sameAnchorOrders.length > 0 ? Math.max(...sameAnchorOrders) + 1 : 0;
       const updatedUsages = usages.map((u, i) =>
         i === arrayIndex
-          ? { ...u, insert_before: anchor, order: nextOrder }
+          ? { ...u, insert_before: anchor, insert_after_anchor: undefined, order: nextOrder }
           : u
       );
       const updated: GuiProjectFile = {
@@ -2669,6 +2680,7 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
       arrayIndex: number,
       targetPosition: {
         anchorChainId: string | null;
+        afterAnchor?: boolean;
         beforeCustomArrayIndex?: number;
       }
     ) => {
@@ -2679,6 +2691,7 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
       const usage = usages[arrayIndex];
       if (!usage) return;
 
+      const afterAnchor = !!targetPosition.afterAnchor;
       const beforeIndex = targetPosition.beforeCustomArrayIndex;
       const beforeUsage =
         beforeIndex === undefined ? undefined : usages[beforeIndex];
@@ -2690,8 +2703,8 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
               chain_id: targetPosition.anchorChainId
             }
           : null;
-      const sourceKey = serializeAnchor(usage.insert_before ?? null);
-      const targetKey = serializeAnchor(targetAnchor);
+      const sourceKey = serializeAnchor(usage.insert_before ?? null, !!usage.insert_after_anchor);
+      const targetKey = serializeAnchor(targetAnchor, afterAnchor);
       const sortedByOrder = (
         left: { usage: CustomNodeUsage; index: number },
         right: { usage: CustomNodeUsage; index: number }
@@ -2704,7 +2717,7 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
           .filter(
             ({ usage: current, index }) =>
               index !== arrayIndex &&
-              serializeAnchor(current.insert_before ?? null) === sourceKey
+              serializeAnchor(current.insert_before ?? null, !!current.insert_after_anchor) === sourceKey
           )
           .sort(sortedByOrder)
           .forEach(({ usage: current, index }, order) => {
@@ -2717,7 +2730,7 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
         .filter(
           ({ usage: current, index }) =>
             index !== arrayIndex &&
-            serializeAnchor(current.insert_before ?? null) === targetKey
+            serializeAnchor(current.insert_before ?? null, !!current.insert_after_anchor) === targetKey
         )
         .sort(sortedByOrder);
       const beforeSiblingIndex =
@@ -2728,7 +2741,7 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
         beforeSiblingIndex >= 0 ? beforeSiblingIndex : targetSiblings.length;
       const nextTargetSiblings = [...targetSiblings];
       nextTargetSiblings.splice(insertIndex, 0, {
-        usage: { ...usage, insert_before: targetAnchor },
+        usage: { ...usage, insert_before: targetAnchor, insert_after_anchor: afterAnchor || undefined },
         index: arrayIndex
       });
       nextTargetSiblings.forEach(({ usage: current, index }, order) => {
@@ -2756,11 +2769,11 @@ export function ChainAssemblyProvider({ children }: { children: ReactNode }) {
       const usages = target.project.custom_node_usages ?? [];
       const usage = usages[arrayIndex];
       if (!usage) return;
-      const anchorKey = serializeAnchor(usage.insert_before ?? null);
+      const anchorKey = serializeAnchor(usage.insert_before ?? null, !!usage.insert_after_anchor);
       // Find same-anchor siblings sorted by order; locate self and target neighbour.
       const siblings = usages
         .map((u, i) => ({ u, i }))
-        .filter(({ u }) => serializeAnchor(u.insert_before ?? null) === anchorKey)
+        .filter(({ u }) => serializeAnchor(u.insert_before ?? null, !!u.insert_after_anchor) === anchorKey)
         .sort((a, b) => a.u.order - b.u.order);
       const selfIdx = siblings.findIndex(({ i }) => i === arrayIndex);
       const swapIdx = selfIdx + direction;

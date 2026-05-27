@@ -43,6 +43,8 @@ export interface CustomUsageRow {
   displayName: string;
   /** Position relative to its anchor: anchor's node id, or `null` for tail. */
   anchorChainId: string | null;
+  /** When true, the custom executes AFTER the anchor instead of before. */
+  afterAnchor: boolean;
   /** Original builtin_core_chain anchor when it no longer exists in CHAIN_CATALOG. */
   missingAnchorChainId?: string;
   resourceDisplayName?: string;
@@ -161,7 +163,8 @@ export function buildChainProjection(
     usage: CustomNodeUsage;
     arrayIndex: number;
   }
-  const usagesByAnchor = new Map<string, IndexedUsage[]>();
+  const beforeByAnchor = new Map<string, IndexedUsage[]>();
+  const afterByAnchor = new Map<string, IndexedUsage[]>();
   const tailUsages: IndexedUsage[] = [];
   const missingAnchorUsages: IndexedUsage[] = [];
   (profile.custom_node_usages ?? []).forEach((usage, arrayIndex) => {
@@ -172,14 +175,18 @@ export function buildChainProjection(
         return;
       }
       const key = usage.insert_before.chain_id;
-      const list = usagesByAnchor.get(key) ?? [];
+      const map = usage.insert_after_anchor ? afterByAnchor : beforeByAnchor;
+      const list = map.get(key) ?? [];
       list.push(indexed);
-      usagesByAnchor.set(key, list);
+      map.set(key, list);
     } else {
       tailUsages.push(indexed);
     }
   });
-  for (const list of usagesByAnchor.values()) {
+  for (const list of beforeByAnchor.values()) {
+    list.sort((a, b) => a.usage.order - b.usage.order);
+  }
+  for (const list of afterByAnchor.values()) {
     list.sort((a, b) => a.usage.order - b.usage.order);
   }
   tailUsages.sort((a, b) => a.usage.order - b.usage.order);
@@ -199,13 +206,15 @@ export function buildChainProjection(
 
   const rows: ChainProjectionRow[] = [];
   for (const node of orderedNodes) {
-    for (const { usage, arrayIndex } of usagesByAnchor.get(node.nodeId) ?? []) {
+    // "before" customs render before the chain node (insert_before semantics)
+    for (const { usage, arrayIndex } of beforeByAnchor.get(node.nodeId) ?? []) {
       rows.push({
         kind: "custom",
         usage,
         arrayIndex,
         ...customUsageFields(usage, customDisplayName, profileResources, profile),
-        anchorChainId: node.nodeId
+        anchorChainId: node.nodeId,
+        afterAnchor: false
       });
     }
     const cov = coverageByNodeId.get(node.nodeId) ?? [];
@@ -224,6 +233,17 @@ export function buildChainProjection(
         resources: cov
       }
     });
+    // "after" customs render after the chain node (insert_after_anchor semantics)
+    for (const { usage, arrayIndex } of afterByAnchor.get(node.nodeId) ?? []) {
+      rows.push({
+        kind: "custom",
+        usage,
+        arrayIndex,
+        ...customUsageFields(usage, customDisplayName, profileResources, profile),
+        anchorChainId: node.nodeId,
+        afterAnchor: true
+      });
+    }
   }
   for (const { usage, arrayIndex } of tailUsages) {
     rows.push({
@@ -231,7 +251,8 @@ export function buildChainProjection(
       usage,
       arrayIndex,
       ...customUsageFields(usage, customDisplayName, profileResources, profile),
-      anchorChainId: null
+      anchorChainId: null,
+      afterAnchor: !!usage.insert_after_anchor
     });
   }
   for (const { usage, arrayIndex } of missingAnchorUsages) {
@@ -241,6 +262,7 @@ export function buildChainProjection(
       arrayIndex,
       ...customUsageFields(usage, customDisplayName, profileResources, profile),
       anchorChainId: null,
+      afterAnchor: !!usage.insert_after_anchor,
       missingAnchorChainId:
         usage.insert_before?.kind === "builtin_core_chain"
           ? usage.insert_before.chain_id
@@ -307,7 +329,8 @@ export function buildExecutionProjection(
     usage: CustomNodeUsage;
     arrayIndex: number;
   }
-  const usagesByAnchor = new Map<string, IndexedUsage[]>();
+  const beforeByAnchor = new Map<string, IndexedUsage[]>();
+  const afterByAnchor = new Map<string, IndexedUsage[]>();
   const tailUsages: IndexedUsage[] = [];
   const missingAnchorUsages: IndexedUsage[] = [];
   (profile.custom_node_usages ?? []).forEach((usage, arrayIndex) => {
@@ -322,14 +345,18 @@ export function buildExecutionProjection(
         return;
       }
       const key = usage.insert_before.chain_id;
-      const list = usagesByAnchor.get(key) ?? [];
+      const map = usage.insert_after_anchor ? afterByAnchor : beforeByAnchor;
+      const list = map.get(key) ?? [];
       list.push(indexed);
-      usagesByAnchor.set(key, list);
+      map.set(key, list);
     } else {
       tailUsages.push(indexed);
     }
   });
-  for (const list of usagesByAnchor.values()) {
+  for (const list of beforeByAnchor.values()) {
+    list.sort((a, b) => a.usage.order - b.usage.order);
+  }
+  for (const list of afterByAnchor.values()) {
     list.sort((a, b) => a.usage.order - b.usage.order);
   }
   tailUsages.sort((a, b) => a.usage.order - b.usage.order);
@@ -342,48 +369,61 @@ export function buildExecutionProjection(
 
   const rows: ExecutionRow[] = [];
   for (const node of orderedNodes) {
-    // Custom usages anchored at this chain node render before its standard rows.
-    for (const { usage, arrayIndex } of usagesByAnchor.get(node.nodeId) ?? []) {
+    // "before" customs render before the chain node's standard rows
+    for (const { usage, arrayIndex } of beforeByAnchor.get(node.nodeId) ?? []) {
       rows.push({
         kind: "custom",
         usage,
         arrayIndex,
         ...customUsageFields(usage, customDisplayName, profileResources, profile),
-        anchorChainId: node.nodeId
+        anchorChainId: node.nodeId,
+        afterAnchor: false
       });
     }
     const covers = coverageByNodeId.get(node.nodeId);
-    if (!covers || covers.length === 0) continue;
-    const group = groupBySlug.get(node.docSlug);
-    for (const { ref, resource, variantId } of covers) {
-      const variant = resource.model_variants.find((v) => v.variant_id === variantId);
-      const activeCandidateId = variant?.effective_candidates?.[node.nodeId] ?? "";
-      const activeCandidate = activeCandidateId
-        ? standardCandidateFor(resource, node.nodeId, activeCandidateId)
-        : null;
-      const candidates = standardCandidatesForNode(resource, node.nodeId);
+    if (covers && covers.length > 0) {
+      const group = groupBySlug.get(node.docSlug);
+      for (const { ref, resource, variantId } of covers) {
+        const variant = resource.model_variants.find((v) => v.variant_id === variantId);
+        const activeCandidateId = variant?.effective_candidates?.[node.nodeId] ?? "";
+        const activeCandidate = activeCandidateId
+          ? standardCandidateFor(resource, node.nodeId, activeCandidateId)
+          : null;
+        const candidates = standardCandidatesForNode(resource, node.nodeId);
+        rows.push({
+          kind: "exec-standard",
+          chainNodeId: node.nodeId,
+          chainDisplayName: node.displayName,
+          order: node.order,
+          docSlug: node.docSlug,
+          docTitle: group?.title ?? node.docSlug,
+          resourceId: ref.resource_instance_id,
+          resourceDisplayName: resource.display_name,
+          variantId,
+          branchDisplayName: variant?.display_name ?? variantId,
+          activeCandidateId,
+          activeCandidateDisplayName:
+            activeCandidate?.display_name ?? (activeCandidateId || node.displayName),
+          activeCandidateFunctionName: activeCandidate?.function_name,
+          activeCandidateNotes: activeCandidate?.notes,
+          candidates: candidates.map((candidate, index) => ({
+            candidateId: candidateIdentity(candidate, node.nodeId, index),
+            displayName: candidate.display_name,
+            functionName: candidate.function_name,
+            notes: candidate.notes
+          }))
+        });
+      }
+    }
+    // "after" customs render after the chain node's standard rows
+    for (const { usage, arrayIndex } of afterByAnchor.get(node.nodeId) ?? []) {
       rows.push({
-        kind: "exec-standard",
-        chainNodeId: node.nodeId,
-        chainDisplayName: node.displayName,
-        order: node.order,
-        docSlug: node.docSlug,
-        docTitle: group?.title ?? node.docSlug,
-        resourceId: ref.resource_instance_id,
-        resourceDisplayName: resource.display_name,
-        variantId,
-        branchDisplayName: variant?.display_name ?? variantId,
-        activeCandidateId,
-        activeCandidateDisplayName:
-          activeCandidate?.display_name ?? (activeCandidateId || node.displayName),
-        activeCandidateFunctionName: activeCandidate?.function_name,
-        activeCandidateNotes: activeCandidate?.notes,
-        candidates: candidates.map((candidate, index) => ({
-          candidateId: candidateIdentity(candidate, node.nodeId, index),
-          displayName: candidate.display_name,
-          functionName: candidate.function_name,
-          notes: candidate.notes
-        }))
+        kind: "custom",
+        usage,
+        arrayIndex,
+        ...customUsageFields(usage, customDisplayName, profileResources, profile),
+        anchorChainId: node.nodeId,
+        afterAnchor: true
       });
     }
   }
@@ -393,7 +433,8 @@ export function buildExecutionProjection(
       usage,
       arrayIndex,
       ...customUsageFields(usage, customDisplayName, profileResources, profile),
-      anchorChainId: null
+      anchorChainId: null,
+      afterAnchor: !!usage.insert_after_anchor
     });
   }
   for (const { usage, arrayIndex } of missingAnchorUsages) {
@@ -403,6 +444,7 @@ export function buildExecutionProjection(
       arrayIndex,
       ...customUsageFields(usage, customDisplayName, profileResources, profile),
       anchorChainId: null,
+      afterAnchor: !!usage.insert_after_anchor,
       missingAnchorChainId:
         usage.insert_before?.kind === "builtin_core_chain"
           ? usage.insert_before.chain_id

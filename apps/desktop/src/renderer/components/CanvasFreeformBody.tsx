@@ -22,7 +22,8 @@ import {
   type CanvasCustomNode,
   type CanvasGroup,
   type CanvasProjection,
-  type CanvasSlotNode
+  type CanvasSlotNode,
+  type CanvasSubSection
 } from "../state/canvasProjection";
 import {
   DEFAULT_VIEWPORT,
@@ -41,6 +42,14 @@ import { type ContextMenuItem } from "./ContextMenu";
 const NODE_COL_WIDTH = 148;
 const NODE_COL_GAP = 8;
 const CLUSTER_PAD = 12;
+/**
+ * Extra pixels a sub-section divider adds to the cluster width.
+ * The divider is a flex child (width: 0, border-left: 1.5px, margin: 0 2px
+ * → 5.5px visual) plus one additional flex gap (8px) since it inserts
+ * an extra flex item between columns.
+ */
+const DIVIDER_VISUAL_WIDTH = 5.5; // border-left(1.5) + margin(2×2)
+const DIVIDER_EXTRA_PX = DIVIDER_VISUAL_WIDTH + NODE_COL_GAP;
 const CLUSTER_HEADER_HEIGHT = 34;
 /** Slot header (order + name) + its margin-bottom (4px). */
 const SLOT_HEADER_HEIGHT = 38;
@@ -51,7 +60,12 @@ const COVERAGE_CARD_GAP = 4;
 const SLOT_PADDING_V = 12;
 /** Cluster border (1px top + 1px bottom). */
 const CLUSTER_BORDER = 2;
-const CLUSTER_GAP = 48;
+/**
+ * Vertical gap between cluster rows (px). Sized to leave room for
+ * ~4 coverage card slots of vertical growth so rows don't crowd
+ * each other when clusters gain coverage.
+ */
+const CLUSTER_GAP = 160;
 /**
  * Phase 5: flow-space distance threshold (px) for deciding
  * near-cluster snap vs far-from-cluster floating drop.
@@ -117,20 +131,43 @@ function aabbOverlap(
   return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
 }
 
+/**
+ * Filter floating customs out of a group's allNodes so dimension
+ * estimation matches what actually renders on canvas. Avoids a
+ * copy when no floating customs exist.
+ */
+function displayNodes(group: CanvasGroup, floatingCustomIdxs: Set<number>): CanvasGroup {
+  if (floatingCustomIdxs.size === 0) return group;
+  const filtered = group.allNodes.filter(
+    (n) => n.kind !== "custom" || !floatingCustomIdxs.has(n.arrayIndex)
+  );
+  return filtered.length === group.allNodes.length
+    ? group
+    : { ...group, allNodes: filtered };
+}
+
+/**
+ * Render-time overlap check for saved cluster positions. Uses
+ * display-mode dimensions (floating customs excluded) and an
+ * inset tolerance so minor dimension changes (e.g. coverage
+ * count ±1) don't trigger a hard reset to defaults.
+ */
 function hasClusterOverlap(
   positions: Record<string, { x: number; y: number }>,
-  groups: CanvasGroup[]
+  groups: CanvasGroup[],
+  floatingCustomIdxs: Set<number> = new Set(),
+  inset = 0
 ): boolean {
   const rects: Array<{ x: number; y: number; w: number; h: number }> = [];
   for (const g of groups) {
-    if (g.allNodes.length === 0) continue;
+    const dg = displayNodes(g, floatingCustomIdxs);
+    if (dg.allNodes.length === 0) continue;
     const pos = positions[g.docSlug];
     if (!pos) continue;
-    rects.push({
-      x: pos.x, y: pos.y,
-      w: estimateClusterWidth(g),
-      h: estimateClusterHeight(g)
-    });
+    const w = estimateClusterWidth(dg) - inset * 2;
+    const h = estimateClusterHeight(dg) - inset * 2;
+    if (w <= 0 || h <= 0) continue;
+    rects.push({ x: pos.x + inset, y: pos.y + inset, w, h });
   }
   for (let i = 0; i < rects.length; i++) {
     for (let j = i + 1; j < rects.length; j++) {
@@ -142,6 +179,15 @@ function hasClusterOverlap(
   }
   return false;
 }
+
+/**
+ * Inset tolerance for the render-time overlap fallback (px).
+ * Each cluster rect is shrunk by this amount on all sides before
+ * the pairwise AABB check, so minor dimension fluctuations (coverage
+ * changes, custom float/anchor) don't false-positive into a full
+ * position reset. Effective gap tolerance = 2 × OVERLAP_INSET.
+ */
+const OVERLAP_INSET = 16;
 
 // ──────────────────────────────────────────────────────────────────
 // Node data types
@@ -171,6 +217,21 @@ type OpenFullEditorFn = (target: {
 
 function CategoryGroupNodeComponent({ data }: { data: CategoryGroupData }) {
   const { group, selection, lensTokens, onSelectionChange, onOpenFullEditor, onCardContextMenu, profileId, accentColor } = data;
+
+  const hasSubSections = group.subSections.length > 1;
+
+  // Build a set of allNodes indices where a sub-section divider should
+  // render BEFORE the node.  Index = subSection.startIdx for every
+  // sub-section except the first.
+  const dividerBeforeIdx = React.useMemo(() => {
+    const s = new Set<number>();
+    if (!hasSubSections) return s;
+    for (let i = 1; i < group.subSections.length; i++) {
+      s.add(group.subSections[i]!.startIdx);
+    }
+    return s;
+  }, [group.subSections, hasSubSections]);
+
   return (
     <div
       className="rf-category-group"
@@ -178,6 +239,7 @@ function CategoryGroupNodeComponent({ data }: { data: CategoryGroupData }) {
       aria-label={`簇: ${group.docTitle}`}
       style={{ borderLeftColor: accentColor }}
     >
+      {/* ── Cluster-level target handle (always present) ──────── */}
       <Handle
         type="target"
         position={Position.Left}
@@ -185,6 +247,24 @@ function CategoryGroupNodeComponent({ data }: { data: CategoryGroupData }) {
         className="rf-invisible-handle"
         isConnectable={false}
       />
+
+      {/* ── Sub-section target handles (interleave-type only) ── */}
+      {hasSubSections && group.subSections.map((sub, idx) => {
+        if (idx === 0 || !sub.routeEdges) return null;
+        const xPx = colLeftX(sub.startIdx, group.subSections);
+        return (
+          <Handle
+            key={`tgt:sub${sub.subId}`}
+            type="target"
+            position={Position.Left}
+            id={`tgt:sub${sub.subId}`}
+            className="rf-invisible-handle rf-sub-handle"
+            isConnectable={false}
+            style={{ left: xPx }}
+          />
+        );
+      })}
+
       <div className="rf-category-group-header">
         <span className="rf-category-group-title">{group.docTitle}</span>
         <span className="rf-category-group-count">
@@ -192,33 +272,58 @@ function CategoryGroupNodeComponent({ data }: { data: CategoryGroupData }) {
         </span>
       </div>
       <div className="rf-category-group-body">
-        {group.allNodes.map((node) =>
-          node.kind === "slot" ? (
-            <SlotCardInline
-              key={`slot:${node.nodeId}`}
-              node={node}
-              selection={selection}
-              lensTokens={lensTokens}
-              onSelectionChange={onSelectionChange}
-              onOpenFullEditor={onOpenFullEditor}
-              onCardContextMenu={onCardContextMenu}
-              profileId={profileId}
-            />
-          ) : (
-            <CustomCardInline
-              key={`cus:${node.arrayIndex}`}
-              node={node}
-              selection={selection}
-              lensTokens={lensTokens}
-              onSelectionChange={onSelectionChange}
-              onOpenFullEditor={onOpenFullEditor}
-              onCardContextMenu={onCardContextMenu}
-              profileId={profileId}
-              canvasDraggable
-            />
-          )
-        )}
+        {group.allNodes.map((node, nodeIdx) => (
+          <React.Fragment key={node.kind === "slot" ? `slot:${node.nodeId}` : `cus:${node.arrayIndex}`}>
+            {dividerBeforeIdx.has(nodeIdx) && (
+              <div className="rf-sub-divider" aria-hidden="true" />
+            )}
+            {node.kind === "slot" ? (
+              <SlotCardInline
+                node={node}
+                selection={selection}
+                lensTokens={lensTokens}
+                onSelectionChange={onSelectionChange}
+                onOpenFullEditor={onOpenFullEditor}
+                onCardContextMenu={onCardContextMenu}
+                profileId={profileId}
+              />
+            ) : (
+              <CustomCardInline
+                node={node}
+                selection={selection}
+                lensTokens={lensTokens}
+                onSelectionChange={onSelectionChange}
+                onOpenFullEditor={onOpenFullEditor}
+                onCardContextMenu={onCardContextMenu}
+                profileId={profileId}
+                canvasDraggable
+              />
+            )}
+          </React.Fragment>
+        ))}
       </div>
+
+      {/* ── Sub-section source handles (interleave-type only) ── */}
+      {hasSubSections && group.subSections.map((sub, idx) => {
+        if (idx === group.subSections.length - 1 || !sub.routeEdges) return null;
+        // Position at the right edge of the sub-section's last column.
+        // N.B. colLeftX(sub.endIdx) would INCLUDE the divider between this
+        // sub-section and the next, so we use (endIdx − 1) + COL_WIDTH instead.
+        const xPx = colLeftX(sub.endIdx - 1, group.subSections) + NODE_COL_WIDTH;
+        return (
+          <Handle
+            key={`src:sub${sub.subId}`}
+            type="source"
+            position={Position.Right}
+            id={`src:sub${sub.subId}`}
+            className="rf-invisible-handle rf-sub-handle"
+            isConnectable={false}
+            style={{ left: xPx }}
+          />
+        );
+      })}
+
+      {/* ── Cluster-level source handle (always present) ──────── */}
       <Handle
         type="source"
         position={Position.Right}
@@ -625,7 +730,9 @@ const nodeTypes: NodeTypes = {
 function estimateClusterWidth(group: CanvasGroup): number {
   const n = group.allNodes.length;
   if (n === 0) return NODE_COL_WIDTH + CLUSTER_PAD * 2;
-  return CLUSTER_PAD * 2 + n * NODE_COL_WIDTH + (n - 1) * NODE_COL_GAP;
+  const dividerCount = Math.max(0, group.subSections.length - 1);
+  return CLUSTER_PAD * 2 + n * NODE_COL_WIDTH + (n - 1) * NODE_COL_GAP
+    + dividerCount * DIVIDER_EXTRA_PX;
 }
 
 function estimateClusterHeight(group: CanvasGroup): number {
@@ -645,16 +752,66 @@ function estimateClusterHeight(group: CanvasGroup): number {
   return CLUSTER_BORDER + CLUSTER_HEADER_HEIGHT + CLUSTER_PAD * 2 + tallestCol;
 }
 
+/**
+ * Semantic row grouping — clusters in the same execution phase
+ * share a row. Ordering within each row follows actual runtime
+ * execution order (min slot order), NOT the slug numeric prefix.
+ *
+ *   Row 0: 10-platform, 75-communication, 45-control         (初始化与控制)
+ *   Row 1: 65-strike, 50-navigation                          (打击与导航)
+ *   Row 2: 61-cooperation, 62-inventory, 70-maintenance      (协调与保障)
+ *   Row 3: 20-device, 30-signal, 31-softkill                 (状态与环境)
+ *   Row 4: 32-signature, 40-sense                            (特征与感知)
+ *   Row 5: custom-only                                       (自定义)
+ *
+ * Slugs not listed here fall into the last row.
+ */
+const LAYOUT_ROW_GROUPS: readonly (readonly string[])[] = [
+  ["10-platform-chain", "75-communication-chain", "45-control-chain"],
+  ["65-strike-chain", "50-navigation-chain"],
+  ["61-cooperation", "62-inventory", "70-maintenance-chain"],
+  ["20-device-chain", "30-signal-environment-chain", "31-softkill"],
+  ["32-signature", "40-sense-chain"],
+  ["custom-only"]
+];
+
+/** Map slug → row index for O(1) lookup. */
+const SLUG_TO_ROW: Record<string, number> = {};
+for (let r = 0; r < LAYOUT_ROW_GROUPS.length; r++) {
+  for (const slug of LAYOUT_ROW_GROUPS[r]!) {
+    SLUG_TO_ROW[slug] = r;
+  }
+}
+
+/** Horizontal gap between clusters in the same row (px). */
+const CLUSTER_COL_GAP = 64;
+
 function computeDefaultClusterPositions(
   groups: CanvasGroup[]
 ): Record<string, { x: number; y: number }> {
-  const positions: Record<string, { x: number; y: number }> = {};
-  let y = 0;
+  // Bucket non-empty groups by row index
+  const rows: CanvasGroup[][] = LAYOUT_ROW_GROUPS.map(() => []);
   for (const group of groups) {
     if (group.allNodes.length === 0) continue;
-    positions[group.docSlug] = { x: 0, y };
-    y += estimateClusterHeight(group) + CLUSTER_GAP;
+    const row = SLUG_TO_ROW[group.docSlug] ?? LAYOUT_ROW_GROUPS.length - 1;
+    (rows[row] ??= []).push(group);
   }
+
+  const positions: Record<string, { x: number; y: number }> = {};
+  let y = 0;
+
+  for (const row of rows) {
+    if (row.length === 0) continue;
+    let x = 0;
+    let rowHeight = 0;
+    for (const group of row) {
+      positions[group.docSlug] = { x, y };
+      x += estimateClusterWidth(group) + CLUSTER_COL_GAP;
+      rowHeight = Math.max(rowHeight, estimateClusterHeight(group));
+    }
+    y += rowHeight + CLUSTER_GAP;
+  }
+
   return positions;
 }
 
@@ -692,55 +849,159 @@ function findNearestCluster(
   return { docSlug: bestSlug, distance: bestDistance };
 }
 
-/** Find the first slot node in a group — used as the default anchor for near-cluster drops. */
-function findFirstSlotInGroup(group: CanvasGroup): string | null {
-  for (const node of group.allNodes) {
-    if (node.kind === "slot") return node.nodeId;
+// ──── Divider-aware pixel helpers ──────────────────────────────────
+
+/**
+ * Count sub-section dividers that appear BEFORE column `colIdx`.
+ * A divider renders before `sub.startIdx` for every sub-section
+ * after the first.
+ */
+function dividersBeforeCol(
+  colIdx: number,
+  subSections: ReadonlyArray<CanvasSubSection>
+): number {
+  let count = 0;
+  for (let i = 1; i < subSections.length; i++) {
+    if (colIdx >= subSections[i]!.startIdx) count++;
+    else break; // sub-sections are ordered
   }
-  return null;
+  return count;
+}
+
+/** Left edge X of column `colIdx` inside the cluster body. */
+function colLeftX(
+  colIdx: number,
+  subSections: ReadonlyArray<CanvasSubSection>
+): number {
+  return (
+    CLUSTER_PAD +
+    colIdx * (NODE_COL_WIDTH + NODE_COL_GAP) +
+    dividersBeforeCol(colIdx, subSections) * DIVIDER_EXTRA_PX
+  );
+}
+
+/** Center X of column `colIdx` inside the cluster body. */
+function colCenterX(
+  colIdx: number,
+  subSections: ReadonlyArray<CanvasSubSection>
+): number {
+  return colLeftX(colIdx, subSections) + NODE_COL_WIDTH / 2;
 }
 
 /**
- * Phase 5 bug-fix: resolve which column gap the mouse is closest to
- * based on the relative X offset inside the cluster body.
+ * Resolve which column gap the mouse is closest to based on the
+ * relative X offset inside the cluster body. Accounts for
+ * sub-section divider widths.
  * Returns an insertion index in [0, nodeCount].
  */
-function resolveInsertionIndex(relX: number, nodeCount: number): number {
+function resolveInsertionIndex(
+  relX: number,
+  nodeCount: number,
+  subSections: ReadonlyArray<CanvasSubSection>
+): number {
   for (let i = 0; i < nodeCount; i++) {
-    const center = CLUSTER_PAD + i * (NODE_COL_WIDTH + NODE_COL_GAP) + NODE_COL_WIDTH / 2;
-    if (relX < center) return i;
+    if (relX < colCenterX(i, subSections)) return i;
   }
   return nodeCount;
 }
 
 /**
- * Find the first slot node at or after `insertIdx` in the group's
- * allNodes array, used to anchor a drop at a specific column position.
- * Falls back to last slot before insertIdx, then null.
+ * Compute the CSS left offset (px) for the insertion line.
+ * `insertIdx` is in [0, nodeCount]; `subSections` drives the
+ * cumulative divider offset.
  */
-function resolveDropAnchor(
-  group: CanvasGroup,
-  insertIdx: number
-): string | null {
-  // Nodes in allNodes are in column order. Walk forward from insertIdx.
-  let lastSlotBefore: string | null = null;
-  for (let i = 0; i < group.allNodes.length; i++) {
-    const n = group.allNodes[i]!;
-    if (n.kind === "slot") {
-      if (i >= insertIdx) return n.nodeId;
-      lastSlotBefore = n.nodeId;
-    }
-  }
-  return lastSlotBefore;
+function insertLineX(
+  insertIdx: number,
+  subSections: ReadonlyArray<CanvasSubSection>
+): number {
+  if (insertIdx === 0) return CLUSTER_PAD / 2;
+  return colLeftX(insertIdx, subSections) - NODE_COL_GAP / 2;
+}
+
+/** Result of resolveDropPosition — anchor info + visual line X. */
+interface DropResolution {
+  anchorId: string | null;
+  afterAnchor: boolean;
+  lineXPx: number;
 }
 
 /**
- * Compute the CSS left offset (px) for the insertion line at a given
- * column insertion index (0 = before first column, N = after last).
+ * Resolve anchor slot, before/after flag, and visual insertion-line
+ * position for a custom-node drop at pixel offset `relX` within the
+ * cluster body.
+ *
+ * At sub-section divider boundaries, the function distinguishes
+ * "end of previous sub-section" (afterAnchor = true) from "start of
+ * next sub-section" (afterAnchor = false) based on which side of the
+ * divider the cursor is closer to.
  */
-function insertLineX(insertIdx: number): number {
-  if (insertIdx === 0) return CLUSTER_PAD / 2;
-  return CLUSTER_PAD + insertIdx * (NODE_COL_WIDTH + NODE_COL_GAP) - NODE_COL_GAP / 2;
+function resolveDropPosition(
+  group: CanvasGroup,
+  relX: number
+): DropResolution {
+  const subs = group.subSections;
+  const insertIdx = resolveInsertionIndex(relX, group.allNodes.length, subs);
+
+  // ── Sub-section divider boundary check ───────────────────────
+  // When insertIdx lands exactly at a sub-section start, the cursor
+  // is near a divider. Compare relX to the midpoint between the
+  // previous column center and the current column center to pick a
+  // side.
+  if (subs.length > 1) {
+    for (let si = 1; si < subs.length; si++) {
+      const sub = subs[si]!;
+      if (insertIdx !== sub.startIdx) continue;
+
+      // Midpoint between last column of prev sub-section and first
+      // column of this sub-section.
+      const prevCenter = colCenterX(sub.startIdx - 1, subs);
+      const currCenter = colCenterX(sub.startIdx, subs);
+      const midpoint = (prevCenter + currCenter) / 2;
+
+      if (relX < midpoint) {
+        // Left of divider → "after last slot of previous sub-section"
+        const prevSub = subs[si - 1]!;
+        let lastSlotId: string | null = null;
+        for (let j = prevSub.endIdx - 1; j >= prevSub.startIdx; j--) {
+          const n = group.allNodes[j]!;
+          if (n.kind === "slot") { lastSlotId = n.nodeId; break; }
+        }
+        if (lastSlotId) {
+          // Line sits between last column of prev sub-section and the divider.
+          const lineX = colLeftX(sub.startIdx, subs) - DIVIDER_EXTRA_PX - NODE_COL_GAP / 2;
+          return { anchorId: lastSlotId, afterAnchor: true, lineXPx: lineX };
+        }
+      }
+      // Right of divider → fall through to normal "before first slot" logic
+      break;
+    }
+  }
+
+  // ── Normal scan: find first slot at/after insertIdx ──────────
+  let lastSlotBefore: { id: string; idx: number } | null = null;
+  for (let i = 0; i < group.allNodes.length; i++) {
+    const n = group.allNodes[i]!;
+    if (n.kind === "slot") {
+      if (i >= insertIdx) {
+        return {
+          anchorId: n.nodeId,
+          afterAnchor: false,
+          lineXPx: insertLineX(insertIdx, subs)
+        };
+      }
+      lastSlotBefore = { id: n.nodeId, idx: i };
+    }
+  }
+
+  // End-of-cluster: anchor is last slot, indicator at end, afterAnchor = true
+  if (lastSlotBefore) {
+    return {
+      anchorId: lastSlotBefore.id,
+      afterAnchor: true,
+      lineXPx: insertLineX(group.allNodes.length, subs)
+    };
+  }
+  return { anchorId: null, afterAnchor: false, lineXPx: insertLineX(insertIdx, subs) };
 }
 
 // ──────────────────────────────────────────────────────────────────
@@ -785,10 +1046,32 @@ function selectedClusterRfId(
 }
 
 /**
- * Compute directed cluster-to-cluster edges. Each cluster's position
- * in the execution chain is determined by the minimum canonical
- * `order` value among its slot nodes. Clusters without any valid
- * nodes (covered slots or customs) are skipped.
+ * A routing point in the global execution order.  Each cluster
+ * contributes one or more points — groups with interleave-type
+ * sub-sections contribute one point per sub-section, while groups
+ * without (or with bookend-type splits) contribute a single point
+ * for the whole cluster.
+ */
+interface RoutingPoint {
+  /** ReactFlow node ID, e.g. "group:30-signal-environment-chain". */
+  nodeId: string;
+  /** Source handle ID on this routing point. */
+  srcHandle: string;
+  /** Target handle ID on this routing point. */
+  tgtHandle: string;
+  /** Minimum slot execution order (for global sorting). */
+  minOrder: number;
+}
+
+/**
+ * Compute directed edges along the execution chain.  When a cluster
+ * has interleave-type sub-sections (small execution-order gaps caused
+ * by UI_GROUP_OVERRIDES), edges are routed at the sub-section level
+ * so the flow correctly bounces between interleaved clusters.
+ *
+ * Bookend-type splits (large structural gaps in clusters like
+ * 10-platform and 75-communication) only get visual dividers — edges
+ * remain at the whole-cluster level to avoid excessive edge clutter.
  *
  * "常亮但低调" opacity (baked into color for arrow marker parity):
  *   - no selection  → 35 %
@@ -800,49 +1083,59 @@ function computeCanvasEdges(
   selection: CanvasSelection | null,
   floatingCustomIdxs: Set<number>
 ): Edge[] {
-  // ── Build ordered cluster list in VISUAL (docSlug) order ──────
-  // `projection.groups` is already sorted by docSlug number via
-  // `applyUiGroupOverrides`. Using this order instead of per-slot
-  // `minOrder` avoids edge zig-zags caused by UI_GROUP_OVERRIDES
-  // extracting sub-ranges whose canonical orders don't match the
-  // docSlug position (e.g. "65-strike" has minOrder 19 but sits
-  // visually after "50-navigation" with minOrder 27).
-  //
-  // Floating (unanchored) customs are excluded — they live outside
-  // clusters and must not contribute to cluster validity.
-  const validClusters: string[] = [];
+  // ── Build routing points in global execution order ─────────────
+  const points: RoutingPoint[] = [];
 
   for (const group of projection.groups) {
     if (group.allNodes.length === 0) continue;
-    let hasValid = false;
-    for (const node of group.allNodes) {
-      if (node.kind === "slot") {
-        if (node.coverage.count > 0) hasValid = true;
-      } else if (node.kind === "custom") {
-        if (!floatingCustomIdxs.has(node.arrayIndex)) {
-          hasValid = true;
-        }
+    const hasDisplayNode = group.allNodes.some(
+      (n) => n.kind !== "custom" || !floatingCustomIdxs.has(n.arrayIndex)
+    );
+    if (!hasDisplayNode) continue;
+
+    const nodeId = `group:${group.docSlug}`;
+    const hasRouteableSubs = group.subSections.length > 1 &&
+      group.subSections.some((s) => s.routeEdges);
+
+    if (!hasRouteableSubs) {
+      // Whole-cluster routing point (default, and bookend-type splits).
+      points.push({
+        nodeId,
+        srcHandle: "src",
+        tgtHandle: "tgt",
+        minOrder: group.subSections[0]?.minOrder ?? Infinity
+      });
+    } else {
+      // Interleave-type: one routing point per sub-section.
+      for (let si = 0; si < group.subSections.length; si++) {
+        const sub = group.subSections[si]!;
+        const isFirst = si === 0;
+        const isLast = si === group.subSections.length - 1;
+        points.push({
+          nodeId,
+          srcHandle: isLast ? "src" : `src:sub${sub.subId}`,
+          tgtHandle: isFirst ? "tgt" : `tgt:sub${sub.subId}`,
+          minOrder: sub.minOrder
+        });
       }
-      if (hasValid) break;
     }
-    if (!hasValid) continue;
-    validClusters.push(`group:${group.docSlug}`);
   }
 
-  // No sort — projection.groups is already in display order.
+  // Sort by execution order so edges follow the canonical chain.
+  points.sort((a, b) => a.minOrder - b.minOrder);
 
   // ── Create edges ───────────────────────────────────────────────
   const selCluster = selectedClusterRfId(projection, selection, floatingCustomIdxs);
   const edges: Edge[] = [];
 
-  for (let i = 0; i < validClusters.length - 1; i++) {
-    const curr = validClusters[i]!;
-    const next = validClusters[i + 1]!;
+  for (let i = 0; i < points.length - 1; i++) {
+    const curr = points[i]!;
+    const next = points[i + 1]!;
 
     let opacity: number;
     if (!selCluster) {
       opacity = 0.35;
-    } else if (curr === selCluster || next === selCluster) {
+    } else if (curr.nodeId === selCluster || next.nodeId === selCluster) {
       opacity = 0.9;
     } else {
       opacity = 0.1;
@@ -851,11 +1144,11 @@ function computeCanvasEdges(
     const color = rgbaStr(142, 142, 142, opacity);
 
     edges.push({
-      id: `e:${curr}→${next}`,
-      source: curr,
-      sourceHandle: "src",
-      target: next,
-      targetHandle: "tgt",
+      id: `e:${curr.nodeId}:${curr.srcHandle}→${next.nodeId}:${next.tgtHandle}`,
+      source: curr.nodeId,
+      sourceHandle: curr.srcHandle,
+      target: next.nodeId,
+      targetHandle: next.tgtHandle,
       type: "smoothstep",
       markerEnd: {
         type: MarkerType.ArrowClosed,
@@ -891,11 +1184,13 @@ function projectionToNodes(
   const defaultPositions = computeDefaultClusterPositions(projection.groups);
   let clusterPositions = { ...defaultPositions, ...canvasState.clusterPositions };
 
-  // D11: if saved positions cause any cluster overlap (stale canvas.json
-  // from a prior layout), fall back entirely to computed defaults.
+  // D11: if saved positions cause significant cluster overlap (stale
+  // canvas.json from a prior layout), fall back to computed defaults.
+  // Uses display-mode dimensions (floating customs excluded) and an
+  // inset tolerance to avoid false-positive resets from minor changes.
   if (
     Object.keys(canvasState.clusterPositions).length > 0 &&
-    hasClusterOverlap(clusterPositions, projection.groups)
+    hasClusterOverlap(clusterPositions, projection.groups, floatingCustomIdxs, OVERLAP_INSET)
   ) {
     clusterPositions = defaultPositions;
   }
@@ -906,17 +1201,7 @@ function projectionToNodes(
     if (group.allNodes.length === 0) continue;
 
     // Filter out floating customs from the cluster's DOM children
-    const displayGroup =
-      floatingCustomIdxs.size > 0
-        ? {
-            ...group,
-            allNodes: group.allNodes.filter(
-              (n) =>
-                n.kind !== "custom" ||
-                !floatingCustomIdxs.has(n.arrayIndex)
-            )
-          }
-        : group;
+    const displayGroup = displayNodes(group, floatingCustomIdxs);
 
     if (displayGroup.allNodes.length === 0) continue;
 
@@ -982,6 +1267,8 @@ export interface CanvasFreeformHandle {
   fitSelection(): void;
   /** Fit a specific cluster (by docSlug) into view. */
   fitCluster(slug: string): void;
+  /** Reset all standard cluster positions to the default semantic layout. */
+  resetLayout(): void;
 }
 
 // ──────────────────────────────────────────────────────────────────
@@ -1026,6 +1313,52 @@ export const CLUSTER_LABELS: Record<string, string> = {
   "custom-only":                 "自定义节点",
 };
 
+// ──────────────────────────────────────────────────────────────────
+// MiniMap per-cluster colors — same-row clusters share a hue family
+// but differ in lightness/saturation for distinguishability.
+// ──────────────────────────────────────────────────────────────────
+const MINIMAP_PALETTE: Record<string, string> = {
+  /* ── Row 0 — 初始化与控制 (blue family, hue 230→210→200°) ──── */
+  "10-platform-chain":           "#3A78C0",  // deep blue
+  "75-communication-chain":      "#50A8E0",  // bright cyan-blue
+  "45-control-chain":            "#4098D0",  // medium blue
+
+  /* ── Row 1 — 打击与导航 (orange-red family, hue 5→25°) ─────── */
+  "65-strike-chain":             "#E05040",  // crimson red
+  "50-navigation-chain":         "#E88040",  // tangerine
+
+  /* ── Row 2 — 协调与保障 (olive-green family, hue 90→85→75°) ── */
+  "61-cooperation":              "#6B9830",  // dark olive
+  "62-inventory":                "#8AB038",  // olive
+  "70-maintenance-chain":        "#A0C840",  // lime-green
+
+  /* ── Row 3 — 状态与环境 (rose family, hue 345→310→350°) ────── */
+  "20-device-chain":             "#C84870",  // deep rose
+  "30-signal-environment-chain": "#9868B8",  // violet-rose
+  "31-softkill":                 "#D45878",  // hot pink
+
+  /* ── Row 4 — 特征与感知 (teal family, hue 190→165°) ────────── */
+  "32-signature":                "#0898A8",  // blue-teal
+  "40-sense-chain":              "#30C0A0",  // green-teal
+
+  /* ── Row 5 — 自定义 (purple) ────────────────────────────────── */
+  "custom-only":                 "#A855F7",  // vivid purple
+};
+
+/** Slug → minimap fill color (per-cluster, row-hue-grouped). */
+function minimapColor(slug: string): string {
+  return MINIMAP_PALETTE[slug] ?? PALETTE_FALLBACK;
+}
+
+/**
+ * Minimum cluster height in canvas coordinates for the minimap rect.
+ * Short clusters (few slots, no coverage) would be tiny in the
+ * minimap, making hover/click difficult. This floor ensures every
+ * cluster has a comfortable hit area. Must stay ≤ CLUSTER_GAP so
+ * inflated rects don't overlap across rows.
+ */
+const MINIMAP_MIN_HEIGHT = CLUSTER_GAP;
+
 function MiniMapNodeWithTooltip({
   id, x, y, width, height, style, color, strokeColor, strokeWidth,
   className, borderRadius, shapeRendering, onClick
@@ -1038,6 +1371,7 @@ function MiniMapNodeWithTooltip({
 }) {
   const { background, backgroundColor } = style || {};
   const fill = color || (background as string) || (backgroundColor as string);
+  const h = Math.max(height, MINIMAP_MIN_HEIGHT);
   return (
     <g>
       <title>{minimapNodeLabel(id)}</title>
@@ -1045,7 +1379,7 @@ function MiniMapNodeWithTooltip({
         className={className}
         x={x} y={y}
         rx={borderRadius} ry={borderRadius}
-        width={width} height={height}
+        width={width} height={h}
         style={{ fill, stroke: strokeColor, strokeWidth }}
         shapeRendering={shapeRendering}
         onClick={onClick ? (e) => onClick(e, id) : undefined}
@@ -1071,6 +1405,8 @@ interface CanvasFreeformBodyProps {
   onViewportChange: (viewport: Viewport) => void;
   onClusterDragEnd: (docSlug: string, position: { x: number; y: number }) => void;
   onCustomDragEnd: (arrayIndex: number, position: { x: number; y: number }) => void;
+  /** Clear all saved cluster positions, reverting to default layout. */
+  onResetClusterLayout: () => void;
   /** Imperative handle for toolbar actions (fit-all, fit-selection). */
   freeformRef?: React.Ref<CanvasFreeformHandle>;
 }
@@ -1087,6 +1423,7 @@ function CanvasFreeformBodyInner({
   onViewportChange,
   onClusterDragEnd,
   onCustomDragEnd,
+  onResetClusterLayout,
   freeformRef
 }: CanvasFreeformBodyProps) {
   // Phase 5: hooks must be called unconditionally (before the early return)
@@ -1157,9 +1494,16 @@ function CanvasFreeformBodyInner({
       fitCluster(slug: string) {
         const rfId = `group:${slug}`;
         rf.fitView({ nodes: [{ id: rfId }], padding: 0.05, duration: 300 });
+      },
+      resetLayout() {
+        onResetClusterLayout();
+        // Wait one frame for state to propagate, then fit-all
+        requestAnimationFrame(() => {
+          rf.fitView({ padding: 0.12, duration: 300 });
+        });
       }
     }),
-    [rf, selection, projection, canvasState.customPositions]
+    [rf, selection, projection, canvasState.customPositions, onResetClusterLayout]
   );
 
   // Cleanup overlap flash timer on unmount
@@ -1175,6 +1519,7 @@ function CanvasFreeformBodyInner({
   const dropRef = useRef<{
     slug: string;
     anchorChainId: string | null;
+    afterAnchor: boolean;
     insertLineXPx: number;
   } | null>(null);
 
@@ -1182,24 +1527,10 @@ function CanvasFreeformBodyInner({
     return <div className="canvas-view-empty-hint">尚无可用数据。</div>;
   }
 
-  // Phase 5: effective cluster positions for drop-target resolution.
-  // Duplicates the computation inside projectionToNodes intentionally
-  // so the drop handler can use it without coupling to the node builder.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const effectiveClusterPositions = useMemo(() => {
-    const defaults = computeDefaultClusterPositions(projection.groups);
-    const merged = { ...defaults, ...canvasState.clusterPositions };
-    if (
-      Object.keys(canvasState.clusterPositions).length > 0 &&
-      hasClusterOverlap(merged, projection.groups)
-    ) {
-      return defaults;
-    }
-    return merged;
-  }, [projection, canvasState.clusterPositions]);
-
   // Phase 5: identify floating customs (unanchored + have explicit position).
-  // Shared across rfNodes + rfEdges so both agree on which customs are floating.
+  // Shared across rfNodes + rfEdges + overlap checks so all agree on
+  // which customs are floating. Must precede effectiveClusterPositions
+  // so the overlap check uses display-mode dimensions.
   const floatingCustomIdxs = useMemo(() => {
     const set = new Set<number>();
     for (const group of projection.groups) {
@@ -1215,6 +1546,24 @@ function CanvasFreeformBodyInner({
     }
     return set;
   }, [projection, canvasState.customPositions]);
+
+  // Phase 5: effective cluster positions for drop-target resolution.
+  // Duplicates the computation inside projectionToNodes intentionally
+  // so the drop handler can use it without coupling to the node builder.
+  // Uses display-mode dimensions (floating customs excluded) and
+  // OVERLAP_INSET tolerance to avoid false-positive resets.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const effectiveClusterPositions = useMemo(() => {
+    const defaults = computeDefaultClusterPositions(projection.groups);
+    const merged = { ...defaults, ...canvasState.clusterPositions };
+    if (
+      Object.keys(canvasState.clusterPositions).length > 0 &&
+      hasClusterOverlap(merged, projection.groups, floatingCustomIdxs, OVERLAP_INSET)
+    ) {
+      return defaults;
+    }
+    return merged;
+  }, [projection, canvasState.clusterPositions, floatingCustomIdxs]);
 
   // Precompute the RF node ID that contains the current selection
   // (for minimap stroke highlight — avoids casting n.data inside the callback).
@@ -1352,10 +1701,10 @@ function CanvasFreeformBodyInner({
             const relX = clusterPos
               ? node.position.x - clusterPos.x
               : 0;
-            const insertIdx = resolveInsertionIndex(relX, group.allNodes.length);
-            const anchorId = resolveDropAnchor(group, insertIdx);
+            const { anchorId, afterAnchor } = resolveDropPosition(group, relX);
             void ca.moveCustomUsage(profileId, arrayIndex, {
-              anchorChainId: anchorId
+              anchorChainId: anchorId,
+              afterAnchor
             });
           } else {
             void ca.moveCustomUsage(profileId, arrayIndex, {
@@ -1473,17 +1822,6 @@ function CanvasFreeformBodyInner({
       );
       const isNear = distance <= SNAP_THRESHOLD_PX && !!docSlug;
 
-      let lineXPx = CLUSTER_PAD / 2;
-      if (isNear && docSlug) {
-        const group = projection.groups.find((g) => g.docSlug === docSlug);
-        if (group) {
-          const clusterPos = effectiveClusterPositions[docSlug];
-          const relX = clusterPos ? flowPos.x - clusterPos.x : 0;
-          const insertIdx = resolveInsertionIndex(relX, group.allNodes.length);
-          lineXPx = insertLineX(insertIdx);
-        }
-      }
-
       const prev = dropRef.current;
       const targetSlug = isNear ? docSlug : null;
 
@@ -1495,9 +1833,10 @@ function CanvasFreeformBodyInner({
         const group = projection.groups.find((g) => g.docSlug === targetSlug);
         const clusterPos = effectiveClusterPositions[targetSlug!];
         const relX = clusterPos ? flowPos.x - clusterPos.x : 0;
-        const insertIdx = group ? resolveInsertionIndex(relX, group.allNodes.length) : 0;
-        const anchorChainId = group ? resolveDropAnchor(group, insertIdx) : null;
-        dropRef.current = { slug: targetSlug, anchorChainId, insertLineXPx: lineXPx };
+        const { anchorId: anchorChainId, afterAnchor, lineXPx } = group
+          ? resolveDropPosition(group, relX)
+          : { anchorId: null as string | null, afterAnchor: false, lineXPx: CLUSTER_PAD / 2 };
+        dropRef.current = { slug: targetSlug, anchorChainId, afterAnchor, insertLineXPx: lineXPx };
         applyDropHighlight(targetSlug, lineXPx);
       } else {
         dropRef.current = null;
@@ -1575,13 +1914,15 @@ function CanvasFreeformBodyInner({
       // ── Resolve anchor from position within the nearest cluster ──
       const isNear = distance <= SNAP_THRESHOLD_PX && !!docSlug;
       let nearAnchorId: string | null = null;
+      let nearAfterAnchor = false;
       if (isNear && docSlug) {
         const nearGroup = projection.groups.find((g) => g.docSlug === docSlug);
         if (nearGroup) {
           const clusterPos = effectiveClusterPositions[docSlug];
           const relX = clusterPos ? flowPos.x - clusterPos.x : 0;
-          const insertIdx = resolveInsertionIndex(relX, nearGroup.allNodes.length);
-          nearAnchorId = resolveDropAnchor(nearGroup, insertIdx);
+          const drop = resolveDropPosition(nearGroup, relX);
+          nearAnchorId = drop.anchorId;
+          nearAfterAnchor = drop.afterAnchor;
         }
       }
 
@@ -1590,7 +1931,8 @@ function CanvasFreeformBodyInner({
           // ── Re-anchor / float an existing custom node ────────────
           if (isNear) {
             await ca.moveCustomUsage(profileId, payload.arrayIndex, {
-              anchorChainId: nearAnchorId
+              anchorChainId: nearAnchorId,
+              afterAnchor: nearAfterAnchor
             });
           } else {
             onCustomDragEnd(payload.arrayIndex, flowPos);
@@ -1630,7 +1972,8 @@ function CanvasFreeformBodyInner({
             ? { kind: "builtin_core_chain" as const, chain_id: nearAnchorId }
             : null;
           await ca.addCustomUsage(
-            profileId, payload.resourceInstanceId, payload.nodeId, anchor
+            profileId, payload.resourceInstanceId, payload.nodeId, anchor,
+            nearAfterAnchor || undefined
           );
         } else {
           // ── Far from cluster: add unanchored + save position ──────
@@ -1694,9 +2037,9 @@ function CanvasFreeformBodyInner({
           style={{ background: "var(--tc-canvas-bg, #1e1e1e)" }}
           maskColor="rgba(0,0,0,0.6)"
           nodeColor={(n) => {
-            if (n.id.startsWith("floating:")) return CLUSTER_PALETTE["custom-only"]!;
+            if (n.id.startsWith("floating:")) return MINIMAP_PALETTE["custom-only"]!;
             const slug = n.id.replace(/^group:/, "");
-            return clusterColor(slug);
+            return minimapColor(slug);
           }}
           nodeStrokeColor={(n) => {
             if (!selection) return "transparent";

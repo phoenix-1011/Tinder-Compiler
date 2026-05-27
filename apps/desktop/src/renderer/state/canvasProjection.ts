@@ -61,6 +61,8 @@ export interface CanvasCustomNode {
    * (renders in the `custom-only` virtual group per requirement.md).
    */
   anchorChainId: string | null;
+  /** When true, this custom executes AFTER its anchor (sorts with +0.5). */
+  afterAnchor: boolean;
   /** Mirror of usage.enabled for the canvas renderer (C17 dashed edges). */
   enabled: boolean;
   /**
@@ -70,6 +72,36 @@ export interface CanvasCustomNode {
    * warning treatment and the inspector exposes recovery actions.
    */
   isOrphan: boolean;
+}
+
+/**
+ * A contiguous run of execution orders within a group.  When the
+ * group's slot orders have gaps (caused by UI_GROUP_OVERRIDES or the
+ * canonical chain structure), the group is split into multiple
+ * sub-sections at each gap.
+ *
+ * `routeEdges` distinguishes interleave-type gaps (small span, edges
+ * connect at sub-section level) from bookend-type gaps (large span,
+ * only a visual divider is shown).
+ */
+export interface CanvasSubSection {
+  /** Ordinal within the group: "0", "1", … */
+  subId: string;
+  /** Start index into allNodes (inclusive). */
+  startIdx: number;
+  /** End index into allNodes (exclusive). */
+  endIdx: number;
+  /** Minimum slot execution order in this sub-section. */
+  minOrder: number;
+  /** Maximum slot execution order in this sub-section. */
+  maxOrder: number;
+  /**
+   * When `true`, the cross-cluster edge routing operates at this
+   * sub-section's granularity (interleave-type split).  When `false`,
+   * edges stay at the whole-cluster level (bookend-type split — the
+   * sub-section is visual-only).
+   */
+  routeEdges: boolean;
 }
 
 export interface CanvasGroup {
@@ -94,6 +126,13 @@ export interface CanvasGroup {
   totalSlotCount: number;
   /** Whether `visibleNodes` was non-trivially filtered. Drives UI hints. */
   hiddenSlotCount: number;
+  /**
+   * Sub-sections derived from execution-order gaps in `allNodes`.
+   * A group with no gaps has a single sub-section spanning all nodes.
+   * Multiple sub-sections indicate the cluster's internal execution is
+   * non-contiguous — other clusters' nodes execute in between.
+   */
+  subSections: CanvasSubSection[];
 }
 
 export interface CanvasProjection {
@@ -120,27 +159,28 @@ const UI_GROUP_OVERRIDES: ReadonlyArray<{
   nodeIds: ReadonlyArray<string>;
 }> = [
   {
+    // Orders 64-66 (contiguous). Extracted from 30-signal-environment-chain.
     uiSlug: "31-softkill",
-    uiTitle: "软杀伤",
+    uiTitle: "软杀效果",
     nodeIds: [
-      "device.softkill.emission.generate",
       "softkill.propagation.resolve",
       "platform.softkill.effect.resolve",
       "device.softkill.effect.process"
     ]
   },
   {
+    // Orders 67-70 (contiguous). 67-69 from 30-signal, 70 from 40-sense.
     uiSlug: "32-signature",
-    uiTitle: "特征",
+    uiTitle: "特征传播",
     nodeIds: [
       "environment.signature.generate",
       "environment.signature.lifecycle.manage",
       "environment.signature.propagation.resolve",
-      "device.signature.receive.process",
-      "sense.detection.from_signature"
+      "device.signature.receive.process"
     ]
   },
   {
+    // Orders 32-35 (contiguous). Extracted from 60-target-action-chain.
     uiSlug: "61-cooperation",
     uiTitle: "协同与通信",
     nodeIds: [
@@ -151,6 +191,7 @@ const UI_GROUP_OVERRIDES: ReadonlyArray<{
     ]
   },
   {
+    // Orders 36-43 (contiguous). Extracted from 60-target-action-chain.
     uiSlug: "62-inventory",
     uiTitle: "库存与监督",
     nodeIds: [
@@ -161,9 +202,23 @@ const UI_GROUP_OVERRIDES: ReadonlyArray<{
       "platform.carriee_inventory.update",
       "platform.supervise_carriee.update",
       "platform.supervise_missile.update",
-      "platform.supervise_canonball.update",
-      "platform.supervise_tunnel.update",
-      "platform.homeport.update"
+      "platform.supervise_canonball.update"
+    ]
+  },
+  {
+    // Orders 44-50 (contiguous). Canonical 70-maintenance nodes (44-48)
+    // plus homeport/tunnel supervision (49-50) reclassified from
+    // 60-target-action-chain to eliminate interleaving.
+    uiSlug: "70-maintenance-chain",
+    uiTitle: "维护与监督",
+    nodeIds: [
+      "platform.tracking_request.maintain",
+      "platform.tracking_target_key.maintain",
+      "platform.tracking_device.resolve",
+      "platform.tracking_fact.resolve",
+      "platform.supervise_tracking.update",
+      "platform.homeport.update",
+      "platform.supervise_tunnel.update"
     ]
   }
 ];
@@ -281,7 +336,8 @@ export function buildCanvasProjection(
     const meta = groupBySlug.get(slug);
     const title = meta?.title ?? slug;
     const rowsInGroup = buckets.get(slug) ?? [];
-    const allNodes = rowsInGroup.map(rowToNodeWithOrphans);
+    const rawNodes = rowsInGroup.map(rowToNodeWithOrphans);
+    const allNodes = sortNodesByOrder(rawNodes);
 
     const slotsInGroup = allNodes.filter(
       (n): n is CanvasSlotNode => n.kind === "slot"
@@ -308,7 +364,8 @@ export function buildCanvasProjection(
       visibleNodes,
       coveredSlotCount,
       totalSlotCount: slotsInGroup.length,
-      hiddenSlotCount: slotsInGroup.length - visibleSlotCount
+      hiddenSlotCount: slotsInGroup.length - visibleSlotCount,
+      subSections: detectSubSections(allNodes)
     };
   });
 
@@ -347,6 +404,7 @@ function rowToNode(
     resourceDisplayName: row.resourceDisplayName,
     branchId: row.branchId,
     anchorChainId: row.anchorChainId,
+    afterAnchor: row.afterAnchor,
     enabled: row.usage.enabled,
     isOrphan: orphanArrayIndexes.has(row.arrayIndex)
   };
@@ -382,19 +440,189 @@ function filterVisible(
   });
 }
 
+/**
+ * Sort a group's allNodes by canonical execution order.
+ * - Slot nodes sort by their `order` field.
+ * - Custom nodes with `afterAnchor === false` sort at anchor − 0.5
+ *   (immediately BEFORE the slot, matching `insert_before` semantics).
+ * - Custom nodes with `afterAnchor === true` sort at anchor + 0.5
+ *   (immediately AFTER the slot, for end-of-cluster placement).
+ * - Unanchored customs go last.
+ */
+function sortNodesByOrder(nodes: CanvasNode[]): CanvasNode[] {
+  const orderById = new Map<string, number>();
+  for (const n of nodes) {
+    if (n.kind === "slot") orderById.set(n.nodeId, n.order);
+  }
+  return [...nodes].sort((a, b) => {
+    const oa = customSortKey(a, orderById);
+    const ob = customSortKey(b, orderById);
+    return oa - ob;
+  });
+}
+
+function customSortKey(
+  node: CanvasNode,
+  orderById: Map<string, number>
+): number {
+  if (node.kind === "slot") return node.order;
+  if (!node.anchorChainId) return Infinity;
+  const anchor = orderById.get(node.anchorChainId);
+  if (anchor == null) return Infinity;
+  return node.afterAnchor ? anchor + 0.5 : anchor - 0.5;
+}
+
+/** Minimum slot execution order in a group (Infinity if no slots). */
+function minSlotOrder(group: CanvasGroup): number {
+  let min = Infinity;
+  for (const n of group.allNodes) {
+    if (n.kind === "slot" && n.order < min) min = n.order;
+  }
+  return min;
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Sub-section detection
+// ──────────────────────────────────────────────────────────────────────
+
+/**
+ * Execution-order gap threshold.  Gaps of this size or larger are
+ * classified as "bookend" (visual divider only, edges stay at cluster
+ * level).  Smaller gaps are "interleave" (sub-section-level edges).
+ */
+const BOOKEND_GAP_THRESHOLD = 10;
+
+/**
+ * Detect execution-order gaps in a sorted `allNodes` sequence and
+ * split into sub-sections.  Each sub-section is a contiguous run of
+ * slot execution orders with no gaps.
+ *
+ * Custom nodes are assigned to the sub-section of their anchor slot.
+ * If a custom has no anchor, it joins the last sub-section.
+ */
+function detectSubSections(allNodes: CanvasNode[]): CanvasSubSection[] {
+  // Collect slot indices + orders.
+  const slotEntries: Array<{ idx: number; order: number }> = [];
+  for (let i = 0; i < allNodes.length; i++) {
+    const n = allNodes[i]!;
+    if (n.kind === "slot") slotEntries.push({ idx: i, order: n.order });
+  }
+  if (slotEntries.length === 0) {
+    // All-custom group: single sub-section.
+    return [{
+      subId: "0",
+      startIdx: 0,
+      endIdx: allNodes.length,
+      minOrder: Infinity,
+      maxOrder: -Infinity,
+      routeEdges: false
+    }];
+  }
+
+  // Find gap positions between consecutive slots.
+  interface GapInfo { afterSlotIdx: number; gap: number }
+  const gaps: GapInfo[] = [];
+  for (let s = 1; s < slotEntries.length; s++) {
+    const gap = slotEntries[s]!.order - slotEntries[s - 1]!.order;
+    if (gap > 1) {
+      gaps.push({ afterSlotIdx: s - 1, gap });
+    }
+  }
+
+  if (gaps.length === 0) {
+    // Contiguous — single sub-section.
+    return [{
+      subId: "0",
+      startIdx: 0,
+      endIdx: allNodes.length,
+      minOrder: slotEntries[0]!.order,
+      maxOrder: slotEntries[slotEntries.length - 1]!.order,
+      routeEdges: true
+    }];
+  }
+
+  // Split at each gap.  The gap boundary is placed so that all
+  // allNodes between the previous sub-section's last slot and the
+  // current sub-section's first slot belong to the correct side.
+  // Custom nodes BEFORE a slot (afterAnchor === false, sort key
+  // anchor − 0.5) belong to that slot's sub-section — NOT the
+  // preceding one. This ensures customs dropped to the right of a
+  // sub-section divider render after the divider, next to their
+  // anchor slot.
+  // Customs AFTER a slot (afterAnchor === true) stay in that slot's
+  // sub-section.
+  const sections: CanvasSubSection[] = [];
+  let subStart = 0;
+  let slotRunStart = 0;
+
+  for (const { afterSlotIdx, gap } of gaps) {
+    const lastSlotNodeIdx = slotEntries[afterSlotIdx]!.idx;
+    const nextSlotNodeIdx = slotEntries[afterSlotIdx + 1]!.idx;
+
+    // Default boundary: the index of the next sub-section's first slot.
+    let subEnd = nextSlotNodeIdx;
+
+    // Pull the boundary backward to exclude customs that are anchored
+    // BEFORE the next slot (afterAnchor === false) — those belong in
+    // the next sub-section, not this one.
+    const nextSlot = allNodes[nextSlotNodeIdx]!;
+    if (nextSlot.kind === "slot") {
+      while (subEnd > lastSlotNodeIdx + 1) {
+        const prev = allNodes[subEnd - 1]!;
+        if (
+          prev.kind === "custom" &&
+          prev.anchorChainId === nextSlot.nodeId &&
+          !prev.afterAnchor
+        ) {
+          subEnd--;
+        } else {
+          break;
+        }
+      }
+    }
+
+    const routeEdges = gap < BOOKEND_GAP_THRESHOLD;
+    sections.push({
+      subId: String(sections.length),
+      startIdx: subStart,
+      endIdx: subEnd,
+      minOrder: slotEntries[slotRunStart]!.order,
+      maxOrder: slotEntries[afterSlotIdx]!.order,
+      routeEdges
+    });
+    subStart = subEnd;
+    slotRunStart = afterSlotIdx + 1;
+  }
+
+  // Final sub-section: slotRunStart..end.
+  const lastGap = gaps[gaps.length - 1]!;
+  sections.push({
+    subId: String(sections.length),
+    startIdx: subStart,
+    endIdx: allNodes.length,
+    minOrder: slotEntries[slotRunStart]!.order,
+    maxOrder: slotEntries[slotEntries.length - 1]!.order,
+    routeEdges: lastGap.gap < BOOKEND_GAP_THRESHOLD
+  });
+
+  return sections;
+}
+
 function buildGroupFromNodes(
   docSlug: string,
   docTitle: string,
   allNodes: CanvasNode[],
   coverageFilter: boolean
 ): CanvasGroup {
-  const slotsInGroup = allNodes.filter(
+  // Sort by execution order so canvas rendering matches the runtime chain.
+  const sorted = sortNodesByOrder(allNodes);
+  const slotsInGroup = sorted.filter(
     (n): n is CanvasSlotNode => n.kind === "slot"
   );
-  const anchors = customAnchorSet(allNodes);
+  const anchors = customAnchorSet(sorted);
   const visibleNodes = coverageFilter
-    ? filterVisible(allNodes, anchors)
-    : allNodes;
+    ? filterVisible(sorted, anchors)
+    : sorted;
   const coveredSlotCount = slotsInGroup.reduce(
     (acc, s) => (s.coverage.count > 0 ? acc + 1 : acc),
     0
@@ -406,11 +634,12 @@ function buildGroupFromNodes(
     docSlug,
     docTitle,
     isCustomOnly: false,
-    allNodes,
+    allNodes: sorted,
     visibleNodes,
     coveredSlotCount,
     totalSlotCount: slotsInGroup.length,
-    hiddenSlotCount: slotsInGroup.length - visibleSlotCount
+    hiddenSlotCount: slotsInGroup.length - visibleSlotCount,
+    subSections: detectSubSections(sorted)
   };
 }
 
@@ -486,11 +715,9 @@ function applyUiGroupOverrides(
   const all = [...stripped, ...overrideGroups].filter(
     (g) => g.allNodes.length > 0
   );
-  all.sort((a, b) => {
-    const na = parseInt(a.docSlug, 10) || 0;
-    const nb = parseInt(b.docSlug, 10) || 0;
-    return na - nb;
-  });
+  // Sort groups by their earliest slot execution order so the canvas
+  // and connection lines match the actual runtime sequence.
+  all.sort((a, b) => minSlotOrder(a) - minSlotOrder(b));
   return all;
 }
 
