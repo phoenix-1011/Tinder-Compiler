@@ -3802,6 +3802,77 @@ kbd {
   font-family: var(--tc-font-mono);
 }
 
+/* ─── Cluster Picker (canvas cluster search/navigation) ──── */
+.cluster-picker-backdrop {
+  position: fixed;
+  inset: 0;
+  background: var(--tc-bg-overlay);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 80px;
+  z-index: 1000;
+}
+.cluster-picker {
+  width: 360px;
+  max-width: 85vw;
+  background: var(--tc-bg-popup);
+  border: 1px solid var(--tc-border-popup);
+  border-radius: 4px;
+  box-shadow: 0 6px 30px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  max-height: 60vh;
+}
+.cluster-picker-input {
+  background: var(--tc-bg-input);
+  border: none;
+  border-bottom: 1px solid var(--tc-border-popup);
+  color: var(--tc-fg-default);
+  padding: 8px 12px;
+  font-size: 14px;
+  outline: none;
+}
+.cluster-picker-input:focus {
+  box-shadow: inset 0 -2px 0 var(--tc-accent);
+}
+.cluster-picker-empty {
+  padding: 16px;
+  color: var(--tc-fg-muted);
+  font-size: 13px;
+  text-align: center;
+}
+.cluster-picker-list {
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+  overflow: auto;
+}
+.cluster-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--tc-fg-default);
+}
+.cluster-picker-row.is-active {
+  background: var(--tc-bg-toggle);
+}
+.cluster-picker-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+.cluster-picker-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Quick Open extras --------------------------------------- */
 .quick-open-row-main {
   display: flex;

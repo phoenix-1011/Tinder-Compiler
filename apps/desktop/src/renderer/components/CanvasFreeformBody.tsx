@@ -66,7 +66,7 @@ const SNAP_THRESHOLD_PX = 80;
 // → orange-red (action/strike) → cool return (sustainment).
 // ──────────────────────────────────────────────────────────────────
 
-const CLUSTER_PALETTE: Record<string, string> = {
+export const CLUSTER_PALETTE: Record<string, string> = {
   /* ── Phase: 基础 / 环境 (cold blues) ──────────────────────────── */
   "10-platform-chain":           "#5B93D5",  // steel blue
   "20-device-chain":             "#7280B8",  // cool slate
@@ -100,7 +100,7 @@ const CLUSTER_PALETTE: Record<string, string> = {
 /** Fall back for any unknown slug — should not happen in practice. */
 const PALETTE_FALLBACK = "#858585";
 
-function clusterColor(slug: string): string {
+export function clusterColor(slug: string): string {
   return CLUSTER_PALETTE[slug] ?? PALETTE_FALLBACK;
 }
 
@@ -980,6 +980,79 @@ export interface CanvasFreeformHandle {
   fitAll(): void;
   /** Fit only the selected entity's cluster (or the node itself) into view. */
   fitSelection(): void;
+  /** Fit a specific cluster (by docSlug) into view. */
+  fitCluster(slug: string): void;
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Main freeform body component
+// ──────────────────────────────────────────────────────────────────
+
+// ──────────────────────────────────────────────────────────────────
+// Custom MiniMap node — adds an SVG <title> for native hover tooltip
+// showing the cluster display name. Matches the default
+// MiniMapNodeComponent API from @xyflow/react.
+// ──────────────────────────────────────────────────────────────────
+
+/** Resolve a RF node id to a human-readable label for the tooltip. */
+function minimapNodeLabel(id: string): string {
+  if (id.startsWith("floating:")) return "自定义节点（浮动）";
+  const slug = id.replace(/^group:/, "");
+  // Look up the display title from CLUSTER_PALETTE key order — the
+  // canonical title comes from CHAIN_CATALOG, but we don't import it
+  // here. Use the slug directly as a reasonable fallback; the
+  // CategoryGroupData.group.docTitle is only available on the RF node
+  // data, which MiniMapNode doesn't receive. Instead we maintain a
+  // lightweight slug→label mapping.
+  return CLUSTER_LABELS[slug] ?? slug;
+}
+
+/** Slug → display label for minimap tooltips. */
+export const CLUSTER_LABELS: Record<string, string> = {
+  "10-platform-chain":           "平台基础链路",
+  "20-device-chain":             "设备链路",
+  "30-signal-environment-chain": "信号与环境传播链路",
+  "31-softkill":                 "软杀伤",
+  "32-signature":                "特征",
+  "40-sense-chain":              "感知链路",
+  "45-control-chain":            "控制指令链路",
+  "50-navigation-chain":         "导航链路",
+  "60-target-action-chain":      "目标动作与协同链路",
+  "61-cooperation":              "协同与通信",
+  "62-inventory":                "库存与监督",
+  "65-strike-chain":             "打击链路",
+  "70-maintenance-chain":        "维护与跟踪链路",
+  "75-communication-chain":      "统一通信链路",
+  "custom-only":                 "自定义节点",
+};
+
+function MiniMapNodeWithTooltip({
+  id, x, y, width, height, style, color, strokeColor, strokeWidth,
+  className, borderRadius, shapeRendering, onClick
+}: {
+  id: string; x: number; y: number; width: number; height: number;
+  style?: React.CSSProperties; color?: string; strokeColor?: string;
+  strokeWidth?: number; className?: string; borderRadius?: number;
+  shapeRendering?: string; selected?: boolean;
+  onClick?: (event: React.MouseEvent, id: string) => void;
+}) {
+  const { background, backgroundColor } = style || {};
+  const fill = color || (background as string) || (backgroundColor as string);
+  return (
+    <g>
+      <title>{minimapNodeLabel(id)}</title>
+      <rect
+        className={className}
+        x={x} y={y}
+        rx={borderRadius} ry={borderRadius}
+        width={width} height={height}
+        style={{ fill, stroke: strokeColor, strokeWidth }}
+        shapeRendering={shapeRendering}
+        onClick={onClick ? (e) => onClick(e, id) : undefined}
+        cursor="pointer"
+      />
+    </g>
+  );
 }
 
 // ──────────────────────────────────────────────────────────────────
@@ -1080,6 +1153,10 @@ function CanvasFreeformBodyInner({
           return;
         }
         rf.fitView({ nodes: nodeIds.map((id) => ({ id })), padding: 0.25, duration: 300 });
+      },
+      fitCluster(slug: string) {
+        const rfId = `group:${slug}`;
+        rf.fitView({ nodes: [{ id: rfId }], padding: 0.2, duration: 300 });
       }
     }),
     [rf, selection, projection, canvasState.customPositions]
@@ -1623,10 +1700,17 @@ function CanvasFreeformBodyInner({
           }}
           nodeStrokeColor={(n) => {
             if (!selection) return "transparent";
-            // Precompute: which RF node ID contains the selection?
             return n.id === selectedRfNodeId ? clusterColor(n.id.replace(/^group:/, "")) : "transparent";
           }}
           nodeStrokeWidth={3}
+          nodeComponent={MiniMapNodeWithTooltip}
+          onNodeClick={(_event, node) => {
+            // Click-to-navigate: fit the clicked cluster into view
+            const slug = node.id.startsWith("group:")
+              ? node.id.slice("group:".length)
+              : null;
+            if (slug) rf.fitView({ nodes: [{ id: node.id }], padding: 0.2, duration: 300 });
+          }}
           aria-label="画布小地图"
         />
       )}

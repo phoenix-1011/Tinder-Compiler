@@ -20,8 +20,122 @@ import { profileResourceBranchId } from "@tinder/nextstep";
 import { CanvasInspector } from "./CanvasInspector";
 import { CanvasBatchCandidatePanel } from "./CanvasBatchCandidatePanel";
 import { CanvasSharedBranchDialog } from "./CanvasSharedBranchDialog";
-import { CanvasFreeformBody, type CanvasFreeformHandle } from "./CanvasFreeformBody";
+import {
+  CanvasFreeformBody,
+  type CanvasFreeformHandle,
+  CLUSTER_LABELS,
+  clusterColor
+} from "./CanvasFreeformBody";
 import { ContextMenu, useContextMenu, type ContextMenuItem } from "./ContextMenu";
+
+// ──────────────────────────────────────────────────────────────────
+// Cluster Picker — browser-search-bar style dropdown for quick
+// navigation to any cluster. Input at top, filtered list below.
+// ──────────────────────────────────────────────────────────────────
+
+/** All cluster entries for the picker — order matches kill-chain progression. */
+const CLUSTER_ENTRIES = Object.entries(CLUSTER_LABELS).map(([slug, label]) => ({ slug, label }));
+
+function fuzzyMatch(query: string, target: string): boolean {
+  const q = query.toLowerCase();
+  const t = target.toLowerCase();
+  let qi = 0;
+  for (let ti = 0; ti < t.length && qi < q.length; ti++) {
+    if (t[ti] === q[qi]) qi++;
+  }
+  return qi === q.length;
+}
+
+function ClusterPicker({
+  open,
+  onClose,
+  onPick
+}: {
+  open: boolean;
+  onClose: () => void;
+  onPick: (slug: string) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [activeIdx, setActiveIdx] = useState(0);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
+
+  useEffect(() => {
+    if (open) {
+      setQuery("");
+      setActiveIdx(0);
+      requestAnimationFrame(() => inputRef.current?.focus());
+    }
+  }, [open]);
+
+  const filtered = useMemo(() => {
+    if (!query.trim()) return CLUSTER_ENTRIES;
+    return CLUSTER_ENTRIES.filter((e) => fuzzyMatch(query, e.label) || fuzzyMatch(query, e.slug));
+  }, [query]);
+
+  useEffect(() => {
+    if (activeIdx >= filtered.length) setActiveIdx(Math.max(0, filtered.length - 1));
+  }, [filtered.length, activeIdx]);
+
+  useEffect(() => {
+    listRef.current?.querySelector<HTMLElement>(`[data-idx="${activeIdx}"]`)
+      ?.scrollIntoView({ block: "nearest" });
+  }, [activeIdx]);
+
+  if (!open) return null;
+
+  const pick = (slug: string) => { onClose(); onPick(slug); };
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Escape") { e.preventDefault(); onClose(); }
+    else if (e.key === "ArrowDown") { e.preventDefault(); setActiveIdx((i) => Math.min(filtered.length - 1, i + 1)); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setActiveIdx((i) => Math.max(0, i - 1)); }
+    else if (e.key === "Enter") {
+      e.preventDefault();
+      const item = filtered[activeIdx];
+      if (item) pick(item.slug);
+    }
+  };
+
+  return (
+    <div className="cluster-picker-backdrop" onMouseDown={onClose}>
+      <div className="cluster-picker" onMouseDown={(e) => e.stopPropagation()}>
+        <input
+          ref={inputRef}
+          className="cluster-picker-input"
+          placeholder="搜索簇…"
+          value={query}
+          onChange={(e) => { setQuery(e.target.value); setActiveIdx(0); }}
+          onKeyDown={onKeyDown}
+          spellCheck={false}
+        />
+        {filtered.length === 0 ? (
+          <div className="cluster-picker-empty">无匹配簇</div>
+        ) : (
+          <ul className="cluster-picker-list" ref={listRef}>
+            {filtered.map((entry, idx) => (
+              <li
+                key={entry.slug}
+                data-idx={idx}
+                className={`cluster-picker-row${idx === activeIdx ? " is-active" : ""}`}
+                onMouseEnter={() => setActiveIdx(idx)}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => pick(entry.slug)}
+              >
+                <span
+                  className="cluster-picker-dot"
+                  style={{ background: clusterColor(entry.slug) }}
+                  aria-hidden="true"
+                />
+                <span className="cluster-picker-label">{entry.label}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
 
 /**
  * Freeform canvas (D-series): @xyflow/react viewport with draggable
@@ -38,6 +152,7 @@ export function CanvasView() {
   const cm = useContextMenu();
   const freeformRef = useRef<CanvasFreeformHandle>(null);
   const [batchOpen, setBatchOpen] = useState(false);
+  const [clusterPickerOpen, setClusterPickerOpen] = useState(false);
 
   // Shared-branch guard pending state — non-null while the dialog
   // is open. Carries the requested jump target so accepting either
@@ -541,6 +656,15 @@ export function CanvasView() {
           >
             <span className="codicon codicon-target" aria-hidden="true" />
           </button>
+          <button
+            type="button"
+            className="canvas-view-icon-btn"
+            onClick={() => setClusterPickerOpen(true)}
+            title="定位到簇"
+            aria-label="定位到簇"
+          >
+            <span className="codicon codicon-compass" aria-hidden="true" />
+          </button>
 
           <button
             type="button"
@@ -649,6 +773,12 @@ export function CanvasView() {
         onCreateProfileBranch={() => void onCreateProfileBranchFromGuard()}
         onJumpToGlobalEditor={onJumpFromGuard}
         onCancel={() => setSharedGuard(null)}
+      />
+
+      <ClusterPicker
+        open={clusterPickerOpen}
+        onClose={() => setClusterPickerOpen(false)}
+        onPick={(slug) => freeformRef.current?.fitCluster(slug)}
       />
     </div>
   );
