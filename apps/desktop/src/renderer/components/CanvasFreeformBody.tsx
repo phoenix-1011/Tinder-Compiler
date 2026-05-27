@@ -1617,7 +1617,7 @@ function CanvasFreeformBodyInner({
           style={{ background: "var(--tc-canvas-bg, #1e1e1e)" }}
           maskColor="rgba(0,0,0,0.6)"
           nodeColor={(n) => {
-            if (n.id.startsWith("floating:")) return "var(--tc-accent, #007acc)";
+            if (n.id.startsWith("floating:")) return CLUSTER_PALETTE["custom-only"]!;
             const slug = n.id.replace(/^group:/, "");
             return clusterColor(slug);
           }}
