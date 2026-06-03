@@ -3,14 +3,14 @@ import type { RuntimeReport, RuntimeReportItem } from "../state/runtimeReport";
 export interface RuntimeReportModalProps {
   report: RuntimeReport;
   /** Target on-disk path where the export will land. */
-  exportPath: string;
+  exportPath?: string;
   /** Called when the user confirms export. Only enabled when no blocking. */
-  onExport: () => void;
+  onExport?: () => void;
   onClose: () => void;
 }
 
 /**
- * Validation + export report for `生成运行配置`. Three buckets:
+ * Validation report for runtime config export. Three buckets:
  * Blocking (prevents export), Warning (informs but allows export), Info
  * (summary).
  */
@@ -20,14 +20,14 @@ export function RuntimeReportModal({
   onExport,
   onClose
 }: RuntimeReportModalProps) {
-  const canExport = report.blocking.length === 0;
+  const canExport = report.blocking.length === 0 && Boolean(onExport);
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
       <div
         className="modal-card runtime-report-card"
         onMouseDown={(e) => e.stopPropagation()}
       >
-        <div className="ca-dialog-title">生成运行配置 · 预检</div>
+        <div className="ca-dialog-title">运行配置 · 预检</div>
 
         <Section
           kind="blocking"
@@ -48,23 +48,31 @@ export function RuntimeReportModal({
           items={report.info}
         />
 
-        <div className="runtime-report-target">
-          目标文件：<code title={exportPath}>{exportPath}</code>
-        </div>
+        {exportPath ? (
+          <div className="runtime-report-target">
+            目标文件：<code title={exportPath}>{exportPath}</code>
+          </div>
+        ) : (
+          <div className="runtime-report-target">
+            完整 runtime config 请从配置档案概览的关联型号中导出。
+          </div>
+        )}
 
         <div className="ca-dialog-actions">
           <button type="button" className="ca-dialog-btn" onClick={onClose}>
             取消
           </button>
-          <button
-            type="button"
-            className={`ca-dialog-btn ${canExport ? "is-primary" : ""}`}
-            disabled={!canExport}
-            onClick={onExport}
-            title={canExport ? "" : "请先修复 Blocking 项"}
-          >
-            导出
-          </button>
+          {onExport && (
+            <button
+              type="button"
+              className={`ca-dialog-btn ${canExport ? "is-primary" : ""}`}
+              disabled={!canExport}
+              onClick={onExport}
+              title={canExport ? "" : "请先修复 Blocking 项"}
+            >
+              导出
+            </button>
+          )}
         </div>
       </div>
     </div>

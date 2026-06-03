@@ -206,6 +206,40 @@ export interface CustomNodeUsage {
   order: number;
 }
 
+/**
+ * Profile-scoped platform-model export mapping. A single authoring profile may
+ * export multiple platform model objects. Each exported platform object maps
+ * every participating compute-resource branch to a concrete compute object key
+ * understood by the platform database.
+ */
+export interface ProfileExportConfig {
+  schema_version: 1;
+  platform_model_targets: ProfilePlatformModelTarget[];
+}
+
+export interface ProfilePlatformModelTarget {
+  target_id: string;
+  platform_model_id: string;
+  platform_version: string;
+  /** Derived from `platform_model_id + "_" + platform_version`; `_` is reserved. */
+  platform_object_key?: string;
+  display_name?: string;
+  enabled: boolean;
+  compute_object_bindings: ProfileComputeObjectBinding[];
+}
+
+export interface ProfileComputeObjectBinding {
+  binding_id: string;
+  resource_kind: ComputeResourceKind;
+  resource_instance_id: string;
+  selected_branch_id: string;
+  compute_object_id: string;
+  compute_object_version: string;
+  /** Derived from `compute_object_id + "_" + compute_object_version`; `_` is reserved. */
+  compute_object_key?: string;
+  display_name?: string;
+}
+
 export type BuiltinExecutionAnchor =
   | { kind: "builtin_domain_node"; domain: string; node_id: string }
   | { kind: "builtin_core_chain"; chain_id: string };
@@ -235,6 +269,12 @@ export interface GuiProjectFile {
    * did not store placement separately.
    */
   custom_node_usages?: CustomNodeUsage[];
+  /**
+   * Platform model export contract. This does not duplicate compute-resource
+   * implementation data; it only maps exported platform model objects to the
+   * concrete compute object keys used by the platform database.
+   */
+  export_config?: ProfileExportConfig;
 }
 
 export interface RuntimeConfigFile {

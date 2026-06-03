@@ -116,8 +116,8 @@ const COLOR_VAR_MAP: Record<string, string[]> = {
   foreground: ["--tc-fg-default"],
   "editor.background": ["--tc-bg-app", "--tc-bg-editor", "--tc-bg-tab-active"],
   "editor.foreground": ["--tc-fg-default"],
-  "editorWidget.background": ["--tc-bg-popup"],
-  "editorWidget.border": ["--tc-border-popup"],
+  "editorWidget.background": ["--tc-bg-popup", "--tc-bg-dialog"],
+  "editorWidget.border": ["--tc-border-popup", "--tc-border-dialog"],
 
   // Title bar
   "titleBar.activeBackground": ["--tc-bg-titlebar"],

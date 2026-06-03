@@ -5,18 +5,10 @@ import { basenameNoExt } from "../state/chainAssemblyStorage";
 
 interface ProfileLifecycleViewProps {
   profileId: string;
-  /** Synthetic tab uri — used by the close button. */
+  /** Synthetic tab uri, used by the close button. */
   tabUri: string;
 }
 
-/**
- * Tab companion to `链路`. Surfaces profile lifecycle actions (rename,
- * duplicate, reveal, delete) and the canonical metadata (file path,
- * schema version, resource counts) that previously lived as inline rows
- * under the sidebar's `使用与版本` section. Rendered as a synthetic
- * `profile-lifecycle://` tab inside EditorArea so it shares the tab
- * strip with files and chain docs.
- */
 export function ProfileLifecycleView({
   profileId,
   tabUri
@@ -58,7 +50,7 @@ export function ProfileLifecycleView({
               <dt>档案名</dt>
               <dd>{profile.name}</dd>
               <dt>文件名</dt>
-              <dd>{basenameNoExt(profile.id) || "(无)"}</dd>
+              <dd>{basenameNoExt(profile.id) || "(未命名)"}</dd>
               <dt>路径</dt>
               <dd>
                 <code>{profile.id}</code>
@@ -86,36 +78,36 @@ export function ProfileLifecycleView({
         <section className="profile-lifecycle-section">
           <h2>操作</h2>
           <div className="profile-lifecycle-section-body">
-          <div className="profile-lifecycle-buttons">
-            <button
-              type="button"
-              className="chain-editor-action-btn"
-              onClick={() => void ca.duplicateProfile(profile)}
-            >
-              创建副本…
-            </button>
-            <button
-              type="button"
-              className="chain-editor-action-btn"
-              onClick={() => void ca.renameProfileById(profile)}
-            >
-              重命名…
-            </button>
-            <button
-              type="button"
-              className="chain-editor-action-btn"
-              onClick={() => void ca.revealProfileInOs(profile)}
-            >
-              在文件管理器中显示
-            </button>
-            <button
-              type="button"
-              className="chain-editor-action-btn is-danger"
-              onClick={() => void ca.deleteProfileById(profile)}
-            >
-              删除档案
-            </button>
-          </div>
+            <div className="profile-lifecycle-buttons">
+              <button
+                type="button"
+                className="chain-editor-action-btn"
+                onClick={() => void ca.duplicateProfile(profile)}
+              >
+                创建副本
+              </button>
+              <button
+                type="button"
+                className="chain-editor-action-btn"
+                onClick={() => void ca.renameProfileById(profile)}
+              >
+                重命名
+              </button>
+              <button
+                type="button"
+                className="chain-editor-action-btn"
+                onClick={() => void ca.revealProfileInOs(profile)}
+              >
+                在文件管理器中显示
+              </button>
+              <button
+                type="button"
+                className="chain-editor-action-btn is-danger"
+                onClick={() => void ca.deleteProfileById(profile)}
+              >
+                删除档案
+              </button>
+            </div>
           </div>
         </section>
       </div>

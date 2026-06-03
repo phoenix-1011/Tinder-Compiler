@@ -16,7 +16,6 @@ import {
   type ExecutionRow
 } from "../state/chainProjection";
 import {
-  buildRuntimeConfig,
   buildRuntimeReport,
   type RuntimeReport
 } from "../state/runtimeReport";
@@ -50,7 +49,6 @@ export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
   const cm = useContextMenu();
   const [reportState, setReportState] = useState<{
     report: RuntimeReport;
-    exportPath: string;
   } | null>(null);
   const [nodeInfo, setNodeInfo] = useState<{
     nodeId: string;
@@ -288,13 +286,6 @@ export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
     }, 0);
   };
 
-  /**
-   * Default runtime export path: sibling of the profile JSON with a
-   * `.runtime.json` suffix. The engine-effective path detection described
-   * by D31 is deferred — this is the staging default.
-   */
-  const runtimeExportPath = `${profile.id.replace(/\.json$/i, "")}.runtime.json`;
-
   const onSave = async () => {
     // The MVP authoring path already writes profile changes through to disk
     // on every action; this button re-serialises and writes the current
@@ -319,17 +310,7 @@ export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
       v2Resources,
       projectV2Resources
     );
-    setReportState({ report, exportPath: runtimeExportPath });
-  };
-
-  const onExport = async () => {
-    if (!reportState) return;
-    const config = buildRuntimeConfig(profile.project, v2Resources);
-    await window.tinder.writeText(
-      reportState.exportPath,
-      JSON.stringify(config, null, 2)
-    );
-    setReportState(null);
+    setReportState({ report });
   };
 
   const setPersistedChainMode = (next: ChainEditorMode) => {
@@ -427,9 +408,9 @@ export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
             type="button"
             className="chain-editor-action-btn is-primary"
             onClick={onGenerate}
-            title="预检并导出运行配置"
+            title="预检运行配置；完整 runtime config 请从配置档案概览的关联型号导出"
           >
-            生成运行配置
+            预检运行配置
           </button>
         </div>
       </div>
@@ -539,8 +520,6 @@ export function ChainEditorView({ profileId, tabUri }: ChainEditorViewProps) {
       {reportState && (
         <RuntimeReportModal
           report={reportState.report}
-          exportPath={reportState.exportPath}
-          onExport={() => void onExport()}
           onClose={() => setReportState(null)}
         />
       )}

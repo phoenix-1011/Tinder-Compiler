@@ -12,7 +12,7 @@
   "scripts": {
     "start": "scripts\\dev.cmd",
     "dev": "scripts\\dev.cmd",
-    "desktop:dev": "pnpm --filter @tinder/desktop dev",
+    "desktop:dev": "scripts\\desktop-dev.cmd",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "lint": "pnpm -r lint",

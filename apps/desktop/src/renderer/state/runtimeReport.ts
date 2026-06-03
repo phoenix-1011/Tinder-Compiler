@@ -3,16 +3,21 @@ import type {
   CustomComputeResource,
   CustomNodeUsage,
   GuiProjectFile,
+  ProfilePlatformModelTarget,
   ProfileCustomResourceRef,
   ProfileStandardVariantRef,
   StandardComputeResource
 } from "@tinder/nextstep";
-import { profileResourceBranchId } from "@tinder/nextstep";
+import {
+  computeObjectKey,
+  platformObjectKey,
+  profileResourceBranchId
+} from "@tinder/nextstep";
 import { CHAIN_CATALOG } from "../help/chain-catalog.generated";
 import { isResourceBindableChainNode } from "../help/chainCatalogUi";
 
 /**
- * Validation + export model for `生成运行配置`.
+ * Validation + export model for runtime config pre-check and export.
  *
  * The MVP report has three severity buckets: blocking failures prevent
  * export, warnings allow export but remain visible, info items summarise
@@ -45,9 +50,28 @@ export interface RuntimeReport {
 /** Minimal v2 runtime config shape consumed by Model-P-v2. */
 export interface RuntimeConfigV2 {
   version: 2;
+  platform_model?: RuntimePlatformModelExport;
+  compute_object_bindings?: RuntimeComputeObjectBindingExport[];
   ordered_execution_list: RuntimeOrderedItem[];
   standard_nodes: RuntimeStandardNodeExport[];
   custom_nodes: RuntimeCustomNodeExport[];
+}
+
+export interface RuntimePlatformModelExport {
+  model_id: string;
+  version: string;
+  object_key: string;
+  display_name?: string;
+}
+
+export interface RuntimeComputeObjectBindingExport {
+  compute_object_key: string;
+  compute_object_id: string;
+  compute_object_version: string;
+  display_name?: string;
+  resource_kind: "standard" | "custom";
+  resource_instance_id: string;
+  branch_id: string;
 }
 
 export type RuntimeOrderedItem =
@@ -461,15 +485,16 @@ function validateResourceForExport(
  * `blocking.length === 0`. Disabled refs / usages are excluded.
  *
  * Uses v2 resource state to populate per-export fields:
- * - `standard_nodes[]` ← selected branch/variant effective candidates
- * - `impl_kind` ← `resource.implementation.kind`
- * - `location` ← `resource.implementation.runtime_artifact.path`
- * - `action_index` / `description` ← the matching entry in
+ * - `standard_nodes[]` from selected branch/variant effective candidates
+ * - `impl_kind` from `resource.implementation.kind`
+ * - `location` from `resource.implementation.runtime_artifact.path`
+ * - `action_index` / `description` from the matching entry in
  *   `resource.custom_nodes[]` looked up by `usage.node_id`
  */
 export function buildRuntimeConfig(
   profile: GuiProjectFile,
-  v2Resources: ComputeResourceV2[]
+  v2Resources: ComputeResourceV2[],
+  platformTarget?: ProfilePlatformModelTarget
 ): RuntimeConfigV2 {
   const usages = (profile.custom_node_usages ?? []).filter((u) => u.enabled);
   const activeStandardRefs = (profile.resources ?? []).filter(
@@ -602,5 +627,37 @@ export function buildRuntimeConfig(
     };
   });
 
-  return { version: 2, ordered_execution_list, standard_nodes, custom_nodes };
+  return {
+    version: 2,
+    ...(platformTarget
+      ? {
+          platform_model: {
+            model_id: platformTarget.platform_model_id,
+            version: platformTarget.platform_version,
+            object_key: platformObjectKey(
+              platformTarget.platform_model_id,
+              platformTarget.platform_version
+            ),
+            display_name: platformTarget.display_name
+          },
+          compute_object_bindings: platformTarget.compute_object_bindings.map(
+            (binding) => ({
+              compute_object_key: computeObjectKey(
+                binding.compute_object_id,
+                binding.compute_object_version
+              ),
+              compute_object_id: binding.compute_object_id,
+              compute_object_version: binding.compute_object_version,
+              display_name: binding.display_name,
+              resource_kind: binding.resource_kind,
+              resource_instance_id: binding.resource_instance_id,
+              branch_id: binding.selected_branch_id
+            })
+          )
+        }
+      : {}),
+    ordered_execution_list,
+    standard_nodes,
+    custom_nodes
+  };
 }

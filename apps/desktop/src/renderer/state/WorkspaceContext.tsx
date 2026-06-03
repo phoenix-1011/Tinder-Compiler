@@ -19,9 +19,11 @@ export type DocumentKind =
   | "chain-editor"
   | "profile-lifecycle"
   | "resource-editor"
-  | "resource-branch";
+  | "resource-branch"
+  | "model-library";
 
 export type ResourceEditorKind = "standard" | "custom";
+export type ModelLibraryDocumentKind = "category" | "family" | "version";
 
 export interface OpenDocument {
   uri: string;
@@ -75,6 +77,16 @@ export interface OpenDocument {
   resourceBranchId?: string;
   /** Whether a resource-branch tab was opened from profile or global scope. */
   resourceBranchScope?: "profile" | "global";
+  /** Model-library tab shape. */
+  modelLibraryDocumentKind?: ModelLibraryDocumentKind;
+  /** Platform vs equipment scope for model-library tabs. */
+  modelLibraryObjectKind?: "platform_model" | "equipment_model";
+  /** Category id for model-library category tabs. */
+  modelLibraryCategoryId?: string;
+  /** Family id for model-library concrete-model tabs. */
+  modelLibraryFamilyId?: string;
+  /** Object key for model-library version tabs. */
+  modelLibraryVersionKey?: string;
   /**
    * Disk location used to reload the resource. v2 packages point at the
    * package directory; legacy single-file resources point at the JSON path.
@@ -88,6 +100,7 @@ export type ActivityView =
   | "search"
   | "run"
   | "chain-assembly"
+  | "model-library"
   | "help"
   | "ai";
 
@@ -125,14 +138,16 @@ interface WorkspaceState {
   activeView: ActivityView;
   documents: OpenDocument[];
   activeUri: string | null;
+  modelLibraryDocuments: OpenDocument[];
+  activeModelLibraryUri: string | null;
   profileGroups: ProfileTabGroup[];
   activeProfileHome: ProfileTabGroup | null;
   /** uri → last save status. */
   saveStatus: Record<string, SaveStatus>;
   revealRequest: RevealRequest | null;
-  /** Whether a previous activeView is reachable via goBack(). */
+  /** Whether a previous workspace location is reachable via goBack(). */
   canGoBack: boolean;
-  /** Whether a popped activeView is reachable via goForward(). */
+  /** Whether a popped workspace location is reachable via goForward(). */
   canGoForward: boolean;
   /**
    * Current top-level app mode. `profile-tree` is the default; `canvas`
@@ -167,9 +182,9 @@ interface WorkspaceActions {
   openFolder(): Promise<void>;
   openFolderByPath(path: string): Promise<void>;
   setActiveView(view: ActivityView): void;
-  /** Pop the previous activeView from history. No-op when canGoBack is false. */
+  /** Restore the previous workspace location. No-op when canGoBack is false. */
   goBack(): void;
-  /** Push back into a previously popped activeView. */
+  /** Restore a workspace location popped by goBack(). */
   goForward(): void;
   openFile(path: string, options?: OpenFileOptions): Promise<void>;
   /**
@@ -212,11 +227,26 @@ interface WorkspaceActions {
     branchId: string;
     displayName: string;
   }): void;
+  openModelLibraryCategory(params: {
+    objectKind: "platform_model" | "equipment_model";
+    categoryId: string;
+    displayName: string;
+  }): void;
+  openModelLibraryFamily(params: {
+    familyId: string;
+    displayName: string;
+  }): void;
+  openModelLibraryVersion(params: {
+    objectKey: string;
+    displayName: string;
+  }): void;
+  closeModelLibraryTab(uri: string): void;
+  setActiveModelLibraryTab(uri: string | null): void;
   closeFile(uri: string): void;
   closeProfileGroup(profileId: string): void;
   closeActiveFile(): void;
   cycleTab(direction: 1 | -1): void;
-  setActive(uri: string): void;
+  setActive(uri: string | null): void;
   /** Promote a preview tab to a pinned tab. No-op when already pinned. */
   pinDocument(uri: string): void;
   updateContent(uri: string, content: string): void;
@@ -292,7 +322,37 @@ function languageFor(name: string): string {
   return LANGUAGE_BY_EXT[ext] ?? "plaintext";
 }
 
-const VIEW_HISTORY_LIMIT = 50;
+const WORKSPACE_HISTORY_LIMIT = 50;
+
+interface WorkspaceNavigationSnapshot {
+  activeView: ActivityView;
+  activeUri: string | null;
+  activeModelLibraryUri: string | null;
+  activeProfileHome: ProfileTabGroup | null;
+}
+
+function sameProfileHome(
+  a: ProfileTabGroup | null,
+  b: ProfileTabGroup | null
+): boolean {
+  return a?.profileId === b?.profileId && a?.displayName === b?.displayName;
+}
+
+function sameNavigationSnapshot(
+  a: WorkspaceNavigationSnapshot,
+  b: WorkspaceNavigationSnapshot
+): boolean {
+  return (
+    a.activeView === b.activeView &&
+    a.activeUri === b.activeUri &&
+    a.activeModelLibraryUri === b.activeModelLibraryUri &&
+    sameProfileHome(a.activeProfileHome, b.activeProfileHome)
+  );
+}
+
+function hasOwn(value: object, key: keyof WorkspaceNavigationSnapshot): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key);
+}
 
 const APP_MODE_KEY = "tinder.appMode";
 const CANVAS_PROFILE_ID_KEY = "tinder.canvasProfileId";
@@ -318,33 +378,6 @@ function readPersistedCanvasProfileId(): string | null {
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [folder, setFolder] = useState<OpenedFolder | null>(null);
   const [activeView, _setActiveView] = useState<ActivityView>("explorer");
-  const [viewBack, setViewBack] = useState<ActivityView[]>([]);
-  const [viewForward, setViewForward] = useState<ActivityView[]>([]);
-  const activeViewRef = useRef<ActivityView>(activeView);
-  activeViewRef.current = activeView;
-
-  const setActiveView = useCallback((view: ActivityView) => {
-    if (view === activeViewRef.current) return;
-    setViewBack((prev) => {
-      const next = [...prev, activeViewRef.current];
-      return next.length > VIEW_HISTORY_LIMIT
-        ? next.slice(next.length - VIEW_HISTORY_LIMIT)
-        : next;
-    });
-    setViewForward([]);
-    _setActiveView(view);
-  }, []);
-
-  const goBack = useCallback(() => {
-    setViewBack((prevBack) => {
-      if (prevBack.length === 0) return prevBack;
-      const target = prevBack[prevBack.length - 1]!;
-      setViewForward((prevFwd) => [activeViewRef.current, ...prevFwd]);
-      _setActiveView(target);
-      return prevBack.slice(0, -1);
-    });
-  }, []);
-
   // App-mode state — persisted in localStorage so reloads (Electron dev
   // hot-reload, devtools refresh) preserve where the user was. Canvas
   // mode requires a profileId; if the persisted mode is `canvas` but
@@ -383,20 +416,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const goForward = useCallback(() => {
-    setViewForward((prevFwd) => {
-      if (prevFwd.length === 0) return prevFwd;
-      const target = prevFwd[0]!;
-      setViewBack((prevBack) => [...prevBack, activeViewRef.current]);
-      _setActiveView(target);
-      return prevFwd.slice(1);
-    });
-  }, []);
-
   const [documents, setDocuments] = useState<OpenDocument[]>([]);
-  const [activeUri, setActiveUri] = useState<string | null>(null);
+  const [activeUri, _setActiveUri] = useState<string | null>(null);
+  const [modelLibraryDocuments, setModelLibraryDocuments] = useState<OpenDocument[]>([]);
+  const [activeModelLibraryUri, _setActiveModelLibraryUri] =
+    useState<string | null>(null);
   const [profileGroups, setProfileGroups] = useState<ProfileTabGroup[]>([]);
-  const [activeProfileHome, setActiveProfileHome] =
+  const [activeProfileHome, _setActiveProfileHome] =
     useState<ProfileTabGroup | null>(null);
   const [saveStatus, setSaveStatus] = useState<Record<string, SaveStatus>>({});
   const [revealRequest, setRevealRequest] = useState<RevealRequest | null>(null);
@@ -405,8 +431,116 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   // Always read latest documents inside async save flow without re-creating callbacks.
   const docsRef = useRef<OpenDocument[]>(documents);
   docsRef.current = documents;
+  const modelLibraryDocsRef = useRef<OpenDocument[]>(modelLibraryDocuments);
+  modelLibraryDocsRef.current = modelLibraryDocuments;
+  const activeViewRef = useRef<ActivityView>(activeView);
+  activeViewRef.current = activeView;
   const activeUriRef = useRef<string | null>(activeUri);
   activeUriRef.current = activeUri;
+  const activeModelLibraryUriRef = useRef<string | null>(activeModelLibraryUri);
+  activeModelLibraryUriRef.current = activeModelLibraryUri;
+  const activeProfileHomeRef = useRef<ProfileTabGroup | null>(activeProfileHome);
+  activeProfileHomeRef.current = activeProfileHome;
+
+  const [navigationBack, setNavigationBack] = useState<WorkspaceNavigationSnapshot[]>([]);
+  const [navigationForward, setNavigationForward] = useState<WorkspaceNavigationSnapshot[]>([]);
+
+  const currentNavigationSnapshot = useCallback(
+    (): WorkspaceNavigationSnapshot => ({
+      activeView: activeViewRef.current,
+      activeUri: activeUriRef.current,
+      activeModelLibraryUri: activeModelLibraryUriRef.current,
+      activeProfileHome: activeProfileHomeRef.current
+    }),
+    []
+  );
+
+  const applyNavigationSnapshot = useCallback(
+    (snapshot: WorkspaceNavigationSnapshot) => {
+      const activeUri =
+        snapshot.activeUri &&
+        docsRef.current.some((doc) => doc.uri === snapshot.activeUri)
+          ? snapshot.activeUri
+          : null;
+      const activeModelLibraryUri =
+        snapshot.activeModelLibraryUri &&
+        modelLibraryDocsRef.current.some(
+          (doc) => doc.uri === snapshot.activeModelLibraryUri
+        )
+          ? snapshot.activeModelLibraryUri
+          : null;
+      _setActiveView(snapshot.activeView);
+      _setActiveUri(activeUri);
+      _setActiveModelLibraryUri(activeModelLibraryUri);
+      _setActiveProfileHome(snapshot.activeProfileHome);
+    },
+    []
+  );
+
+  const activateWorkspace = useCallback(
+    (next: Partial<WorkspaceNavigationSnapshot>) => {
+      const current = currentNavigationSnapshot();
+      const target: WorkspaceNavigationSnapshot = {
+        activeView: next.activeView ?? current.activeView,
+        activeUri: hasOwn(next, "activeUri")
+          ? next.activeUri ?? null
+          : current.activeUri,
+        activeModelLibraryUri: hasOwn(next, "activeModelLibraryUri")
+          ? next.activeModelLibraryUri ?? null
+          : current.activeModelLibraryUri,
+        activeProfileHome: hasOwn(next, "activeProfileHome")
+          ? next.activeProfileHome ?? null
+          : current.activeProfileHome
+      };
+      if (sameNavigationSnapshot(current, target)) return;
+      setNavigationBack((prev) => {
+        const updated = [...prev, current];
+        return updated.length > WORKSPACE_HISTORY_LIMIT
+          ? updated.slice(updated.length - WORKSPACE_HISTORY_LIMIT)
+          : updated;
+      });
+      setNavigationForward([]);
+      applyNavigationSnapshot(target);
+    },
+    [applyNavigationSnapshot, currentNavigationSnapshot]
+  );
+
+  const setActiveView = useCallback(
+    (view: ActivityView) => {
+      activateWorkspace({
+        activeView: view,
+        ...(view === "model-library" ? { activeUri: null } : {})
+      });
+    },
+    [activateWorkspace]
+  );
+
+  const goBack = useCallback(() => {
+    setNavigationBack((prevBack) => {
+      if (prevBack.length === 0) return prevBack;
+      const target = prevBack[prevBack.length - 1]!;
+      const current = currentNavigationSnapshot();
+      setNavigationForward((prevFwd) => [current, ...prevFwd]);
+      applyNavigationSnapshot(target);
+      return prevBack.slice(0, -1);
+    });
+  }, [applyNavigationSnapshot, currentNavigationSnapshot]);
+
+  const goForward = useCallback(() => {
+    setNavigationForward((prevFwd) => {
+      if (prevFwd.length === 0) return prevFwd;
+      const target = prevFwd[0]!;
+      const current = currentNavigationSnapshot();
+      setNavigationBack((prevBack) => {
+        const updated = [...prevBack, current];
+        return updated.length > WORKSPACE_HISTORY_LIMIT
+          ? updated.slice(updated.length - WORKSPACE_HISTORY_LIMIT)
+          : updated;
+      });
+      applyNavigationSnapshot(target);
+      return prevFwd.slice(1);
+    });
+  }, [applyNavigationSnapshot, currentNavigationSnapshot]);
 
   const ensureProfileGroup = useCallback(
     (profileId: string, displayName: string) => {
@@ -450,7 +584,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       const position = options?.position;
       const existing = docsRef.current.find((d) => d.uri === path);
       if (existing) {
-        setActiveUri(path);
+        activateWorkspace({ activeUri: path });
         if (position) revealAt(path, position);
         // Re-opening an existing tab through a non-preview path (e.g. an
         // explicit pin) should promote it. Opening through preview leaves
@@ -491,10 +625,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         next[previewIdx] = doc;
         return next;
       });
-      setActiveUri(path);
+      activateWorkspace({ activeUri: path });
       if (position) revealAt(path, position);
     },
-    [revealAt]
+    [activateWorkspace, revealAt]
   );
 
   const openHelpDoc = useCallback(
@@ -503,7 +637,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       const uri = `help://${nodeId}`;
       const existing = docsRef.current.find((d) => d.uri === uri);
       if (existing) {
-        setActiveUri(uri);
+        activateWorkspace({ activeUri: uri });
         if (!preview && existing.preview) {
           setDocuments((prev) =>
             prev.map((d) => (d.uri === uri ? { ...d, preview: false } : d))
@@ -533,9 +667,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         next[previewIdx] = doc;
         return next;
       });
-      setActiveUri(uri);
+      activateWorkspace({ activeUri: uri });
     },
-    []
+    [activateWorkspace]
   );
 
   const pinDocument = useCallback((uri: string) => {
@@ -572,7 +706,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }) => {
       const existing = docsRef.current.find((d) => d.uri === params.uri);
       if (existing) {
-        setActiveUri(params.uri);
+        activateWorkspace({ activeUri: params.uri });
         if (!params.preview && existing.preview) {
           setDocuments((prev) =>
             prev.map((d) =>
@@ -642,18 +776,86 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         next[previewIdx] = doc;
         return next;
       });
-      setActiveUri(params.uri);
+      activateWorkspace({ activeUri: params.uri });
     },
-    []
+    [activateWorkspace]
   );
 
   const openProfileOverview = useCallback(
     (profileId: string, displayName: string) => {
       const group = ensureProfileGroup(profileId, displayName);
-      setActiveProfileHome(group);
-      setActiveUri(null);
+      activateWorkspace({
+        activeView: "chain-assembly",
+        activeUri: null,
+        activeProfileHome: group
+      });
     },
-    [ensureProfileGroup]
+    [activateWorkspace, ensureProfileGroup]
+  );
+
+  const openModelLibraryTab = useCallback(
+    (params: {
+      uri: string;
+      name: string;
+      tooltip?: string;
+      modelLibraryDocumentKind: ModelLibraryDocumentKind;
+      modelLibraryObjectKind?: "platform_model" | "equipment_model";
+      modelLibraryCategoryId?: string;
+      modelLibraryFamilyId?: string;
+      modelLibraryVersionKey?: string;
+    }) => {
+      const existing = modelLibraryDocsRef.current.find(
+        (doc) => doc.uri === params.uri
+      );
+      if (existing) {
+        activateWorkspace({
+          activeView: "model-library",
+          activeUri: null,
+          activeModelLibraryUri: params.uri
+        });
+        setModelLibraryDocuments((prev) =>
+          prev.map((doc) =>
+            doc.uri === params.uri
+              ? {
+                  ...doc,
+                  name: params.name,
+                  tooltip: params.tooltip,
+                  modelLibraryDocumentKind: params.modelLibraryDocumentKind,
+                  modelLibraryObjectKind: params.modelLibraryObjectKind,
+                  modelLibraryCategoryId: params.modelLibraryCategoryId,
+                  modelLibraryFamilyId: params.modelLibraryFamilyId,
+                  modelLibraryVersionKey: params.modelLibraryVersionKey
+                }
+              : doc
+          )
+        );
+        return;
+      }
+      const doc: OpenDocument = {
+        uri: params.uri,
+        name: params.name,
+        tooltip: params.tooltip,
+        kind: "model-library",
+        preview: false,
+        language: "plaintext",
+        content: "",
+        baseline: "",
+        dirty: false,
+        eol: "lf",
+        modelLibraryDocumentKind: params.modelLibraryDocumentKind,
+        modelLibraryObjectKind: params.modelLibraryObjectKind,
+        modelLibraryCategoryId: params.modelLibraryCategoryId,
+        modelLibraryFamilyId: params.modelLibraryFamilyId,
+        modelLibraryVersionKey: params.modelLibraryVersionKey
+      };
+      setModelLibraryDocuments((prev) => [...prev, doc]);
+      activateWorkspace({
+        activeView: "model-library",
+        activeUri: null,
+        activeModelLibraryUri: params.uri
+      });
+    },
+    [activateWorkspace]
   );
 
   const openChainEditor = useCallback(
@@ -760,6 +962,50 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [ensureProfileGroup, openSyntheticTab]
   );
 
+  const openModelLibraryCategory = useCallback(
+    (params: {
+      objectKind: "platform_model" | "equipment_model";
+      categoryId: string;
+      displayName: string;
+    }) => {
+      openModelLibraryTab({
+        uri: `model-library://category/${params.objectKind}/${params.categoryId}`,
+        name: params.displayName,
+        tooltip: `模型库 / ${params.displayName}`,
+        modelLibraryDocumentKind: "category",
+        modelLibraryObjectKind: params.objectKind,
+        modelLibraryCategoryId: params.categoryId
+      });
+    },
+    [openModelLibraryTab]
+  );
+
+  const openModelLibraryFamily = useCallback(
+    (params: { familyId: string; displayName: string }) => {
+      openModelLibraryTab({
+        uri: `model-library://family/${params.familyId}`,
+        name: params.displayName,
+        tooltip: `模型库 / ${params.displayName}`,
+        modelLibraryDocumentKind: "family",
+        modelLibraryFamilyId: params.familyId
+      });
+    },
+    [openModelLibraryTab]
+  );
+
+  const openModelLibraryVersion = useCallback(
+    (params: { objectKey: string; displayName: string }) => {
+      openModelLibraryTab({
+        uri: `model-library://version/${params.objectKey}`,
+        name: params.displayName,
+        tooltip: `模型库 / ${params.displayName}`,
+        modelLibraryDocumentKind: "version",
+        modelLibraryVersionKey: params.objectKey
+      });
+    },
+    [openModelLibraryTab]
+  );
+
   const closeProfileGroup = useCallback((profileId: string) => {
     const closingUris = docsRef.current
       .filter((d) => d.profileId === profileId)
@@ -768,11 +1014,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setProfileGroups((prev) =>
       prev.filter((item) => item.profileId !== profileId)
     );
-    setActiveProfileHome((current) =>
+    _setActiveProfileHome((current) =>
       current?.profileId === profileId ? null : current
     );
     setDocuments((prev) => prev.filter((d) => d.profileId !== profileId));
-    setActiveUri((current) => {
+    _setActiveUri((current) => {
       if (!current || !closingSet.has(current)) return current;
       const remaining = docsRef.current.filter((d) => d.profileId !== profileId);
       return remaining.length > 0 ? remaining[remaining.length - 1]!.uri : null;
@@ -792,7 +1038,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   const closeFile = useCallback((uri: string) => {
     setDocuments((prev) => prev.filter((d) => d.uri !== uri));
-    setActiveUri((current) => {
+    _setActiveUri((current) => {
       if (current !== uri) return current;
       const remaining = docsRef.current.filter((d) => d.uri !== uri);
       return remaining.length > 0 ? remaining[remaining.length - 1]!.uri : null;
@@ -804,14 +1050,38 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const setActive = useCallback((uri: string) => setActiveUri(uri), []);
+  const closeModelLibraryTab = useCallback((uri: string) => {
+    setModelLibraryDocuments((prev) => prev.filter((doc) => doc.uri !== uri));
+    _setActiveModelLibraryUri((current) => {
+      if (current !== uri) return current;
+      const remaining = modelLibraryDocsRef.current.filter(
+        (doc) => doc.uri !== uri
+      );
+      return remaining.length > 0 ? remaining[remaining.length - 1]!.uri : null;
+    });
+  }, []);
+
+  const setActiveModelLibraryTab = useCallback(
+    (uri: string | null) =>
+      activateWorkspace({
+        activeView: "model-library",
+        activeUri: null,
+        activeModelLibraryUri: uri
+      }),
+    [activateWorkspace]
+  );
+
+  const setActive = useCallback(
+    (uri: string | null) => activateWorkspace({ activeUri: uri }),
+    [activateWorkspace]
+  );
 
   const closeActiveFile = useCallback(() => {
     const uri = activeUriRef.current;
     if (!uri) return;
     setDocuments((prev) => prev.filter((d) => d.uri !== uri));
     const remaining = docsRef.current.filter((d) => d.uri !== uri);
-    setActiveUri(remaining.length > 0 ? remaining[remaining.length - 1]!.uri : null);
+    _setActiveUri(remaining.length > 0 ? remaining[remaining.length - 1]!.uri : null);
   }, []);
 
   const cycleTab = useCallback((direction: 1 | -1) => {
@@ -820,8 +1090,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     const cur = activeUriRef.current;
     const idx = cur ? docs.findIndex((d) => d.uri === cur) : -1;
     const nextIdx = (idx + direction + docs.length) % docs.length;
-    setActiveUri(docs[nextIdx]!.uri);
-  }, []);
+    activateWorkspace({ activeUri: docs[nextIdx]!.uri });
+  }, [activateWorkspace]);
 
   const setSyntheticDirty = useCallback((uri: string, dirty: boolean) => {
     setDocuments((prev) =>
@@ -945,8 +1215,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     return saveDocument(uri);
   }, [saveDocument]);
 
-  const canGoBack = viewBack.length > 0;
-  const canGoForward = viewForward.length > 0;
+  const canGoBack = navigationBack.length > 0;
+  const canGoForward = navigationForward.length > 0;
 
   const value = useMemo<WorkspaceContextValue>(
     () => ({
@@ -954,6 +1224,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       activeView,
       documents,
       activeUri,
+      modelLibraryDocuments,
+      activeModelLibraryUri,
       profileGroups,
       activeProfileHome,
       saveStatus,
@@ -972,6 +1244,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       openProfileLifecycle,
       openResourceEditor,
       openResourceBranch,
+      openModelLibraryCategory,
+      openModelLibraryFamily,
+      openModelLibraryVersion,
+      closeModelLibraryTab,
+      setActiveModelLibraryTab,
       closeFile,
       closeProfileGroup,
       closeActiveFile,
@@ -997,6 +1274,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       activeView,
       documents,
       activeUri,
+      modelLibraryDocuments,
+      activeModelLibraryUri,
       profileGroups,
       activeProfileHome,
       saveStatus,
@@ -1015,6 +1294,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       openProfileLifecycle,
       openResourceEditor,
       openResourceBranch,
+      openModelLibraryCategory,
+      openModelLibraryFamily,
+      openModelLibraryVersion,
+      closeModelLibraryTab,
+      setActiveModelLibraryTab,
       closeFile,
       closeProfileGroup,
       closeActiveFile,

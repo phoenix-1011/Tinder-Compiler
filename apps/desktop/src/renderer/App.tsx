@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { TitleBar } from "./components/TitleBar";
 import { ActivityBar } from "./components/ActivityBar";
 import { SideBar } from "./components/SideBar";
@@ -26,6 +27,7 @@ import { KeyboardShortcuts } from "./state/KeyboardShortcuts";
 import { BuiltInCommands } from "./state/BuiltInCommands";
 import { LspBootstrap } from "./state/LspBootstrap";
 import { ChainAssemblyProvider } from "./state/ChainAssemblyContext";
+import { ModelLibraryProvider } from "./state/ModelLibraryContext";
 import { ChainHelpProvider } from "./help/ChainHelpContext";
 import { ChainHelpView } from "./help/ChainHelpView";
 
@@ -46,7 +48,13 @@ function Workbench() {
     closeThemePicker,
     isSettingsOpen
   } = useUI();
-  const { activeView, appMode } = useWorkspace();
+  const { activeView, appMode, setActive } = useWorkspace();
+
+  useEffect(() => {
+    if (activeView === "model-library") {
+      setActive(null);
+    }
+  }, [activeView, setActive]);
 
   // Body grid: activity bar | [optional sidebar + 0-width splitter overlay] |
   // main | [optional 0-width AI splitter overlay + AI panel]. Splitters
@@ -147,14 +155,16 @@ export function App() {
                 <UIProvider>
                   <CommandRegistryProvider>
                     <ChainAssemblyProvider>
-                      <ChainHelpProvider>
-                        <BuiltInCommands />
-                        <KeyboardShortcuts />
-                        <LspBootstrap />
-                        <AutoSave />
-                        <UserKeybindingsLoader />
-                        <Workbench />
-                      </ChainHelpProvider>
+                      <ModelLibraryProvider>
+                        <ChainHelpProvider>
+                          <BuiltInCommands />
+                          <KeyboardShortcuts />
+                          <LspBootstrap />
+                          <AutoSave />
+                          <UserKeybindingsLoader />
+                          <Workbench />
+                        </ChainHelpProvider>
+                      </ModelLibraryProvider>
                     </ChainAssemblyProvider>
                   </CommandRegistryProvider>
                 </UIProvider>

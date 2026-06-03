@@ -10,6 +10,7 @@ import { ProfileOverviewView } from "./ProfileOverviewView";
 import { ProfileLifecycleView } from "./ProfileLifecycleView";
 import { ResourceEditorView } from "./ResourceEditorView";
 import { ResourceBranchView } from "./ResourceBranchView";
+import { ModelLibraryPage } from "./ModelLibraryPage";
 
 /**
  * Items rendered along the tab strip. A "standalone" item is a single
@@ -39,10 +40,15 @@ export function EditorArea() {
   const {
     documents,
     activeUri,
+    activeView,
+    modelLibraryDocuments,
+    activeModelLibraryUri,
     profileGroups,
     activeProfileHome,
     setActive,
+    setActiveModelLibraryTab,
     closeFile,
+    closeModelLibraryTab,
     closeProfileGroup,
     openProfileOverview,
     pinDocument,
@@ -53,6 +59,10 @@ export function EditorArea() {
     folder
   } = useWorkspace();
   const active = documents.find((d) => d.uri === activeUri) ?? null;
+  const activeModelLibraryTab =
+    activeView === "model-library"
+      ? modelLibraryDocuments.find((d) => d.uri === activeModelLibraryUri) ?? null
+      : null;
   const tabMenu = useContextMenu();
   const [draggedUri, setDraggedUri] = useState<string | null>(null);
   const [dropTargetUri, setDropTargetUri] = useState<string | null>(null);
@@ -122,6 +132,7 @@ export function EditorArea() {
     const groupMeta = new Map(profileGroups.map((item) => [item.profileId, item]));
     const items: TabStripItem[] = [];
     for (const doc of documents) {
+      if (doc.kind === "model-library") continue;
       if (consumed.has(doc.uri)) continue;
       if (isProfileChild(doc)) {
         const profileId = doc.profileId!;
@@ -153,6 +164,13 @@ export function EditorArea() {
     }
     return items;
   }, [documents, profileGroups]);
+
+  const activateModelLibraryTab = useCallback(
+    (uri: string) => {
+      setActiveModelLibraryTab(uri);
+    },
+    [setActiveModelLibraryTab]
+  );
 
   const renderTab = (doc: OpenDocument, isInGroup: boolean) => (
     <div
@@ -217,6 +235,41 @@ export function EditorArea() {
     </div>
   );
 
+  const renderModelLibraryTab = (doc: OpenDocument) => (
+    <div
+      key={doc.uri}
+      role="tab"
+      aria-selected={
+        activeView === "model-library" && !active && doc.uri === activeModelLibraryUri
+      }
+      title={doc.tooltip ?? doc.uri}
+      className={`editor-tab model-library-tab${
+        activeView === "model-library" && !active && doc.uri === activeModelLibraryUri
+          ? " is-active"
+          : ""
+      }`}
+      onClick={() => activateModelLibraryTab(doc.uri)}
+      onAuxClick={(event) => {
+        if (event.button === 1) {
+          event.preventDefault();
+          closeModelLibraryTab(doc.uri);
+        }
+      }}
+    >
+      <span className="editor-tab-name">{doc.name}</span>
+      <button
+        className="editor-tab-close"
+        aria-label={`关闭 ${doc.name}`}
+        onClick={(event) => {
+          event.stopPropagation();
+          closeModelLibraryTab(doc.uri);
+        }}
+      >
+        <span className="codicon codicon-close" aria-hidden="true" />
+      </button>
+    </div>
+  );
+
   return (
     <section className="editor-area" aria-label="编辑器">
       <div className="editor-tabs" role="tablist">
@@ -232,7 +285,9 @@ export function EditorArea() {
             >
               <div
                 className={`editor-tab-group-label${
-                  !activeUri && activeProfileHome?.profileId === item.profileId
+                  !activeUri &&
+                  activeView !== "model-library" &&
+                  activeProfileHome?.profileId === item.profileId
                     ? " is-active"
                     : ""
                 }`}
@@ -262,11 +317,27 @@ export function EditorArea() {
           )
         )}
       </div>
+      {modelLibraryDocuments.length > 0 && (
+        <div
+          className="editor-tabs editor-tabs-secondary"
+          role="tablist"
+          aria-label="模型库"
+        >
+          {modelLibraryDocuments.map((doc) => renderModelLibraryTab(doc))}
+        </div>
+      )}
       {active && active.kind === "file" && (
         <Breadcrumbs workspacePath={folder?.path ?? null} filePath={active.uri} />
       )}
       <div className="editor-host">
-        {!active && activeProfileHome ? (
+        {!active && activeModelLibraryTab ? (
+          <ModelLibraryPage
+            key={activeModelLibraryTab.uri}
+            tab={activeModelLibraryTab}
+          />
+        ) : activeView === "model-library" && !active ? (
+          <ModelLibraryPage />
+        ) : !active && activeProfileHome ? (
           <ProfileOverviewView
             key={activeProfileHome.profileId}
             profileId={activeProfileHome.profileId}

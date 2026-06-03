@@ -21,7 +21,10 @@ import type {
   PlatformComputeNode,
   PlatformResourceInstance,
   PlatformTemplate,
+  ProfileComputeObjectBinding,
+  ProfileExportConfig,
   ProfileCustomResourceRef,
+  ProfilePlatformModelTarget,
   ProfileResourceSlot,
   ProfileResourceRef,
   ProfileStandardBranchSlot,
@@ -686,6 +689,25 @@ export function executionItemLabel(
  */
 export const DEFAULT_PROFILE_VARIANT_ID = "default";
 export const DEFAULT_BRANCH_ID = "default";
+export const DEFAULT_PROFILE_EXPORT_CONFIG_VERSION = 1 as const;
+
+export function platformObjectKey(modelId: string, version: string): string {
+  const id = modelId.trim();
+  const v = version.trim();
+  return id && v ? `${id}_${v}` : "";
+}
+
+export function computeObjectKey(objectId: string, version: string): string {
+  return platformObjectKey(objectId, version);
+}
+
+export function profileComputeBindingId(
+  kind: ComputeResourceKind,
+  resourceInstanceId: string,
+  branchId: string,
+): string {
+  return `${kind}:${resourceInstanceId}:${branchId}`;
+}
 
 export function profileResourceBranchId(ref: ProfileResourceRef): string {
   if (ref.kind === "standard") {
@@ -775,6 +797,59 @@ export function normalizeProfileResourceRefs(
   return out;
 }
 
+export function normalizeProfileComputeObjectBinding(
+  binding: ProfileComputeObjectBinding,
+): ProfileComputeObjectBinding {
+  const branchId = binding.selected_branch_id || DEFAULT_BRANCH_ID;
+  const compute_object_id = binding.compute_object_id?.trim() ?? "";
+  const compute_object_version = binding.compute_object_version?.trim() ?? "";
+  return {
+    ...binding,
+    selected_branch_id: branchId,
+    binding_id:
+      binding.binding_id ||
+      profileComputeBindingId(
+        binding.resource_kind,
+        binding.resource_instance_id,
+        branchId,
+      ),
+    compute_object_id,
+    compute_object_version,
+    compute_object_key: computeObjectKey(
+      compute_object_id,
+      compute_object_version,
+    ),
+  };
+}
+
+export function normalizeProfilePlatformModelTarget(
+  target: ProfilePlatformModelTarget,
+): ProfilePlatformModelTarget {
+  const platform_model_id = target.platform_model_id?.trim() ?? "";
+  const platform_version = target.platform_version?.trim() ?? "";
+  return {
+    ...target,
+    platform_model_id,
+    platform_version,
+    platform_object_key: platformObjectKey(platform_model_id, platform_version),
+    enabled: target.enabled ?? true,
+    compute_object_bindings: (target.compute_object_bindings ?? []).map(
+      normalizeProfileComputeObjectBinding,
+    ),
+  };
+}
+
+export function normalizeProfileExportConfig(
+  config: ProfileExportConfig | undefined,
+): ProfileExportConfig {
+  return {
+    schema_version: DEFAULT_PROFILE_EXPORT_CONFIG_VERSION,
+    platform_model_targets: (config?.platform_model_targets ?? []).map(
+      normalizeProfilePlatformModelTarget,
+    ),
+  };
+}
+
 /**
  * Pure migration from a v1 profile shape + its `profile-extras.json` entry to
  * the v2 in-memory shape.
@@ -798,7 +873,12 @@ export function migrateProfileFromV1(
   extras: { extraStandardIds?: string[] } | null | undefined,
 ): GuiProjectFile {
   if (profile.resources && profile.custom_node_usages) {
-    return profile;
+    return {
+      ...profile,
+      resources: normalizeProfileResourceRefs(profile.resources),
+      custom_node_usages: profile.custom_node_usages,
+      export_config: normalizeProfileExportConfig(profile.export_config),
+    };
   }
   const resources: ProfileResourceRef[] = profile.resources
     ? normalizeProfileResourceRefs(profile.resources)
@@ -843,6 +923,7 @@ export function migrateProfileFromV1(
     ...profile,
     resources,
     custom_node_usages: profile.custom_node_usages ?? [],
+    export_config: normalizeProfileExportConfig(profile.export_config),
   };
 }
 
