@@ -262,6 +262,24 @@ async function readCanvasFile(
   }
 }
 
+/**
+ * Read the persisted selection for one profile without hydrating the full
+ * per-profile state. Shares the schema validation/normalization of the
+ * canvas loader so other consumers (e.g. AI context) never re-encode the
+ * canvas.json layout. Writes are debounced (DEBOUNCE_MS), so the result can
+ * lag the live canvas selection by that much.
+ */
+export async function readPersistedCanvasSelection(
+  tinderDir: string | null,
+  profileId: string | null
+): Promise<CanvasSelection | null> {
+  if (!tinderDir || !profileId) return null;
+  const file = await readCanvasFile(tinderDir);
+  const slot = file?.profiles[profileId];
+  if (!slot || !isPerProfileState(slot)) return null;
+  return normalizePerProfileState(slot).selection;
+}
+
 async function writeCanvasFile(
   tinderDir: string,
   file: CanvasStateFile

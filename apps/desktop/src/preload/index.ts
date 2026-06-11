@@ -1,4 +1,19 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
+import type {
+  AiChatDelta,
+  AiChatEnd,
+  AiChatError,
+  AiChatStartInput,
+  AiChatStarted,
+  AiCodexTaskEvent,
+  AiCodexTaskStartInput,
+  AiCodexTaskStarted,
+  AiProviderTestResult,
+  AiSecretMetadata,
+  AiSecretSaveInput,
+  CodexStatus,
+  UserAiSettings
+} from "@tinder/ai";
 
 export interface DirEntry {
   name: string;
@@ -149,6 +164,24 @@ export interface LspApi {
   ): Disposable;
 }
 
+export interface AiApi {
+  readSettings(): Promise<UserAiSettings>;
+  writeSettings(settings: UserAiSettings): Promise<void>;
+  saveSecret(input: AiSecretSaveInput): Promise<{ secretId: string }>;
+  deleteSecret(secretId: string): Promise<void>;
+  listSecrets(): Promise<AiSecretMetadata[]>;
+  testProvider(providerId: string): Promise<AiProviderTestResult>;
+  codexStatus(command?: string): Promise<CodexStatus>;
+  startChat(input: AiChatStartInput): Promise<AiChatStarted>;
+  cancelChat(requestId: string): Promise<void>;
+  onChatDelta(requestId: string, listener: (delta: AiChatDelta) => void): Disposable;
+  onChatEnd(requestId: string, listener: (end: AiChatEnd) => void): Disposable;
+  onChatError(requestId: string, listener: (error: AiChatError) => void): Disposable;
+  startCodexTask(input: AiCodexTaskStartInput): Promise<AiCodexTaskStarted>;
+  cancelCodexTask(taskId: string): Promise<void>;
+  onCodexTaskEvent(taskId: string, listener: (event: AiCodexTaskEvent) => void): Disposable;
+}
+
 export interface TinderApi {
   openFolder(): Promise<OpenedFolder | null>;
   openFolderByPath(path: string): Promise<OpenedFolder>;
@@ -183,6 +216,7 @@ export interface TinderApi {
   search: SearchApi;
   recent: RecentApi;
   lsp: LspApi;
+  ai: AiApi;
   userKeybindings: UserKeybindingsApi;
   project: ProjectApi;
   /** Update the OS-drawn title bar overlay (minimize/maximize/close buttons). */
@@ -254,6 +288,24 @@ const lsp: LspApi = {
   onExit: (id, listener) => listenOn(`lsp:exit:${id}`, listener)
 };
 
+const ai: AiApi = {
+  readSettings: () => ipcRenderer.invoke("ai:readSettings"),
+  writeSettings: (settings) => ipcRenderer.invoke("ai:writeSettings", settings),
+  saveSecret: (input) => ipcRenderer.invoke("ai:saveSecret", input),
+  deleteSecret: (secretId) => ipcRenderer.invoke("ai:deleteSecret", secretId),
+  listSecrets: () => ipcRenderer.invoke("ai:listSecrets"),
+  testProvider: (providerId) => ipcRenderer.invoke("ai:testProvider", providerId),
+  codexStatus: (command) => ipcRenderer.invoke("ai:codexStatus", command),
+  startChat: (input) => ipcRenderer.invoke("ai:chat:start", input),
+  cancelChat: (requestId) => ipcRenderer.invoke("ai:chat:cancel", requestId),
+  onChatDelta: (requestId, listener) => listenOn(`ai:chat:delta:${requestId}`, listener),
+  onChatEnd: (requestId, listener) => listenOn(`ai:chat:end:${requestId}`, listener),
+  onChatError: (requestId, listener) => listenOn(`ai:chat:error:${requestId}`, listener),
+  startCodexTask: (input) => ipcRenderer.invoke("ai:codex:start", input),
+  cancelCodexTask: (taskId) => ipcRenderer.invoke("ai:codex:cancel", taskId),
+  onCodexTaskEvent: (taskId, listener) => listenOn(`ai:codex:event:${taskId}`, listener)
+};
+
 const userKeybindings: UserKeybindingsApi = {
   read: () => ipcRenderer.invoke("userConfig:keybindings"),
   path: () => ipcRenderer.invoke("userConfig:keybindingsPath"),
@@ -292,6 +344,7 @@ const api: TinderApi = {
   search,
   recent,
   lsp,
+  ai,
   userKeybindings,
   project,
   setTitleBarOverlay: (opts) =>

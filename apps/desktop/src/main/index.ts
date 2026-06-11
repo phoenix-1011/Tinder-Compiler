@@ -7,6 +7,7 @@ import { registerRunnerHandlers } from "./runner.js";
 import { registerSearchHandlers } from "./search.js";
 import { registerRecentHandlers } from "./recent.js";
 import { registerLspHandlers } from "./lsp.js";
+import { registerAiHandlers } from "./ai.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -57,6 +58,7 @@ app.whenReady().then(async () => {
   registerSearchHandlers();
   registerRecentHandlers();
   registerLspHandlers();
+  registerAiHandlers();
 
   // Theme: update OS-drawn title-bar overlay buttons (minimize/maximize/close)
   ipcMain.handle(

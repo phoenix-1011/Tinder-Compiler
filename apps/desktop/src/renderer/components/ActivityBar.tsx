@@ -8,7 +8,6 @@ const TOP_ITEMS: Array<{ id: ActivityView; label: string; icon: string }> = [
   { id: "chain-assembly", label: "计算链路组装", icon: "type-hierarchy" },
   { id: "model-library", label: "模型库", icon: "database" },
   { id: "help", label: "链路文档", icon: "book" },
-  { id: "ai", label: "AI 助手", icon: "sparkle" }
 ];
 
 export function ActivityBar() {

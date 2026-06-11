@@ -10,8 +10,12 @@ export interface ProjectConfig {
   buildSystem?: BuildSystem;
   /** Project-level commands surfaced in the Run panel */
   tasks?: ProjectTask[];
-  /** Project-level AI provider override */
+  /** Legacy project-level AI provider override. Prefer aiModelPresetId. */
   aiProviderId?: string;
+  /** Project-level AI model preset override */
+  aiModelPresetId?: string;
+  /** Project-level AI mode override */
+  aiMode?: "chat" | "auto" | "plan" | "debug";
   /** Optional language server overrides keyed by Monaco language id. */
   languageServers?: Record<string, ProjectLanguageServer>;
 }

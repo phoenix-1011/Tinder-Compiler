@@ -22,7 +22,10 @@ export interface ProjectConfig {
   name?: string;
   buildSystem?: "xmake" | "cmake" | "go" | "python" | "custom";
   tasks?: ProjectTask[];
+  /** Legacy project-level AI provider override. Prefer aiModelPresetId. */
   aiProviderId?: string;
+  aiModelPresetId?: string;
+  aiMode?: "chat" | "auto" | "plan" | "debug";
 }
 
 const EMPTY: ProjectConfig = { tasks: [] };

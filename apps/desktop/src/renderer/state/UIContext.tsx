@@ -51,6 +51,7 @@ interface UIContextValue {
   toggleSidebar(): void;
   togglePanel(): void;
   toggleAiPanel(): void;
+  openAiPanel(): void;
   showSidebar(): void;
   showPanel(): void;
   hidePanel(): void;
@@ -134,6 +135,10 @@ export function UIProvider({ children }: { children: ReactNode }) {
     setState((s) => ({ ...s, aiPanelVisible: !s.aiPanelVisible }));
   }, []);
 
+  const openAiPanel = useCallback(() => {
+    setState((s) => (s.aiPanelVisible ? s : { ...s, aiPanelVisible: true }));
+  }, []);
+
   const setAiPanelWidth = useCallback((width: number) => {
     setState((s) => ({
       ...s,
@@ -177,6 +182,7 @@ export function UIProvider({ children }: { children: ReactNode }) {
       toggleSidebar,
       togglePanel,
       toggleAiPanel,
+      openAiPanel,
       showSidebar,
       showPanel,
       hidePanel,
@@ -203,6 +209,7 @@ export function UIProvider({ children }: { children: ReactNode }) {
       toggleSidebar,
       togglePanel,
       toggleAiPanel,
+      openAiPanel,
       showSidebar,
       showPanel,
       hidePanel,

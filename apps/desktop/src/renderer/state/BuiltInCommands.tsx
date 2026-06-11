@@ -28,7 +28,8 @@ export function BuiltInCommands() {
     showSidebar,
     openAbout,
     openThemePicker,
-    openSettings
+    openSettings,
+    openAiPanel
   } = useUI();
   const { openPalette } = useCommandRegistry();
 
@@ -201,7 +202,16 @@ export function BuiltInCommands() {
   useView("explorer", "view.showExplorer", "显示资源管理器", "Ctrl+Shift+E", setActiveView, showSidebar);
   useView("search", "view.showSearch", "显示搜索", "Ctrl+Shift+F", setActiveView, showSidebar);
   useView("run", "view.showRun", "显示运行与构建", "Ctrl+Shift+D", setActiveView, showSidebar);
-  useView("ai", "view.showAi", "显示 AI 助手", undefined, setActiveView, showSidebar);
+  // The AI assistant lives in the window-level right panel, not the sidebar.
+  useCommand(
+    {
+      id: "view.showAi",
+      category: "视图",
+      title: "显示 AI 助手",
+      run: () => openAiPanel()
+    },
+    [openAiPanel]
+  );
 
   useCommand(
     {
