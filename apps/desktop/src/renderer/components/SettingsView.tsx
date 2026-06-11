@@ -32,8 +32,13 @@ const NAV: NavItem[] = [
 export function SettingsView() {
   const { settings, update, reset } = useSettings();
   const { current: themeId, themes, setTheme } = useTheme();
-  const { closeSettings } = useUI();
-  const [section, setSection] = useState<string>("appearance");
+  const { closeSettings, settingsSection } = useUI();
+  const [section, setSection] = useState<string>(settingsSection ?? "appearance");
+  // Follow openSettings("ai")-style requests when the panel re-opens on a
+  // specific section.
+  useEffect(() => {
+    if (settingsSection) setSection(settingsSection);
+  }, [settingsSection]);
 
   return (
     <div className="settings-page">
@@ -275,6 +280,20 @@ const CODEX_APPROVAL_OPTIONS: NonNullable<CodexCliConfig["approvalPolicy"]>[] = 
   "never"
 ];
 
+const AI_MODE_LABEL: Record<string, string> = {
+  chat: "对话",
+  plan: "计划",
+  auto: "自动",
+  debug: "调试"
+};
+const CODEX_STATUS_LABEL: Record<string, string> = {
+  "not-installed": "未安装",
+  "not-signed-in": "未登录",
+  "credentials-found": "已找到凭据",
+  "signed-in": "已登录",
+  error: "错误"
+};
+
 function supportedModesForBackend(backend: AddModelForm["backend"]): AiMode[] {
   return backend === "api" ? API_SUPPORTED_MODES : CODEX_SUPPORTED_MODES;
 }
@@ -400,7 +419,7 @@ function AiSettingsSection() {
       });
     }
     setEditingPresetId(preset.id);
-    setMessage(`Editing ${preset.label}. Leave API Key blank to keep the existing key.`);
+    setMessage(`正在编辑 ${preset.label}。留空 API 密钥则保留原有密钥。`);
     setError(null);
   };
 
@@ -551,7 +570,7 @@ function AiSettingsSection() {
       emitAiSettingsChanged();
       setForm(EMPTY_AI_FORM);
       setEditingPresetId(null);
-      setMessage(editingPresetId ? "Model preset updated." : "Model preset added.");
+      setMessage(editingPresetId ? "模型预设已更新。" : "模型预设已添加。");
     } catch (err) {
       setError((err as Error).message ?? String(err));
     } finally {
@@ -564,7 +583,7 @@ function AiSettingsSection() {
     const preset = settings.modelPresets.find((item) => item.id === presetId);
     if (!preset) return;
     if (preset.id === "codex-readonly-high") {
-      setError("The built-in Codex preset cannot be deleted.");
+      setError("内置 Codex 预设不可删除。");
       return;
     }
     if (!window.confirm(`Delete model preset "${preset.label}"?`)) return;
@@ -606,9 +625,7 @@ function AiSettingsSection() {
       emitAiSettingsChanged();
       if (editingPresetId === presetId) cancelEdit();
       setMessage(
-        shouldClearProjectDefault
-          ? "Model preset deleted and project default cleared."
-          : "Model preset deleted."
+        shouldClearProjectDefault ? "已删除模型预设并清除项目默认。" : "已删除模型预设。"
       );
     } catch (err) {
       setError((err as Error).message ?? String(err));
@@ -622,7 +639,7 @@ function AiSettingsSection() {
     const provider = settings.providers.find((item) => item.id === providerId);
     if (!provider) return;
     if (settings.modelPresets.some((preset) => preset.providerId === providerId)) {
-      setError("Delete or edit presets that use this provider before deleting the provider.");
+      setError("删除该提供方前，请先删除或修改使用它的预设。");
       return;
     }
     if (!window.confirm(`Delete provider "${provider.label}"?`)) return;
@@ -641,7 +658,7 @@ function AiSettingsSection() {
       }
       await reload();
       emitAiSettingsChanged();
-      setMessage("Provider deleted.");
+      setMessage("提供方已删除。");
     } catch (err) {
       setError((err as Error).message ?? String(err));
     } finally {
@@ -670,7 +687,7 @@ function AiSettingsSection() {
       }
       await reload();
       emitAiSettingsChanged();
-      setMessage("Provider key reference cleared.");
+      setMessage("已清除提供方的密钥引用。");
     } catch (err) {
       setError((err as Error).message ?? String(err));
     } finally {
@@ -684,7 +701,7 @@ function AiSettingsSection() {
     setMessage(null);
     try {
       const result = await window.tinder.ai.testProvider(providerId);
-      setMessage(`${result.ok ? "OK" : "Failed"}: ${result.message}`);
+      setMessage(`${result.ok ? "成功" : "失败"}：${result.message}`);
     } catch (err) {
       setError((err as Error).message ?? String(err));
     } finally {
@@ -696,7 +713,7 @@ function AiSettingsSection() {
     if (!settings) return;
     const command = codexCommand.trim();
     if (!command) {
-      setError("Codex command is required.");
+      setError("Codex 命令不能为空。");
       return;
     }
     setBusy(true);
@@ -726,7 +743,7 @@ function AiSettingsSection() {
       });
       await reload({ probeCodex: true });
       emitAiSettingsChanged();
-      setMessage("Codex command saved.");
+      setMessage("Codex 命令已保存。");
     } catch (err) {
       setError((err as Error).message ?? String(err));
     } finally {
@@ -748,8 +765,8 @@ function AiSettingsSection() {
       });
       setMessage(
         deviceAuth
-          ? "Started Codex device-code login in the run panel."
-          : "Started Codex login in the run panel."
+          ? "已在运行面板启动 Codex 设备码登录。"
+          : "已在运行面板启动 Codex 登录。"
       );
     } catch (err) {
       setError((err as Error).message ?? String(err));
@@ -775,7 +792,7 @@ function AiSettingsSection() {
         aiModelPresetId: presetId || undefined,
         aiMode: mode
       });
-      setMessage(ok ? "Project AI defaults saved." : "No project folder is open.");
+      setMessage(ok ? "项目 AI 默认设置已保存。" : "未打开任何项目文件夹。");
     } catch (err) {
       setError((err as Error).message ?? String(err));
     } finally {
@@ -792,27 +809,27 @@ function AiSettingsSection() {
     : CODEX_SUPPORTED_MODES;
 
   return (
-    <Section title="AI" hint="Providers, model presets, API keys, and Codex status">
+    <Section title="AI" hint="提供方、模型预设、API 密钥与 Codex 状态">
       <div className="settings-help">
         {error && <p className="settings-help-error">{error}</p>}
         {message && <p className="settings-hint">{message}</p>}
       </div>
 
       <div className="settings-section-title">
-        {editingPresetId ? "Edit Model" : "Add Model"}
+        {editingPresetId ? "编辑模型" : "添加模型"}
       </div>
-      <Field label="Backend">
+      <Field label="后端">
         <select
           className="settings-select"
           value={form.backend}
           disabled={Boolean(editingPresetId)}
           onChange={(e) => updateBackend(e.target.value as "api" | "codex")}
         >
-          <option value="api">Custom API</option>
+          <option value="api">自定义 API</option>
           <option value="codex">Codex</option>
         </select>
       </Field>
-      <Field label="Name">
+      <Field label="名称">
         <input
           className="settings-input"
           value={form.name}
@@ -822,12 +839,12 @@ function AiSettingsSection() {
       </Field>
       {form.backend === "api" && (
         <>
-          <Field label="Provider">
+          <Field label="提供方">
             <input
               className="settings-input"
               value={form.providerName}
               onChange={(e) => updateForm("providerName", e.target.value)}
-              placeholder="Office Gateway"
+              placeholder="内网网关"
             />
           </Field>
           <Field label="Base URL">
@@ -838,25 +855,25 @@ function AiSettingsSection() {
               placeholder="http://localhost:8000/v1"
             />
           </Field>
-          <Field label="API Key">
+          <Field label="API 密钥">
             <input
               className="settings-input"
               type="password"
               value={form.apiKey}
               onChange={(e) => updateForm("apiKey", e.target.value)}
-              placeholder="Stored with Electron safeStorage"
+              placeholder="使用 Electron safeStorage 加密存储"
             />
           </Field>
         </>
       )}
       {form.backend === "codex" && (
         <>
-          <Field label="Command">
+          <Field label="命令">
             <input
               className="settings-input"
               value={form.codexCommand}
               onChange={(e) => updateForm("codexCommand", e.target.value)}
-              placeholder="codex or an absolute path to codex.cmd"
+              placeholder="codex 或 codex.cmd 的绝对路径"
             />
           </Field>
           <Field label="Profile">
@@ -864,10 +881,10 @@ function AiSettingsSection() {
               className="settings-input settings-input-narrow"
               value={form.codexProfile}
               onChange={(e) => updateForm("codexProfile", e.target.value)}
-              placeholder="optional"
+              placeholder="可选"
             />
           </Field>
-          <Field label="Sandbox">
+          <Field label="沙箱">
             <select
               className="settings-select"
               value={form.codexSandbox}
@@ -882,7 +899,7 @@ function AiSettingsSection() {
               ))}
             </select>
           </Field>
-          <Field label="Approval">
+          <Field label="审批策略">
             <select
               className="settings-select"
               value={form.codexApprovalPolicy}
@@ -902,29 +919,29 @@ function AiSettingsSection() {
           </Field>
         </>
       )}
-      <Field label="Model ID">
+      <Field label="模型 ID">
         <input
           className="settings-input"
           value={form.model}
           onChange={(e) => updateForm("model", e.target.value)}
-          placeholder={form.backend === "codex" ? "optional" : "model-id"}
+          placeholder={form.backend === "codex" ? "可选" : "model-id"}
         />
       </Field>
-      <Field label="Reasoning Label">
+      <Field label="推理标签">
         <input
           className="settings-input settings-input-narrow"
           value={form.reasoningLabel}
           onChange={(e) => updateForm("reasoningLabel", e.target.value)}
         />
       </Field>
-      <Field label="Reasoning Mapping">
+      <Field label="推理映射">
         <input
           className="settings-input settings-input-narrow"
           value={form.reasoningEffort}
           onChange={(e) => updateForm("reasoningEffort", e.target.value)}
         />
       </Field>
-      <Field label="Default Mode">
+      <Field label="默认模式">
         <select
           className="settings-select"
           value={clampMode(form.defaultMode, defaultModeOptions)}
@@ -932,28 +949,29 @@ function AiSettingsSection() {
         >
           {defaultModeOptions.map((mode) => (
             <option key={mode} value={mode}>
-              {mode}
+              {AI_MODE_LABEL[mode] ?? mode}
             </option>
           ))}
         </select>
       </Field>
       <div className="settings-inline-actions">
         <button className="primary-button" disabled={busy} onClick={saveModel}>
-          {editingPresetId ? "Save Model" : "Add Model"}
+          {editingPresetId ? "保存模型" : "添加模型"}
         </button>
         {editingPresetId && (
           <button className="secondary-button" disabled={busy} onClick={cancelEdit}>
-            Cancel Edit
+            取消编辑
           </button>
         )}
       </div>
 
-      <div className="settings-section-title">Model Presets</div>
+      <div className="settings-section-title">模型预设</div>
       <div className="settings-help">
         {(settings?.modelPresets ?? []).map((preset) => (
           <div className="settings-ai-row" key={preset.id}>
             <span>
-              <code>{preset.label}</code> {preset.backend} {preset.defaultMode ?? ""}
+              <code>{preset.label}</code> {preset.backend === "codex" ? "Codex" : "API"}{" "}
+              {preset.defaultMode ? AI_MODE_LABEL[preset.defaultMode] ?? preset.defaultMode : ""}
             </span>
             <span className="settings-inline-actions">
               <button
@@ -961,23 +979,23 @@ function AiSettingsSection() {
                 disabled={busy}
                 onClick={() => editPreset(preset)}
               >
-                Edit
+                编辑
               </button>
               <button
                 className="secondary-button"
                 disabled={busy || preset.id === "codex-readonly-high"}
                 onClick={() => void deletePreset(preset.id)}
               >
-                Delete
+                删除
               </button>
             </span>
           </div>
         ))}
       </div>
 
-      <div className="settings-section-title">Providers</div>
+      <div className="settings-section-title">提供方</div>
       <div className="settings-help">
-        {(settings?.providers ?? []).length === 0 && <p>No custom API providers.</p>}
+        {(settings?.providers ?? []).length === 0 && <p>暂无自定义 API 提供方。</p>}
         {(settings?.providers ?? []).map((provider) => (
           <div className="settings-ai-row" key={provider.id}>
             <span>
@@ -989,35 +1007,35 @@ function AiSettingsSection() {
                 disabled={busy}
                 onClick={() => void testProvider(provider.id)}
               >
-                Test
+                测试
               </button>
               <button
                 className="secondary-button"
                 disabled={busy || !provider.apiKeySource}
                 onClick={() => void clearProviderKey(provider.id)}
               >
-                Clear Key
+                清除密钥
               </button>
               <button
                 className="secondary-button"
                 disabled={busy}
                 onClick={() => void deleteProvider(provider.id)}
               >
-                Delete
+                删除
               </button>
             </span>
           </div>
         ))}
       </div>
 
-      <div className="settings-section-title">Project Defaults</div>
-      <Field label="Model Preset">
+      <div className="settings-section-title">项目默认</div>
+      <Field label="模型预设">
         <select
           className="settings-select"
           value={project.config.aiModelPresetId ?? ""}
           onChange={(event) => void saveProjectAiDefaults({ presetId: event.target.value })}
         >
-          <option value="">Use user default</option>
+          <option value="">使用用户默认</option>
           {(settings?.modelPresets ?? []).map((preset) => (
             <option key={preset.id} value={preset.id}>
               {preset.label}
@@ -1025,7 +1043,7 @@ function AiSettingsSection() {
           ))}
         </select>
       </Field>
-      <Field label="Mode">
+      <Field label="模式">
         <select
           className="settings-select"
           value={clampMode(project.config.aiMode ?? "chat", projectModeOptions)}
@@ -1033,7 +1051,7 @@ function AiSettingsSection() {
         >
           {projectModeOptions.map((mode) => (
             <option key={mode} value={mode}>
-              {mode}
+              {AI_MODE_LABEL[mode] ?? mode}
             </option>
           ))}
         </select>
@@ -1041,37 +1059,37 @@ function AiSettingsSection() {
 
       <div className="settings-section-title">Codex</div>
       <div className="settings-help">
-        <Field label="Command">
+        <Field label="命令">
           <input
             className="settings-input"
             value={codexCommand}
             onChange={(event) => setCodexCommand(event.target.value)}
-            placeholder="codex or an absolute path to codex.exe"
+            placeholder="codex 或 codex.exe 的绝对路径"
           />
         </Field>
-        <p>Status: {codex?.status ?? "unknown"}</p>
-        {codex?.version && <p>Version: {codex.version}</p>}
+        <p>状态：{codex ? CODEX_STATUS_LABEL[codex.status] ?? codex.status : "未知"}</p>
+        {codex?.version && <p>版本：{codex.version}</p>}
         {codex?.message && <p>{codex.message}</p>}
         <div className="settings-inline-actions">
           <button className="secondary-button" disabled={busy} onClick={() => void saveCodexCommand()}>
-            Save Command
+            保存命令
           </button>
           <button
             className="secondary-button"
             disabled={busy}
             onClick={() => void reload({ probeCodex: true })}
           >
-            Refresh Codex
+            刷新状态
           </button>
           <button className="primary-button" disabled={busy} onClick={() => void startCodexLogin()}>
-            Login
+            登录
           </button>
           <button
             className="secondary-button"
             disabled={busy}
             onClick={() => void startCodexLogin(true)}
           >
-            Device Code
+            设备码登录
           </button>
         </div>
       </div>

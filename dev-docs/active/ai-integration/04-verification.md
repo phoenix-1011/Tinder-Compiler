@@ -224,3 +224,21 @@ Expected (manual UI):
   active document.
 - When the profile is open as a document, the proposal targets the editor
   copy (no `disk` tag) and apply leaves the document dirty for manual save.
+
+## AI Panel UI Pass Checks (2026-06-11)
+
+Expected (manual UI):
+
+- In canvas mode the AI panel shows the "unavailable in canvas mode" notice
+  and no composer; switching back to the profile view restores the panel.
+- The transcript fills the panel, sticks to the bottom while streaming, and
+  stops following when the user scrolls up.
+- User messages render as right-aligned bubbles; assistant replies as plain
+  text; system/command/stderr/error notes as slim labeled strips.
+- The composer footer hosts the mode and model selectors plus a send button
+  that becomes a stop button while a request is running.
+- Enter sends, Shift+Enter inserts a newline, and confirming Chinese IME
+  composition with Enter does not send.
+- With no model configured the transcript shows the centered empty state
+  with an Add Model button.
+- A patch proposal appears inline at the end of the transcript.

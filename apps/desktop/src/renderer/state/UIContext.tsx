@@ -65,7 +65,9 @@ interface UIContextValue {
   openThemePicker(): void;
   closeThemePicker(): void;
   isSettingsOpen: boolean;
-  openSettings(): void;
+  /** Optional nav section to open Settings on (e.g. "ai"). */
+  settingsSection: string | null;
+  openSettings(section?: string): void;
   closeSettings(): void;
   toggleSettings(): void;
   limits: typeof LIMITS;
@@ -105,6 +107,7 @@ export function UIProvider({ children }: { children: ReactNode }) {
   const [isAboutOpen, setAboutOpen] = useState(false);
   const [isThemePickerOpen, setThemePickerOpen] = useState(false);
   const [isSettingsOpen, setSettingsOpen] = useState(false);
+  const [settingsSection, setSettingsSection] = useState<string | null>(null);
 
   // Persist to localStorage on change.
   useEffect(() => {
@@ -164,7 +167,10 @@ export function UIProvider({ children }: { children: ReactNode }) {
   const closeAbout = useCallback(() => setAboutOpen(false), []);
   const openThemePicker = useCallback(() => setThemePickerOpen(true), []);
   const closeThemePicker = useCallback(() => setThemePickerOpen(false), []);
-  const openSettings = useCallback(() => setSettingsOpen(true), []);
+  const openSettings = useCallback((section?: string) => {
+    setSettingsSection(section ?? null);
+    setSettingsOpen(true);
+  }, []);
   const closeSettings = useCallback(() => setSettingsOpen(false), []);
   const toggleSettings = useCallback(() => setSettingsOpen((v) => !v), []);
 
@@ -196,6 +202,7 @@ export function UIProvider({ children }: { children: ReactNode }) {
       openThemePicker,
       closeThemePicker,
       isSettingsOpen,
+      settingsSection,
       openSettings,
       closeSettings,
       toggleSettings,
@@ -223,6 +230,7 @@ export function UIProvider({ children }: { children: ReactNode }) {
       openThemePicker,
       closeThemePicker,
       isSettingsOpen,
+      settingsSection,
       openSettings,
       closeSettings,
       toggleSettings

@@ -1,6 +1,16 @@
+/**
+ * OpenAI-compatible multimodal content parts. A message content is either a
+ * plain string (text-only, the common case) or an array of parts when images
+ * are attached. Text-only requests keep the string form so strict endpoints
+ * that reject content arrays are unaffected.
+ */
+export type AiMessageContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } };
+
 export interface AiMessage {
   role: "system" | "user" | "assistant";
-  content: string;
+  content: string | AiMessageContentPart[];
 }
 
 export type AiMode = "chat" | "auto" | "plan" | "debug";
@@ -108,6 +118,8 @@ export interface AiChatStartInput {
   prompt: string;
   context?: string;
   messages?: AiMessage[];
+  /** Data-URL images attached to the prompt; sent as image_url content parts. */
+  images?: string[];
 }
 
 export interface AiChatStarted {
@@ -197,6 +209,8 @@ export interface AiCodexTaskStartInput {
   prompt: string;
   context?: string;
   cwd?: string;
+  /** Data-URL images; written to temp files and passed as `codex exec -i`. */
+  images?: string[];
 }
 
 export interface AiCodexTaskStarted {

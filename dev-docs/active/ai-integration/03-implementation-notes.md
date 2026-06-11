@@ -167,6 +167,36 @@
 - Known follow-up: `ProjectConfig` is still hand-duplicated between
   `packages/project` and `ProjectContext.tsx` (pre-existing; the renderer
   copy should import from `@tinder/project`).
+- UI pass (2026-06-11): the AI panel is temporarily disabled in canvas mode
+  (`appMode === "canvas"` renders a notice and `runChat` guards) because
+  canvas editing and AI-applied profile writes are not coordinated yet. The
+  panel layout was reworked to the mainstream chat shape: scrollable
+  transcript as the main region with stick-to-bottom auto-scroll, user turns
+  as right-aligned bubbles, assistant turns as plain blocks,
+  system/command/stderr/error as slim left-border notes, a typing indicator,
+  the proposal card inline at the end of the transcript, context chips above
+  a rounded composer whose footer holds the mode/model selectors and a
+  send/stop icon button, Enter-to-send with Shift+Enter newline and an
+  IME-composition guard, and a centered empty state (with Add Model when no
+  preset exists). The standalone "Selected preset" card was removed (the
+  picker shows it) and the Codex status/work-package cards merged into one
+  compact card.
+- UI pass 2 (2026-06-11): the panel now manages multiple in-memory chat
+  sessions. The top bar is a session tab strip - each tab owns its transcript,
+  proposal, and snapshot; `+` opens a new tab, hover reveals a close button,
+  and closing the last tab spawns a fresh one. Streaming is session-targeted
+  by a captured id (`updateTurns(sid, ...)`, `queueStreamDelta(sid, ...)`), so
+  switching tabs mid-stream never misroutes deltas. The provider/root/branch/
+  target pill bar and the "Session started" system turn were removed. The
+  new-session config row (folder picker + worktree checkbox) moved above the
+  composer and only shows before a tab's first message. The folder picker is a
+  dropdown of recent workspace folders + "打开文件夹…" that switches the whole
+  workspace (the AI root follows the open workspace). The worktree checkbox is
+  declarative for now (records `session.useWorktree`; the git-worktree backend
+  stays the deferred P8 slice). The execution-target dropdown and its
+  readonly/root-main options were dropped from the panel - read vs write is
+  determined by mode, worktree vs in-place by the checkbox. Codex status
+  collapsed to a slim strip under the tabs.
 
 ## Deferred Topics
 

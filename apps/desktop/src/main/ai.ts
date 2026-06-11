@@ -1,7 +1,8 @@
 import { app, ipcMain } from "electron";
 import { promises as fs } from "node:fs";
 import { dirname, join } from "node:path";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
+import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import {
   AUTO_PROPOSAL_SYSTEM_INSTRUCTION,
@@ -49,7 +50,10 @@ const CODEX_SANDBOXES = new Set(["read-only", "workspace-write", "danger-full-ac
 const CODEX_APPROVAL_POLICIES = new Set(["on-request", "never"]);
 const MAX_PROVIDER_ERROR_CHARS = 2000;
 const activeChatRequests = new Map<string, AbortController>();
-const activeCodexTasks = new Map<string, ChildProcessWithoutNullStreams>();
+const activeCodexTasks = new Map<
+  string,
+  { child: ChildProcessWithoutNullStreams; cleanup: () => void }
+>();
 
 function aiSettingsPath(): string {
   return join(app.getPath("userData"), SETTINGS_FILE);
@@ -197,13 +201,44 @@ function validateSettings(input: UserAiSettings): UserAiSettings {
   return settings;
 }
 
+/**
+ * Decode a settings file tolerantly. Node writes plain UTF-8, but the file
+ * may have been hand-edited or rewritten by another tool (e.g. PowerShell
+ * `Out-File` defaults to UTF-16 LE + BOM, Notepad's "UTF-8 with BOM"), and a
+ * leading BOM makes `JSON.parse` throw "Unexpected token". Detect the BOM and
+ * decode accordingly, then strip it.
+ */
+function stripBom(text: string): string {
+  return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+}
+
+function decodeJsonBuffer(buf: Buffer): string {
+  if (buf.length >= 2 && buf[0] === 0xff && buf[1] === 0xfe) {
+    return stripBom(buf.toString("utf16le"));
+  }
+  // UTF-16 BE BOM. swap16() requires an even length; a truncated/corrupt file
+  // would otherwise throw RangeError out of a path with no fallback, so fall
+  // back to utf8 for odd lengths.
+  if (buf.length >= 2 && buf[0] === 0xfe && buf[1] === 0xff && buf.length % 2 === 0) {
+    const swapped = Buffer.from(buf);
+    swapped.swap16();
+    return stripBom(swapped.toString("utf16le"));
+  }
+  return stripBom(buf.toString("utf8"));
+}
+
 async function readJsonFile<T>(path: string, fallback: T): Promise<T> {
+  let buffer: Buffer;
   try {
-    return JSON.parse(await fs.readFile(path, "utf8")) as T;
+    buffer = await fs.readFile(path);
   } catch (err) {
     if ((err as NodeJS.ErrnoException)?.code === "ENOENT") return fallback;
     throw err;
   }
+  const text = decodeJsonBuffer(buffer).trim();
+  // An empty (or whitespace-only) file means "no settings yet", not corruption.
+  if (!text) return fallback;
+  return JSON.parse(text) as T;
 }
 
 async function writeJsonFile(path: string, value: unknown): Promise<void> {
@@ -358,7 +393,20 @@ function chatMessages(input: AiChatStartInput): AiMessage[] {
       content: `Use this application context when it is relevant:\n\n${input.context.trim()}`
     });
   }
-  messages.push({ role: "user", content: input.prompt });
+  const images = input.images?.filter((url) => typeof url === "string" && url.trim().length > 0);
+  if (images?.length) {
+    // Multimodal user message (OpenAI vision format) only when images are
+    // attached; text-only requests stay a plain string for strict endpoints.
+    messages.push({
+      role: "user",
+      content: [
+        { type: "text", text: input.prompt },
+        ...images.map((url) => ({ type: "image_url" as const, image_url: { url } }))
+      ]
+    });
+  } else {
+    messages.push({ role: "user", content: input.prompt });
+  }
   if (input.mode === "plan") {
     messages.unshift({
       role: "system",
@@ -571,7 +619,39 @@ function quoteCodexConfigValue(value: string): string {
   return JSON.stringify(value);
 }
 
-function codexArgs(preset: AiModelPreset, config: UserAiSettings["codexConfigs"][number]): string[] {
+const DATA_URL_EXT: Record<string, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/jpg": "jpg",
+  "image/gif": "gif",
+  "image/webp": "webp",
+  "image/bmp": "bmp"
+};
+
+/**
+ * Codex CLI consumes images as files (`codex exec -i <FILE>`), not data URLs.
+ * Decode each attachment data URL to a temp file and return the paths; the
+ * caller is responsible for deleting them once the task ends.
+ */
+async function writeCodexImageFiles(images: string[] | undefined): Promise<string[]> {
+  if (!images?.length) return [];
+  const paths: string[] = [];
+  for (const dataUrl of images) {
+    const match = /^data:(image\/[a-z0-9.+-]+);base64,(.*)$/i.exec(dataUrl.trim());
+    if (!match) continue;
+    const ext = DATA_URL_EXT[match[1].toLowerCase()] ?? "png";
+    const file = join(tmpdir(), `tinder-codex-${randomUUID()}.${ext}`);
+    await fs.writeFile(file, Buffer.from(match[2], "base64"));
+    paths.push(file);
+  }
+  return paths;
+}
+
+function codexArgs(
+  preset: AiModelPreset,
+  config: UserAiSettings["codexConfigs"][number],
+  imagePaths: string[]
+): string[] {
   const args = [
     "--ask-for-approval",
     config.approvalPolicy ?? "on-request",
@@ -589,6 +669,7 @@ function codexArgs(preset: AiModelPreset, config: UserAiSettings["codexConfigs"]
   if (reasoningEffort) {
     args.push("-c", `model_reasoning_effort=${quoteCodexConfigValue(reasoningEffort)}`);
   }
+  for (const path of imagePaths) args.push("--image", path);
   args.push("-");
   return args;
 }
@@ -721,24 +802,35 @@ async function startCodexTask(
   const taskId = input.taskId?.trim() || makeCodexTaskId();
   if (activeCodexTasks.has(taskId)) throw new Error(`Codex task "${taskId}" is already running`);
   const cwd = input.cwd?.trim() || app.getPath("home");
-  const child = spawn(config.command || "codex", codexArgs(preset, config), {
-    cwd,
-    env: process.env,
-    shell: process.platform === "win32",
-    windowsHide: true
-  });
+  const imagePaths = await writeCodexImageFiles(input.images);
+  const cleanupImages = () => {
+    for (const path of imagePaths) void fs.rm(path, { force: true }).catch(() => {});
+  };
+  let child: ChildProcessWithoutNullStreams;
+  try {
+    child = spawn(config.command || "codex", codexArgs(preset, config, imagePaths), {
+      cwd,
+      env: process.env,
+      shell: process.platform === "win32",
+      windowsHide: true
+    });
+  } catch (err) {
+    cleanupImages();
+    throw err;
+  }
   child.stdin.on("error", () => {
     /* Spawn failures destroy stdin before the buffered prompt flushes; the
        child "error" handler below already reports the root cause. */
   });
   child.stdin.end(promptForCodex(input));
-  activeCodexTasks.set(taskId, child);
+  activeCodexTasks.set(taskId, { child, cleanup: cleanupImages });
   const state = { stdoutRest: "" };
   let closed = false;
   const finish = (event: AiCodexTaskEvent) => {
     if (closed) return;
     closed = true;
     activeCodexTasks.delete(taskId);
+    cleanupImages();
     flushCodexJsonl(contents, taskId, state);
     sendCodexEvent(contents, event);
   };
@@ -763,12 +855,16 @@ async function startCodexTask(
 }
 
 function cancelCodexTask(taskId: string): void {
-  const child = activeCodexTasks.get(taskId);
-  if (!child) return;
+  const entry = activeCodexTasks.get(taskId);
+  if (!entry) return;
   try {
-    killProcessTree(child);
+    killProcessTree(entry.child);
   } finally {
     activeCodexTasks.delete(taskId);
+    // Best-effort temp-image cleanup in case the kill prevents a 'close' event
+    // from firing finish() (cleanupImages is idempotent: fs.rm force ignores
+    // already-removed files).
+    entry.cleanup();
   }
 }
 

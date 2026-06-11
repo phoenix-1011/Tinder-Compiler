@@ -120,7 +120,7 @@ export function StatusBar() {
           <button
             className="statusbar-item statusbar-button"
             title="设置 (Ctrl+,)"
-            onClick={openSettings}
+            onClick={() => openSettings()}
           >
             <span className="codicon codicon-settings-gear" aria-hidden="true" />
           </button>
